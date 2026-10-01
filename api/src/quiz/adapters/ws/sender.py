@@ -115,5 +115,7 @@ class Sender:
             frame = self._queue.popleft()
             self._queued -= len(frame.data)
             self._in_flight = len(frame.data)
-            await self._ws.send_text(frame.data.decode())
-            self._in_flight = 0
+            try:
+                await self._ws.send_text(frame.data.decode())
+            finally:
+                self._in_flight = 0

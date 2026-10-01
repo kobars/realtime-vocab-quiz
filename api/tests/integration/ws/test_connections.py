@@ -325,8 +325,25 @@ async def test_replacing_a_socket_whose_writer_failed_does_not_raise() -> None:
     sender.send(page())
     await asyncio.wait_for(sender.task, 1)  # the write failed: the writer is gone
     registry.replace("c0")  # runs inside the newer socket's join
-    registry.broadcast("VOCAB-42", board(1), leaderboard=True)
     assert sender.close_code == 4001
+
+
+async def test_a_failed_write_leaves_only_the_queue_in_the_buffer() -> None:
+    sender = sender_of(BrokenSocket())
+    sender.send(page())
+    await asyncio.wait_for(sender.task, 1)  # the write failed: that frame is gone
+    sender.send(page())
+    assert sender.buffered == len(encode(page()))
+
+
+async def test_a_broadcast_past_the_hard_limit_after_a_failed_write_closes_1013() -> None:
+    registry = Registry(cast("Store", None), 10_000)
+    sender = sender_of(BrokenSocket())
+    registry.bind(Connection("c0", "u0", "VOCAB-42"), sender)
+    sender.send(page())
+    await asyncio.wait_for(sender.task, 1)  # the write failed: the writer is gone
+    registry.broadcast("VOCAB-42", blob(256 * KIB + 1), leaderboard=False)
+    assert sender.close_code == 1013
 
 
 class Talking(Socket):  # a client that sends ``texts``, then leaves; it reads nothing
@@ -354,7 +371,9 @@ class Service:  # records the messages the receive loop hands to the use cases
 async def test_a_closing_socket_hands_no_more_frames_to_the_use_cases() -> None:
     sock, service = Talking(json.dumps(JOIN), PING), Service()
     sender = sender_of(sock, 0.1)
-    sender.close(4001)  # replaced; its writer is still flushing to a client that does not read
+    sender.send(page())
+    await asyncio.sleep(0)  # the writer takes it and blocks: the client does not read
+    sender.close(4001)  # replaced while its writer is still flushing
     deps = Deps(cast("QuizService", service), Registry(cast("Store", None), 10_000), 16 * KIB)
     code = await serve(cast("WebSocket", sock), Connection("c0", "u0"), limiter(), sender, deps)
     assert (code, service.handled) == (4001, [])
