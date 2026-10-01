@@ -54,7 +54,7 @@ async def converse(
     """Play on one socket until the player settles or ``stop``; return its close code."""
     p.send("join", quizId=p.quiz_id, displayName=p.name)
     last_in = last_ping = time.monotonic()
-    think_s, timeout_s = opts.think_ms / 1000, opts.timeout_ms / 1000
+    think_s = opts.think_ms / 1000
     while True:
         now = time.monotonic()
         if p.settled(now) or now >= stop:  # before the flush: nothing goes out after the end
@@ -65,7 +65,7 @@ async def converse(
             p.rec.counts["msgs_out"] += 1
         p.outbox.clear()
         answer_due = p.answer_due if p.answer else None  # a reply can outrun a retry's timer
-        retry = p.sent_at + timeout_s if p.sent_at is not None else None
+        retry = p.sent_at + p.board.timeout_s if p.sent_at is not None else None
         expiry = p.board.pending[0][1] + p.board.timeout_s if p.board.pending else None
         timers = [t - now for t in (answer_due, retry, expiry, p.resync_at, stop) if t is not None]
         wait = max(0.0, min([WAKE_S, *timers]))
@@ -77,7 +77,9 @@ async def converse(
         if raw is not None:
             last_in = now
             p.rec.counts["msgs_in"] += 1
-            head = BOARD_HEAD.match(raw) if isinstance(raw, str) and not p.board.pending else None
+            # Skim only while no total can change: a frame may show it before the reply does.
+            skim = not p.board.pending and p.sent_at is None
+            head = BOARD_HEAD.match(raw) if isinstance(raw, str) and skim else None
             if head:
                 p.on_seq(int(head[1]), head[2] == "true", now)
             else:
@@ -87,14 +89,11 @@ async def converse(
         if now - last_ping >= PING_EVERY_S:
             p.send("ping")
             last_ping = now
-        p.due(now, timeout_s)
+        p.due(now)
 
 
 async def play(p: Player, http: httpx.AsyncClient, opts: Options) -> None:
-    """One cohort's player: a mock session, then connects until it finishes or must stop.
-
-    Open waits never cross a connection (they would time the reconnect): an unsent or unanswered
-    answer is dropped and ``joined`` re-serves its question; a timed one counts as missing."""
+    """One cohort's player: a mock session, then connects until it finishes or must stop."""
     stop = p.deadline + opts.timeout_ms / 1000  # time for the last replies, then give up
     backoff = Backoff()
     session = (await http.post("/sessions", json={"displayName": p.name})).raise_for_status()
@@ -118,9 +117,7 @@ async def play(p: Player, http: httpx.AsyncClient, opts: Options) -> None:
             code = DEAD_LINK  # a failed open, like a refused upgrade in the browser
             p.rec.counts["failed_opens"] += 1
         finally:  # also when play() raises
-            p.drop_answer()
-            p.board.abandon()
-            p.outbox.clear()
+            p.disconnected()
         if code == NORMAL or p.ended:
             return
         wait = backoff.closed(code, time.monotonic(), random.random())  # noqa: S311
