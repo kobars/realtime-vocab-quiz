@@ -19,4 +19,5 @@
 **/.DS_Store
 api/tests
 docs
-load
+load/results
+load/tests

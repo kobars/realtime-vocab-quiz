@@ -46,8 +46,8 @@ check: ## Run every check a change must pass
 	$(call step,web build,pnpm -C web build)
 acceptance: ## Run the acceptance tests
 	@echo "not yet"
-load: ## Run the load scenarios with the bot swarm
-	@echo "not yet"
+load: ## Run the bot swarm in the compose network; options in LOAD_ARGS (see load/README.md)
+	docker compose --profile load run --rm --build load $(LOAD_ARGS)
 contracts: ## Regenerate the JSON Schema and TypeScript types
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,contracts,uv run --project api --locked python scripts/gen_contracts.py)

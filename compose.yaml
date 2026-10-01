@@ -15,5 +15,18 @@ services:
       timeout: 2s
       retries: 15
 
+  # The bot swarm (make load); it reaches the API through nginx on the compose network.
+  load:
+    profiles: ["load"]
+    build:
+      context: .
+      dockerfile: load/Dockerfile
+    environment:
+      LOAD_URL: ${LOAD_URL:-http://nginx:8080/api}
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 } # one descriptor per bot socket
+    volumes:
+      - ./load/results:/app/results
+
 volumes:
   redis-data:
