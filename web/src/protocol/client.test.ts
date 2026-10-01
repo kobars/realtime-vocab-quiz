@@ -313,3 +313,18 @@ it('ignores errors of other requests when matching answers', async () => {
   next.receive(joined())
   expect(answers(next)).toEqual([answerMsg('s-1')])
 })
+
+it('forgets the answers in flight on a dropped socket when matching errors on the next one', async () => {
+  uuids('s-1', 's-2')
+  const client = start()
+  const first = await joinedSocket()
+  client.answer(0, 2)
+  first.drop()
+  const second = await connected()
+  second.receive(joined())
+  client.answer(1, 3)
+  second.receive(answerError('RATE_LIMITED'))
+  second.receive(answerError('QUESTION_NOT_OPEN'))
+  await wait(1_000)
+  expect(answers(second).map((message) => message.submissionId)).toEqual(['s-1', 's-2', 's-1'])
+})
