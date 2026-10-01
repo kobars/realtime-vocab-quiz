@@ -24,6 +24,10 @@ class QuizKeys(NamedTuple):
     control: str  # pub/sub channel, not a key: it has no TTL
 
 
+# The fields that refresh() leaves alone: the tick token keeps its own 200 ms expiry.
+NO_QUIZ_TTL = frozenset({"tick", "events", "control"})
+
+
 def quiz_keys(quiz_id: str, prefix: str = "") -> QuizKeys:
     """Build ``<prefix>quiz:{<quiz_id>}:<name>``; the braces keep a quiz in one cluster slot."""
     return QuizKeys(*(f"{prefix}quiz:{{{quiz_id}}}:{name}" for name in QuizKeys._fields))

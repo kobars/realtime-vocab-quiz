@@ -7,8 +7,13 @@ services:
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     ports:
       - "127.0.0.1:6381:6379" # local only: the development Redis has no password
+    volumes:
+      - redis-data:/data # named, so `make down` (no -v) keeps the AOF data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 2s
       timeout: 2s
       retries: 15
+
+volumes:
+  redis-data:
