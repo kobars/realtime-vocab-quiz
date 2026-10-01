@@ -1,4 +1,5 @@
 # AI-ASSISTED: end_quiz.lua on a real Redis: the host mark, then one quiz_ended broadcast.
+import asyncio
 import json
 import uuid
 
@@ -77,3 +78,50 @@ async def test_host_end_without_the_fsync_announces_nothing(
     assert refused.value.code is ErrorCode.UNAVAILABLE
     assert await redis_client.hget(keys.meta, "endSeq") is None
     assert await redis_client.get(keys.seq) == "0"
+
+
+async def test_a_retry_after_a_failed_fsync_waits_for_its_own_fsync(
+    redis_store: RedisStore, redis_client: Redis, redis_prefix: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quiz_id = f"T-{uuid.uuid4().hex[:12].upper()}"
+    keys = quiz_keys(quiz_id, redis_prefix)
+    await redis_store.create_quiz(quiz_id, (Question("q0", 1),), window_ms=60_000, time_limit_ms=1)
+    seen, wait = [], redis_store._fsynced  # noqa: SLF001 - the WAITAOF step under test
+
+    async def fails_once(conn: Redis) -> int:
+        seen.append(await redis_client.hget(keys.meta, "endSeq"))
+        return 0 if len(seen) == 1 else await wait(conn)
+
+    monkeypatch.setattr(redis_store, "_fsynced", fails_once)
+    with pytest.raises(DomainError) as refused:
+        await redis_store.end_by_host(quiz_id)
+    assert refused.value.code is ErrorCode.UNAVAILABLE
+    assert await redis_store.end_by_host(quiz_id) == 1
+    assert seen == [None, None]  # the retry found the mark, yet waited again before announcing
+
+
+async def test_overlapping_host_ends_each_wait_for_the_fsync_before_announcing(
+    redis_store: RedisStore, redis_client: Redis, redis_prefix: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quiz_id = f"T-{uuid.uuid4().hex[:12].upper()}"
+    keys = quiz_keys(quiz_id, redis_prefix)
+    await redis_store.create_quiz(quiz_id, (Question("q0", 1),), window_ms=60_000, time_limit_ms=1)
+    seen, wait = [], redis_store._fsynced  # noqa: SLF001 - the WAITAOF step under test
+    first_waits, release = asyncio.Event(), asyncio.Event()
+
+    async def first_held(conn: Redis) -> int:
+        seen.append(await redis_client.hget(keys.meta, "endSeq"))
+        if len(seen) == 1:
+            first_waits.set()
+            await release.wait()
+        return await wait(conn)
+
+    monkeypatch.setattr(redis_store, "_fsynced", first_held)
+    first = asyncio.create_task(redis_store.end_by_host(quiz_id))
+    await first_waits.wait()
+    try:
+        assert await redis_store.end_by_host(quiz_id) == 1
+    finally:
+        release.set()
+    assert await first == 1
+    assert seen == [None, None]  # the second end waited for its own fsync, not the first one's

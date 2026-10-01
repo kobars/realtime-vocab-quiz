@@ -1,6 +1,7 @@
 -- AI-ASSISTED: end_quiz of docs/spec/redis.md §3 and §3.1: the idempotent, once-only announcement.
--- ARGV: reason (deadline or host), topN. A first host call only marks the end; the next host call,
--- or a deadline call once due, publishes quiz_ended. Later calls return the same endSeq.
+-- ARGV: reason (deadline, host or mark), topN. A mark call, or a first host call, only writes the end
+-- mark (again, when it exists, so the caller's WAITAOF covers it); the next host call, or a deadline
+-- call once due, publishes quiz_ended. Later calls return the same endSeq.
 local reason = ARGV[1]
 local meta = redis.call('HMGET', KEYS[K.meta], 'deadlineMs', 'endedMs', 'endSeq')
 if not meta[1] then
@@ -16,7 +17,7 @@ end
 
 redis.call('HSET', KEYS[K.meta], 'endedMs', meta[2] or math.min(now, deadline))
 redis.call('DEL', KEYS[K.dirty])
-if reason == 'host' and not meta[2] then
+if reason == 'mark' or (reason == 'host' and not meta[2]) then
   refresh()
   return {'marked'}
 end

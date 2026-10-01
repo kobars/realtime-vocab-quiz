@@ -201,7 +201,7 @@ class RedisStore:
             await pubsub.aclose()  # type: ignore[no-untyped-call]
 
     async def end_quiz(
-        self, quiz_id: str, reason: Literal["deadline", "host"], *, on: Redis | None = None
+        self, quiz_id: str, reason: Literal["deadline", "host", "mark"], *, on: Redis | None = None
     ) -> port.End:
         reply = await self._run("end_quiz", quiz_id, reason, self.limits.top_n, on=on)
         match reply[0]:
@@ -214,7 +214,7 @@ class RedisStore:
 
     async def end_by_host(self, quiz_id: str) -> int:
         async with self._client.client() as conn:  # WAITAOF counts this connection's writes only
-            end = await self.end_quiz(quiz_id, "host", on=conn)
+            end = await self.end_quiz(quiz_id, "mark", on=conn)  # rewritten when it exists
             if end.status == "marked":
                 if await self._fsynced(conn) < 1:
                     raise DomainError(ErrorCode.UNAVAILABLE, "the end mark was not fsynced")
