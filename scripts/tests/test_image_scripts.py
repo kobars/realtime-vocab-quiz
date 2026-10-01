@@ -111,8 +111,10 @@ def test_smoke_fails_when_a_response_lacks_a_security_header(tmp_path: Path) -> 
         (None, "cannot read"),
         ('    add_header X-Content-Type-Options "nosniff" always;\n', "0 of 1 add_header lines"),
         (
-            'add_header Referrer-Policy "no-referrer" always;\n'
-            "add_header X-Content-Type-Options nosniff always;\n",
+            (
+                'add_header Referrer-Policy "no-referrer" always;\n'
+                "add_header X-Content-Type-Options nosniff always;\n"
+            ),
             "1 of 2 add_header lines",
         ),
     ],
