@@ -1,3 +1,32 @@
-# AI-ASSISTED: build-script policy for the client dependencies (vue-demi needs no build).
+# AI-ASSISTED: build-script policy for the client dependencies (vue-demi needs no build) and a release-age floor.
 allowBuilds:
   vue-demi: false
+# pnpm installs only versions published at least 7 days (in minutes) ago, Dependabot's cooldown.
+minimumReleaseAge: 10080
+# Every install checks the whole lock file against the floor. These locked versions were under
+# 7 days old when the floor was set; all of them pass it from 2026-10-08, and the list can go.
+minimumReleaseAgeExclude:
+  - "@lucide/vue@1.49.0"
+  - "@types/node@24.19.0 || 26.6.3"
+  - "@types/ws@8.18.2"
+  - "@typescript-eslint/eslint-plugin@8.71.0"
+  - "@typescript-eslint/parser@8.71.0"
+  - "@typescript-eslint/project-service@8.71.0"
+  - "@typescript-eslint/scope-manager@8.71.0"
+  - "@typescript-eslint/tsconfig-utils@8.71.0"
+  - "@typescript-eslint/type-utils@8.71.0"
+  - "@typescript-eslint/types@8.71.0"
+  - "@typescript-eslint/typescript-estree@8.71.0"
+  - "@typescript-eslint/utils@8.71.0"
+  - "@typescript-eslint/visitor-keys@8.71.0"
+  - "@vitest/coverage-v8@5.0.2"
+  - "@vitest/istanbul-lib-coverage@1.0.2"
+  - "@vitest/istanbul-lib-report@1.0.2"
+  - "@vitest/mocker@5.0.2"
+  - "@vitest/spy@5.0.2"
+  - "enhanced-resolve@5.26.0"
+  - "std-env@4.3.0"
+  - "tinyrainbow@3.2.0"
+  - "typescript-eslint@8.71.0"
+  - "vitest@5.0.2"
+  - "ws@8.22.0"

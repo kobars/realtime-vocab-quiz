@@ -53,15 +53,17 @@ In order, stopping at the first failing step:
 1. The client install from the lock file (`pnpm install --frozen-lockfile`).
 2. Every pre-commit hook on every file: ruff lint and format, ESLint, typos, and lychee (in
    Docker) on the relative links and anchors of the tracked Markdown.
-3. mypy (strict) and import-linter.
-4. deptry: every import in `api/src` is a declared dependency and every runtime dependency is
+3. actionlint and zizmor on the workflows: zizmor fails on a finding of medium severity or
+   higher, and `.github/zizmor.yml` requires every action to be pinned to a full commit SHA.
+4. mypy (strict) and import-linter.
+5. deptry: every import in `api/src` is a declared dependency and every runtime dependency is
    used; `api/tests`, `scripts/` and `load/` import only declared packages.
-5. pytest without the `integration`, `acceptance` and `system` markers, with a unit
+6. pytest without the `integration`, `acceptance` and `system` markers, with a unit
    branch-coverage floor (`UNIT_COVERAGE_FLOOR` in the `Makefile`), then the acceptance tests on
    the memory store.
-6. The contract drift check: the generated schema and types match the server's models.
-7. vue-tsc, then Vitest with coverage thresholds (`web/vitest.config.ts`).
-8. The client build (`pnpm -C web build`).
+7. The contract drift check: the generated schema and types match the server's models.
+8. vue-tsc, then Vitest with coverage thresholds (`web/vitest.config.ts`).
+9. The client build (`pnpm -C web build`).
 
 Each acceptance run writes a JUnit report (into `REPORTS`, else `reports/`), and
 `scripts/check_junit_skips.py` fails the run when a test skips that should run: none on the
@@ -99,9 +101,29 @@ Every pull request and every push to `main` runs these GitHub Actions workflows:
   nightly; it uploads the Playwright report, and the stack's logs when a suite fails.
 - `links.yml` runs weekly and also checks the external links.
 
+The CI, security and container workflows also run weekly on `main`, where the CI run tries ten
+times as many Hypothesis examples; a failed scheduled run opens, or comments on, the one open
+issue labelled `ci-scheduled` (`.github/workflows/scheduled-failure.yml`).
+
 The CI, security, container and stack workflows each end in one gate job (`ci-required`,
 `security-required`, `containers-required`, `stack-required`) that fails when a job it needs fails or is
 cancelled.
+
+## Dependency updates
+
+Dependabot (`.github/dependabot.yml`) opens weekly pull requests for the GitHub Actions, the
+Python and web lock files and the Docker images, with the minor and patch updates of each
+ecosystem grouped into one pull request, and only for releases at least 7 days old. The same
+wait applies by hand: pnpm resolves only versions that are 7 days old (`minimumReleaseAge` in
+`web/pnpm-workspace.yaml`), and the Python lock is upgraded with
+
+```bash
+uv lock --project api --upgrade --exclude-newer "7 days"  # newest versions at least 7 days old
+uv lock --project api                                     # keeps those versions, drops the cut-off from uv.lock
+```
+
+The second command matters: `uv.lock` records the cut-off, and `uv run --locked` without the
+same option then reports the lock as out of date.
 
 ## Pull requests
 
