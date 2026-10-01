@@ -7,6 +7,7 @@ from pathlib import Path
 import quiz.domain
 
 DOMAIN = Path(quiz.domain.__file__).parent
+CLOCK_AND_IO = {"time", "datetime", "random", "os", "io", "socket", "asyncio", "threading"}
 
 
 def _resolve(node: ast.ImportFrom, package: str) -> str:
@@ -37,7 +38,8 @@ def _package(path: Path) -> str:
 
 
 def _allowed(module: str) -> bool:
-    return module.partition(".")[0] in sys.stdlib_module_names or (
+    top = module.partition(".")[0]
+    return (top in sys.stdlib_module_names and top not in CLOCK_AND_IO) or (
         module == "quiz.domain" or module.startswith("quiz.domain.")
     )
 
@@ -54,10 +56,16 @@ def test_domain_imports_only_the_standard_library() -> None:
     assert outside == set()
 
 
-def test_guard_flags_third_party_and_other_quiz_packages() -> None:
-    source = "import redis\nfrom quiz.adapters import x\nfrom fractions import Fraction\n"
+def test_domain_keeps_no_global_state() -> None:
+    for path in DOMAIN.rglob("*.py"):
+        nodes = ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        assert not any(isinstance(node, ast.Global | ast.Nonlocal) for node in nodes), path.name
+
+
+def test_guard_flags_third_party_clock_and_other_quiz_packages() -> None:
+    source = "import redis, time\nfrom quiz.adapters import x\nfrom fractions import Fraction\n"
     flagged = {m for m in _imported_modules(source, "quiz.domain") if not _allowed(m)}
-    assert flagged == {"redis", "quiz.adapters"}
+    assert flagged == {"redis", "time", "quiz.adapters"}
 
 
 def test_guard_resolves_relative_imports() -> None:
