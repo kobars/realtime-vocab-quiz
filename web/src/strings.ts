@@ -54,16 +54,19 @@ export const strings = {
     reconnecting: 'Reconnecting…',
     resyncing: 'Updating…',
     closed: 'Disconnected. Reload the page to try again.',
+    busy: 'Server busy, retrying',
   },
+  /** The error codes that show a short message; every other code shows none, the client recovers by itself (UI spec §4.3). */
   errors: {
     ALREADY_ANSWERED: 'That question was already answered; your first answer stands.',
     QUESTION_NOT_OPEN: 'That question is closed; loading the current one.',
     RATE_LIMITED: 'Too many requests; trying again in a second.',
-    SESSION_REPLACED: 'This quiz is open in another tab.',
     QUIZ_ENDED: 'The quiz has ended.',
-    UNAVAILABLE: 'Server busy, retrying.',
-    other: 'Something went wrong; trying again.',
-    useThisTab: 'Use this tab',
+  },
+  /** The blocking cards, by the store's `blocked` state (UI spec §3.7). */
+  blocked: {
+    replaced: { title: 'This quiz is open in another tab.', action: 'Use this tab' },
+    version: { title: 'A new version is available.', action: 'Reload' },
   },
   leaderboard: {
     title: 'Leaderboard',
