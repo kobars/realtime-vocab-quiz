@@ -55,11 +55,15 @@ class Scripts:
         for name in SCRIPTS:
             self._shas[name] = await self._client.script_load(source(name))
 
-    async def call(self, name: str, keys: Sequence[str], *args: str | int) -> Reply:
-        """EVALSHA the script; on NOSCRIPT (Redis restarted) reload all scripts and retry once."""
+    async def call(
+        self, name: str, keys: Sequence[str], *args: str | int, on: Redis | None = None
+    ) -> Reply:
+        """EVALSHA the script (on the client ``on`` if given); on NOSCRIPT (Redis restarted)
+        reload all scripts and retry once."""
+        client = on or self._client
         try:
-            reply: Reply = await self._client.evalsha(self._shas[name], len(keys), *keys, *args)
+            reply: Reply = await client.evalsha(self._shas[name], len(keys), *keys, *args)
         except NoScriptError:
             await self.load()
-            reply = await self._client.evalsha(self._shas[name], len(keys), *keys, *args)
+            reply = await client.evalsha(self._shas[name], len(keys), *keys, *args)
         return reply

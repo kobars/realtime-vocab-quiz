@@ -2,10 +2,12 @@
 import json
 import uuid
 
+import pytest
 from redis.asyncio import Redis
 
 from quiz.adapters.redis import RedisStore
 from quiz.adapters.redis.keys import quiz_keys
+from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.session import Question
 from quiz.ports.store import End, Publish
 
@@ -37,3 +39,41 @@ async def test_end_quiz_is_idempotent(
     assert messages == [{"frame": {**head, "entries": [entry]}, "ranks": []}]
     assert await redis_client.get(keys.seq) == "1"
     assert await redis_client.hget(keys.meta, "endSeq") == "1"
+
+
+async def test_host_end_announces_only_after_the_mark_is_fsynced(
+    redis_store: RedisStore, redis_client: Redis, redis_prefix: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quiz_id = f"T-{uuid.uuid4().hex[:12].upper()}"
+    keys = quiz_keys(quiz_id, redis_prefix)
+    await redis_store.create_quiz(quiz_id, (Question("q0", 1),), window_ms=60_000, time_limit_ms=1)
+    seen, wait = [], redis_store._fsynced  # noqa: SLF001 - the WAITAOF step under test
+
+    async def watched(conn: Redis) -> int:
+        end_seq = await redis_client.hget(keys.meta, "endSeq")
+        seen.append((end_seq, await redis_client.get(keys.seq)))
+        return await wait(conn)  # the real WAITAOF 1 0 2000 (the test Redis runs with AOF on)
+
+    monkeypatch.setattr(redis_store, "_fsynced", watched)
+    assert await redis_store.end_by_host(quiz_id) == 1
+    assert seen == [(None, "0")]  # marked, not yet announced, while it waited
+    assert await redis_store.end_by_host(quiz_id) == 1  # idempotent; no second wait
+    assert len(seen) == 1
+
+
+async def test_host_end_without_the_fsync_announces_nothing(
+    redis_store: RedisStore, redis_client: Redis, redis_prefix: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quiz_id = f"T-{uuid.uuid4().hex[:12].upper()}"
+    keys = quiz_keys(quiz_id, redis_prefix)
+    await redis_store.create_quiz(quiz_id, (Question("q0", 1),), window_ms=60_000, time_limit_ms=1)
+
+    async def no_fsync(_: Redis) -> int:
+        return 0
+
+    monkeypatch.setattr(redis_store, "_fsynced", no_fsync)
+    with pytest.raises(DomainError) as refused:
+        await redis_store.end_by_host(quiz_id)
+    assert refused.value.code is ErrorCode.UNAVAILABLE
+    assert await redis_client.hget(keys.meta, "endSeq") is None
+    assert await redis_client.get(keys.seq) == "0"

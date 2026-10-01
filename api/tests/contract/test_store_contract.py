@@ -293,6 +293,13 @@ async def test_seq_moves_only_with_broadcasts(store: Store, quiz_id: str) -> Non
     assert await store.end_quiz(quiz_id, "host") == End("ended", 2)
 
 
+async def test_end_by_host_marks_and_announces_in_one_call(store: Store, quiz_id: str) -> None:
+    await started(store, quiz_id, "a")
+    assert await store.end_by_host(quiz_id) == 1
+    assert await store.end_by_host(quiz_id) == 1  # idempotent: the host may retry
+    assert await store.end_quiz(quiz_id, "deadline") == End("ended", 1)
+
+
 async def test_end_quiz_twice_announces_once(store: Store, quiz_id: str) -> None:
     await started(store, quiz_id, "a")
     assert await store.end_quiz(quiz_id, "host") == End("marked")

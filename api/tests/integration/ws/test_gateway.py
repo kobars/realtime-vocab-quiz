@@ -1,4 +1,5 @@
 # AI-ASSISTED: the /ws gateway rules, each driven through an in-process WebSocket client.
+import io
 import itertools
 import json
 import logging
@@ -12,6 +13,7 @@ from quiz.adapters.ws.endpoint import UVICORN_LOGGERS, path_only
 from quiz.config import Settings
 from quiz.domain.session import Question
 from quiz.main import create_app, services_of
+from quiz.obs import logs
 
 ORIGIN = {"origin": "http://localhost:8080"}
 PING = '{"v":1,"type":"ping"}'
@@ -162,3 +164,19 @@ def test_an_unreachable_ticket_store_answers_503() -> None:
     app = create_app(Settings(store="redis", redis_url="redis://127.0.0.1:1/0"))
     client = TestClient(app)  # no lifespan, so no script load: the ticket redeem is the first call
     assert refused(client, "some-ticket") == 503
+
+
+def test_the_close_line_carries_the_quiz_id_and_the_connection_id() -> None:
+    with client_of() as client:
+        store = services_of(client.app).store  # type: ignore[arg-type]
+        create = partial(store.create_quiz, window_ms=60_000, time_limit_ms=20_000)
+        client.portal.call(create, "VOCAB-42", (Question("q0", 1),))  # type: ignore[union-attr]
+        out = io.StringIO()
+        logs.configure_logging(out)
+        with connect(client, ticket(client)) as ws:
+            ws.send_json({"v": 1, "type": "join", "quizId": "VOCAB-42", "displayName": "Ann"})
+            assert ws.receive_json()["type"] == "joined"
+    lines = [json.loads(line) for line in out.getvalue().splitlines()]
+    [closed] = [line for line in lines if line["event"].startswith("ws /ws closed")]
+    assert closed["quiz_id"] == "VOCAB-42"
+    assert closed["request_id"]  # the connection's id

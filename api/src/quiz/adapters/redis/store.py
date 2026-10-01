@@ -24,6 +24,8 @@ from quiz.domain.session import Question
 from quiz.ports import store as port
 from quiz.ports.store import Created, Joined, Limits
 
+WAITAOF_TIMEOUT_MS = 2000  # the host end waits this long for the mark's fsync (redis.md §3.1)
+
 
 def _ok(name: str, reply: Reply) -> Reply:
     """Raise an error code as ``DomainError`` (``QUIZ_ENDED`` carries ``endSeq``); others pass."""
@@ -57,10 +59,12 @@ class RedisStore:
         """Load the scripts; call once before the first command."""
         await self._scripts.load()
 
-    async def _run(self, name: str, quiz_id: str, *args: str | int) -> Reply:
+    async def _run(
+        self, name: str, quiz_id: str, *args: str | int, on: Redis | None = None
+    ) -> Reply:
         keys = quiz_keys(quiz_id, self._prefix)
         with _reachable():
-            reply = await self._scripts.call(name, keys, *args)
+            reply = await self._scripts.call(name, keys, *args, on=on)
         return _ok(name, reply)
 
     async def create_quiz(
@@ -172,8 +176,10 @@ class RedisStore:
             case status:
                 raise ValueError(status)
 
-    async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> port.End:
-        reply = await self._run("end_quiz", quiz_id, reason, self.limits.top_n)
+    async def end_quiz(
+        self, quiz_id: str, reason: Literal["deadline", "host"], *, on: Redis | None = None
+    ) -> port.End:
+        reply = await self._run("end_quiz", quiz_id, reason, self.limits.top_n, on=on)
         match reply[0]:
             case "ended":
                 return port.End("ended", int(reply[1] or 0))
@@ -181,6 +187,21 @@ class RedisStore:
                 return port.End(status)
             case status:
                 raise ValueError(status)
+
+    async def end_by_host(self, quiz_id: str) -> int:
+        async with self._client.client() as conn:  # WAITAOF counts this connection's writes only
+            end = await self.end_quiz(quiz_id, "host", on=conn)
+            if end.status == "marked":
+                if await self._fsynced(conn) < 1:
+                    raise DomainError(ErrorCode.UNAVAILABLE, "the end mark was not fsynced")
+                end = await self.end_quiz(quiz_id, "host", on=conn)
+        return port.announced(end)
+
+    async def _fsynced(self, conn: Redis) -> int:
+        """``WAITAOF 1 0 2000`` on ``conn``: 1 when the local AOF fsync covers its writes."""
+        with _reachable():
+            local, _replicas = await conn.waitaof(1, 0, WAITAOF_TIMEOUT_MS)
+        return int(local)
 
     async def renew_presence(
         self, quiz_id: str, stale_ms: int, pairs: Sequence[tuple[str, str]]

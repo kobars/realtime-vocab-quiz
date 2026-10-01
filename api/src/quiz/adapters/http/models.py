@@ -51,7 +51,7 @@ class Ended(BaseModel):
     model_config = _example(quizId="VOCAB-42", status="ended", endSeq=57)
     quizId: str
     status: Literal["ended"]
-    endSeq: int | None
+    endSeq: int
 
 
 class Status(BaseModel):
