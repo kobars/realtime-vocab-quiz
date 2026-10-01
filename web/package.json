@@ -8,6 +8,11 @@
   "engines": {
     "node": ">=24"
   },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run"
+  },
   "dependencies": {
     "@lucide/vue": "^1.49.0",
     "@vueuse/core": "^15.0.0",
