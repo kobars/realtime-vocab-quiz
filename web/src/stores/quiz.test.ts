@@ -194,6 +194,24 @@ it('SESSION_REPLACED stops the client, so even a close that would reconnect open
   expect([sockets.length, store.connection, store.lastError?.code]).toEqual([1, 'closed', 'SESSION_REPLACED'])
 })
 
+it.each([
+  ['SESSION_REPLACED', 'replaced'],
+  ['UNSUPPORTED_VERSION', 'version'],
+] as const)('%s blocks the screen and stops the client', async (code, blocked) => {
+  const { store, socket } = await playing()
+  socket.receive(error(code, null))
+  expect([store.blocked, store.connection]).toEqual([blocked, 'closed'])
+})
+
+it('close 4001 blocks the screen as session-replaced and never reconnects; a new join clears it', async () => {
+  const { store, socket } = await playing()
+  socket.onclose?.({ code: 4001 })
+  await wait(30_000)
+  expect([sockets.length, store.blocked, store.closeCode]).toEqual([1, 'replaced', 4001])
+  store.join('VOCAB-42', 'Ana')
+  expect(store.blocked).toBe(null)
+})
+
 it('ALREADY_ANSWERED unlocks the choices and rejoins on the same socket', async () => {
   const { store, socket } = await playing()
   socket.receive(question(0))
@@ -232,7 +250,17 @@ it('a retried answer keeps the choices locked while the server is busy', async (
   socket.receive(question(0))
   store.answer(1)
   socket.receive(error('UNAVAILABLE', 'answer'))
-  expect(store.pending?.submissionId).toBe('s-1')
+  expect([store.pending?.submissionId, store.busy]).toEqual(['s-1', 'answer'])
+  await wait(10_000)
+  expect(store.busy).toBe('answer')
+  socket.receive(result(0, 's-1', 140))
+  expect(store.busy).toBe(null)
+})
+
+it('UNAVAILABLE on a rejoin, which the client does not retry, shows no busy state', async () => {
+  const { store, socket } = await playing()
+  socket.receive(error('UNAVAILABLE', 'join'))
+  expect(store.busy).toBe(null)
 })
 
 it('a question that arrives after quiz_ended changes nothing, and no answer goes out', async () => {

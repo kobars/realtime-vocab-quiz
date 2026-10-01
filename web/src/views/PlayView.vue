@@ -34,9 +34,6 @@ watch(() => store.lastResult, (result) => {
 
 const intro = computed(() => store.quiz !== null && (store.phase === 'intro' || store.phase === 'join'))
 watch(intro, (shown) => shown && void nextTick(() => start.value?.$el.focus()), { immediate: true })
-
-/** Another tab took over: its card replaces the quiz column and the leaderboard (UI spec §3.7). */
-const replaced = computed(() => store.lastError?.code === 'SESSION_REPLACED')
 </script>
 
 <template>
@@ -67,9 +64,10 @@ const replaced = computed(() => store.lastError?.code === 'SESSION_REPLACED')
     >
       {{ announcement }}
     </p>
-    <ResultsView v-if="store.phase === 'finished' || store.phase === 'results'" />
+    <!-- A blocking card replaces the quiz column and the leaderboard, on every phase (UI spec §3.7). -->
+    <ResultsView v-if="store.blocked === null && (store.phase === 'finished' || store.phase === 'results')" />
     <div
-      v-else-if="!replaced"
+      v-else-if="store.blocked === null"
       class="grid gap-6 lg:grid-cols-[minmax(0,640px)_360px] lg:justify-between"
     >
       <QuestionCard
