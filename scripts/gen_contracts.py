@@ -16,7 +16,7 @@ from pydantic import TypeAdapter
 from pydantic.json_schema import GenerateJsonSchema, JsonSchemaMode
 from pydantic_core import CoreSchema
 
-from quiz.contracts.messages import ClientMessage, ServerMessage
+from quiz.contracts.messages import CLIENT_ADAPTER, SERVER_ADAPTER
 
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA = ROOT / "contracts" / "schema" / "protocol.json"
@@ -36,9 +36,10 @@ class _NoFieldTitles(GenerateJsonSchema):
 
 def build_schema() -> dict[str, Any]:
     """Return one JSON Schema whose ``$defs`` hold every message and both unions."""
+    # The codec validates with these adapters, so the published schema is the parser's.
     inputs: list[tuple[str, JsonSchemaMode, TypeAdapter[Any]]] = [
-        (name, "serialization", TypeAdapter(union))
-        for name, union in (("ClientMessage", ClientMessage), ("ServerMessage", ServerMessage))
+        ("ClientMessage", "serialization", CLIENT_ADAPTER),
+        ("ServerMessage", "serialization", SERVER_ADAPTER),
     ]
     _, schema = TypeAdapter.json_schemas(inputs, title="Protocol", schema_generator=_NoFieldTitles)
     return {
