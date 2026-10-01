@@ -8,8 +8,11 @@ PYTEST = cd api && uv run --locked pytest
 VITEST = pnpm -C web exec vitest run
 # The image tag; both images build from the repository root, so the root .dockerignore applies.
 IMAGE_TAG ?= dev
+# The API node that the Vite dev server proxies to (web/vite.config.ts) and that server's origins.
+DEV_API_PORT ?= 8001
+DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
 
-.PHONY: help build up down demo demo-stop test test-integration check acceptance load contracts new-quiz ai-log
+.PHONY: help build up down dev-api demo demo-stop test test-integration check acceptance load contracts new-quiz ai-log
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -22,6 +25,8 @@ up: ## Start the development Redis
 	docker compose up -d --wait redis
 down: ## Stop the development Redis
 	docker compose down
+dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)
+	cd api && ALLOWED_ORIGINS='$(DEV_ORIGINS)' uv run --locked python -m quiz --host 127.0.0.1 --port $(DEV_API_PORT)
 demo: ## Run the full stack with seed data and bots
 	@echo "not yet"
 demo-stop: ## Stop the demo stack
