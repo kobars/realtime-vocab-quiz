@@ -1,7 +1,8 @@
 # AI-ASSISTED: the Prometheus metrics of one node, on a registry of their own.
 """Every metric the service exports. ``/metrics`` serves ``REGISTRY``. Each metric is registered
 here up front, and a labelled counter starts with each label value at 0, so a scrape shows every
-series before its first event. The scoring path increments ``REDIS_CLOCK_STEP``."""
+series before its first event. The scoring service counts answers and clock steps, the gateway
+open sockets, the fan-out tick its frames and durations."""
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -23,7 +24,7 @@ LEADERBOARD_FRAMES = Counter(
 )
 TICK_DURATION = Histogram(
     "tick_duration_seconds",
-    "Duration of one coalescing tick: publish script and relay",
+    "Duration of one coalescing tick: the publish script, and the shifted ranks when due",
     buckets=(0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5),
     registry=REGISTRY,
 )
