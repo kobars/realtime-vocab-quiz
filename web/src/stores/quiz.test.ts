@@ -173,6 +173,19 @@ it('QUIZ_NOT_FOUND stops the client and returns to idle with the error', async (
   expect([store.connection, store.phase, store.lastError?.code]).toEqual(['idle', 'join', 'QUIZ_NOT_FOUND'])
 })
 
+it('another failed first join stops the client and returns to idle, so the player can join again', async () => {
+  const { store, socket } = await joinQuiz()
+  socket.receive(error('UNAVAILABLE', 'join'))
+  await wait(30_000)
+  expect([sockets.length, store.connection, store.lastError]).toEqual([1, 'idle', { code: 'UNAVAILABLE', message: '', requestType: 'join' }])
+})
+
+it('a failed rejoin after joined keeps the client', async () => {
+  const { store, socket } = await playing()
+  socket.receive(error('UNAVAILABLE', 'join'))
+  expect(store.connection).toBe('joined')
+})
+
 it('SESSION_REPLACED stops the client, so even a close that would reconnect opens no new socket', async () => {
   const { store, socket } = await playing()
   socket.receive(error('SESSION_REPLACED', null))

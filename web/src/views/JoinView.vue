@@ -6,7 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import JoinField from '@/components/join/JoinField.vue'
 import QuizPreviewCard from '@/components/join/QuizPreviewCard.vue'
 import { fetchQuizPreview, type PreviewResult } from '@/components/join/preview'
-import { displayNameError, NAME_MAX, normalizeQuizId, QUIZ_ID_MAX, quizIdError, readName, saveName } from '@/components/join/validation'
+import { displayNameError, normalizeQuizId, QUIZ_ID_MAX, quizIdError, readName, saveName } from '@/components/join/validation'
 import { Button } from '@/components/ui/button'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
@@ -20,6 +20,8 @@ const name = ref(readName())
 const idError = ref<string | null>(null)
 const nameError = ref<string | null>(null)
 const joining = ref(false)
+/** The last join failed for a reason other than the quiz ID: the form is open again, to retry. */
+const joinFailed = ref(false)
 
 const idField = useTemplateRef<{ focus: () => void }>('idField')
 const nameField = useTemplateRef<{ focus: () => void }>('nameField')
@@ -64,6 +66,7 @@ function onNameBlur(): void {
 
 async function submit(): Promise<void> {
   if (joining.value) return
+  joinFailed.value = false
   onIdBlur()
   onNameBlur()
   if (idError.value !== null) return focus(idField)
@@ -78,18 +81,38 @@ async function submit(): Promise<void> {
     return focus(idField)
   }
   saveName(name.value)
-  store.join(quizId.value, name.value)
+  try {
+    store.join(quizId.value, name.value)
+  } catch {
+    // The client could not start, for example when storage is blocked.
+    failJoin()
+  }
 }
 
+function failJoin(): void {
+  joining.value = false
+  joinFailed.value = true
+}
+
+/**
+ * How the join ended, or null while it runs (a `reconnecting` link may still join). Any other error reply to the
+ * join, or a final close before `joined`, failed it: the client never sends that join again (protocol §1).
+ */
+const outcome = computed(() => {
+  if (store.quiz !== null || store.ended) return 'ready'
+  if (store.lastError?.code === 'QUIZ_NOT_FOUND') return 'not-found'
+  return store.lastError?.requestType === 'join' || store.connection === 'closed' ? 'failed' : null
+})
+
 // The fields are read-only while joining, so `quizId` is still the ID that was sent.
-watch([() => store.quiz !== null || store.ended, () => store.lastError?.code], ([ready, code]) => {
+watch(outcome, (result) => {
   if (!joining.value) return
-  if (ready) void router.push({ name: 'quiz', params: { quizId: quizId.value } })
-  else if (code === 'QUIZ_NOT_FOUND') {
+  if (result === 'ready') void router.push({ name: 'quiz', params: { quizId: quizId.value } })
+  else if (result === 'not-found') {
     joining.value = false
     idError.value = strings.join.notFound
     focus(idField)
-  }
+  } else if (result === 'failed') failJoin()
 })
 
 // `/?quiz=VOCAB-42` (also the target of `/q/VOCAB-42`) fills the quiz ID and moves on to the name.
@@ -155,12 +178,19 @@ watch(
         v-model="name"
         :label="strings.join.nameLabel"
         :error="nameError"
-        :maxlength="NAME_MAX"
         :readonly="joining"
         autocomplete="nickname"
         @update:model-value="onNameInput"
         @blur="onNameBlur"
       />
+
+      <p
+        v-if="joinFailed"
+        role="alert"
+        class="text-sm text-destructive"
+      >
+        {{ strings.join.failed }}
+      </p>
 
       <Button
         type="submit"

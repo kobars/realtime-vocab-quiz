@@ -30,6 +30,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   document.body.innerHTML = ''
 })
 
@@ -51,11 +52,32 @@ async function screen(path = '/') {
 }
 
 describe('validation', () => {
-  it('upper-cases the quiz ID as it is typed and limits the name to 32 characters', async () => {
+  it('upper-cases the quiz ID as it is typed and puts no native length limit on the name', async () => {
     const { id, name } = await screen()
     await id.setValue('vocab-42')
     expect(id.element.value).toBe('VOCAB-42')
-    expect(name.attributes('maxlength')).toBe('32')
+    // A native maxlength counts UTF-16 units before the trim: it would cut valid names, such as 32 emoji.
+    expect(name.attributes('maxlength')).toBeUndefined()
+  })
+
+  it('keeps the caret in place when a lower-case letter is typed mid-ID', async () => {
+    const { id } = await screen()
+    await id.setValue('VOCAB-2')
+    id.element.focus()
+    id.element.value = 'VOCAB-x2'
+    id.element.setSelectionRange(7, 7)
+    await id.trigger('input')
+    await flushPromises()
+    expect(id.element.value).toBe('VOCAB-X2')
+    expect(id.element.selectionStart).toBe(7)
+  })
+
+  it('renders when sessionStorage cannot be read', async () => {
+    vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new DOMException('denied', 'SecurityError')
+    })
+    const { name } = await screen()
+    expect(name.element.value).toBe('')
   })
 
   it('checks the quiz ID on blur, links the message to the field and clears it once fixed', async () => {
@@ -143,6 +165,36 @@ describe('join', () => {
     expect(document.activeElement).toBe(id.element)
     expect(button()).toBe(strings.join.submit)
     expect(router.currentRoute.value.name).toBe('join')
+  })
+
+  it.each([
+    ['an error reply to the join', () => emit({ v: 1, type: 'error', code: 'UNAVAILABLE', message: '', requestType: 'join' })],
+    ['a final close before joined', () => emit({ type: 'status', status: 'closed', code: 1008 })],
+  ])('unlocks the form after %s and lets the player retry', async (_, fail) => {
+    const { router, id, wrapper, button, submit } = await joining()
+    fail()
+    await flushPromises()
+    expect(button()).toBe(strings.join.submit)
+    expect(id.attributes('readonly')).toBeUndefined()
+    expect(wrapper.get('[role=alert]').text()).toBe(strings.join.failed)
+    expect(router.currentRoute.value.name).toBe('join')
+    await submit()
+    expect(start).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[role=alert]').exists()).toBe(false)
+  })
+
+  it('keeps the progress while the client reconnects', async () => {
+    const { button } = await joining()
+    emit({ type: 'status', status: 'reconnecting', code: 1006 })
+    await flushPromises()
+    expect(button()).toBe(strings.join.joining)
+  })
+
+  it('reports a client that cannot start, for example with blocked storage', async () => {
+    configureQuizStore({ createClient: () => { throw new DOMException('denied', 'SecurityError') } })
+    const { wrapper, button } = await joining()
+    expect(button()).toBe(strings.join.submit)
+    expect(wrapper.get('[role=alert]').text()).toBe(strings.join.failed)
   })
 
   it('opens the results when the quiz ended before the join', async () => {
