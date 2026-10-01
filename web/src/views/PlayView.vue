@@ -16,7 +16,13 @@ import ResultsView from './ResultsView.vue'
 defineProps<{ quizId: string }>()
 
 const store = useQuizStore()
-const score = useCountUp(() => store.myScore)
+// Only a new answer result counts the header score up; `joined`, `snapshot` and the others swap it at once (UI spec §4.3).
+let counted = store.lastResult
+const score = useCountUp(() => store.myScore, undefined, (to) => {
+  const fresh = store.lastResult !== counted && store.lastResult?.score === to
+  counted = store.lastResult
+  return fresh
+})
 const start = useTemplateRef<{ $el: HTMLElement }>('start')
 const shownIndex = computed(() => {
   if (store.phase === 'question') return store.question?.questionIndex ?? null
@@ -24,8 +30,10 @@ const shownIndex = computed(() => {
   return null
 })
 
-// The answer result and the new score, announced once each (UI spec §6.3).
+// The answer result and the new score, announced once each (UI spec §6.3). The region empties when a question
+// opens, so the next result is a change the screen reader announces even when its text is the same.
 const announcement = ref('')
+watch(() => store.phase === 'question', (open) => open && (announcement.value = ''))
 watch(() => store.lastResult, (result) => {
   if (result === null) return
   const answer = store.question?.choices[result.correctChoiceIndex] ?? ''
