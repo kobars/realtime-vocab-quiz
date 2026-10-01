@@ -1,4 +1,5 @@
-// AI-ASSISTED: the tab's mock identity in sessionStorage and a fresh one-time ticket before every connect (protocol spec §8).
+// AI-ASSISTED: the tab's mock identity in sessionStorage and a fresh one-time ticket before every connect, each request with a deadline (protocol spec §7, §8).
+import { withTimeout } from '@/lib/timeout'
 
 export interface Identity {
   userId: string
@@ -76,30 +77,41 @@ export async function connectTicket(
   return { identity, ticket }
 }
 
+/** How long one session or ticket request may take: a stalled one fails, and the client handles it as a failed open. */
+export const IDENTITY_TIMEOUT_MS = 5_000
+
 /** `POST {base}/sessions {displayName}` → `{userId, sessionToken}`; `POST {base}/tickets` with the bearer token → `{ticket}`. */
-export function httpAuthApi(base = '/api', fetchFn: typeof fetch = (...args) => fetch(...args)): AuthApi {
+export function httpAuthApi(
+  base = '/api',
+  fetchFn: typeof fetch = (...args) => fetch(...args),
+  timeoutMs = IDENTITY_TIMEOUT_MS,
+): AuthApi {
   return {
-    async createSession(displayName) {
-      const response = await fetchFn(`${base}/sessions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ displayName }),
-      })
-      if (!response.ok) throw new Error(`POST ${base}/sessions failed: ${response.status}`)
-      const identity = toIdentity(await response.json())
-      if (identity === null) throw new Error(`POST ${base}/sessions returned no userId and sessionToken`)
-      return identity
-    },
-    async createTicket(sessionToken) {
-      const response = await fetchFn(`${base}/tickets`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${sessionToken}` },
-      })
-      if (response.status === 401) return null
-      if (!response.ok) throw new Error(`POST ${base}/tickets failed: ${response.status}`)
-      const { ticket } = (await response.json()) as { ticket?: unknown }
-      if (typeof ticket !== 'string' || ticket === '') throw new Error(`POST ${base}/tickets returned no ticket`)
-      return ticket
-    },
+    createSession: (displayName) =>
+      withTimeout(timeoutMs, async (signal) => {
+        const response = await fetchFn(`${base}/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ displayName }),
+          signal,
+        })
+        if (!response.ok) throw new Error(`POST ${base}/sessions failed: ${response.status}`)
+        const identity = toIdentity(await response.json())
+        if (identity === null) throw new Error(`POST ${base}/sessions returned no userId and sessionToken`)
+        return identity
+      }),
+    createTicket: (sessionToken) =>
+      withTimeout(timeoutMs, async (signal) => {
+        const response = await fetchFn(`${base}/tickets`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${sessionToken}` },
+          signal,
+        })
+        if (response.status === 401) return null
+        if (!response.ok) throw new Error(`POST ${base}/tickets failed: ${response.status}`)
+        const { ticket } = (await response.json()) as { ticket?: unknown }
+        if (typeof ticket !== 'string' || ticket === '') throw new Error(`POST ${base}/tickets returned no ticket`)
+        return ticket
+      }),
   }
 }

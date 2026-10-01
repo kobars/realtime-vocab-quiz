@@ -1,6 +1,6 @@
 // AI-ASSISTED: tests for the tab identity in sessionStorage and the ticket before each connect.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { type AuthApi, IDENTITY_KEY, connectTicket, httpAuthApi } from './identity'
+import { type AuthApi, IDENTITY_KEY, IDENTITY_TIMEOUT_MS, connectTicket, httpAuthApi } from './identity'
 
 const fakeApi = (tickets: (string | null)[] = []) => {
   let sessions = 0
@@ -96,9 +96,10 @@ describe('httpAuthApi', () => {
     const api = httpAuthApi('/api', fetchFn)
     expect(await api.createSession('Ana')).toEqual({ userId: 'u1', sessionToken: 's1' })
     expect(await api.createTicket('s1')).toBe('abc')
+    const signal = expect.any(AbortSignal)
     expect(fetchFn.mock.calls).toEqual([
-      ['/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"displayName":"Ana"}' }],
-      ['/api/tickets', { method: 'POST', headers: { Authorization: 'Bearer s1' } }],
+      ['/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"displayName":"Ana"}', signal }],
+      ['/api/tickets', { method: 'POST', headers: { Authorization: 'Bearer s1' }, signal }],
     ])
   })
 
@@ -120,5 +121,23 @@ describe('httpAuthApi', () => {
     await expect(api.createSession('Ana')).rejects.toThrow('no userId and sessionToken')
     fetchFn.mockResolvedValueOnce(reply(201, { expiresInMs: 30_000 }))
     await expect(api.createTicket('s1')).rejects.toThrow('no ticket')
+  })
+
+  it.each([
+    ['session', (api: AuthApi) => api.createSession('Ana')],
+    ['ticket', (api: AuthApi) => api.createTicket('s1')],
+  ])('fails a %s request that never answers after 5 s and aborts it', async (_, request) => {
+    vi.useFakeTimers()
+    try {
+      const fetchFn = vi.fn<typeof fetch>(() => new Promise(() => undefined))
+      const outcome = request(httpAuthApi('/api', fetchFn)).catch((error: unknown) => error)
+      await vi.advanceTimersByTimeAsync(IDENTITY_TIMEOUT_MS - 1)
+      expect(fetchFn.mock.calls[0]?.[1]?.signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(await outcome).toMatchObject({ name: 'TimeoutError' })
+      expect(fetchFn.mock.calls[0]?.[1]?.signal?.aborted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
