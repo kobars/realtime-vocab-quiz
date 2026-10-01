@@ -6,6 +6,7 @@ Every reply and close goes through the socket's ``Sender``, its one writer."""
 import asyncio
 from dataclasses import dataclass
 
+import structlog
 from fastapi import WebSocket
 
 from quiz.adapters.ws.limits import RateLimiter, Verdict
@@ -69,6 +70,7 @@ async def _dispatch(
     outcome = await deps.service.handle(conn, msg)
     if isinstance(msg, m.Join):
         deps.registry.bind(conn, sender)
+        structlog.contextvars.bind_contextvars(quiz_id=conn.quiz_id)  # this socket's later lines
     if outcome.replaced_conn_id is not None:
         deps.registry.replace(outcome.replaced_conn_id)
     for reply in outcome.replies:
