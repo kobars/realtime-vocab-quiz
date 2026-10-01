@@ -31,6 +31,7 @@ dev = [
     "ruff>=0.16.9",
 ]
 load = [
+    "httpx>=0.28.1",
     "websockets>=17.1",
 ]
 
@@ -51,26 +52,28 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["quiz", "check_internal"]
+known-first-party = ["quiz", "check_internal", "bots", "latency", "player"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004"]
 "../scripts/tests/**" = ["S101", "PLR2004"]
 "../scripts/*.py" = ["S603", "T201"]
+"../load/*.py" = ["T201"]
+"../load/tests/**" = ["S101", "PLR2004"]
 
 [tool.mypy]
 strict = true
 python_version = "3.14"
-mypy_path = ["src", "../scripts"]
-files = ["src", "tests", "../scripts"]
+mypy_path = ["src", "../scripts", "../load"]
+files = ["src", "tests", "../scripts", "../load"]
 # Test folders have no __init__.py: name modules by path so same-named test files can coexist.
 explicit_package_bases = true
 warn_unreachable = true
 
 [tool.pytest.ini_options]
 minversion = "9.0"
-testpaths = ["tests", "../scripts/tests"]
-pythonpath = ["../scripts"]
+testpaths = ["tests", "../scripts/tests", "../load/tests"]
+pythonpath = ["../scripts", "../load"]
 # importlib mode lets test files in different folders share a basename without __init__.py.
 addopts = ["--strict-markers", "--strict-config", "-ra", "--import-mode=importlib"]
 asyncio_mode = "auto"

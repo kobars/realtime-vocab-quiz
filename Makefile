@@ -33,8 +33,8 @@ test-integration: ## Run the tests that need Redis (REDIS_URL or a container per
 	$(call step,pytest integration,$(PYTEST) tests/integration tests/contract -m integration; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ])
 check: ## Run every check a change must pass
 	$(call step,internal content,uv run --project api --locked python scripts/check_internal.py)
-	$(call step,ruff lint,cd api && uv run --locked ruff check . ../scripts)
-	$(call step,ruff format,cd api && uv run --locked ruff format --check . ../scripts)
+	$(call step,ruff lint,cd api && uv run --locked ruff check . ../scripts ../load)
+	$(call step,ruff format,cd api && uv run --locked ruff format --check . ../scripts ../load)
 	$(call step,mypy,cd api && uv run --locked mypy)
 	$(call step,import layers,cd api && uv run --locked lint-imports)
 	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance")
