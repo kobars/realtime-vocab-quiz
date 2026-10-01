@@ -450,3 +450,24 @@ async def test_a_replaced_sockets_in_flight_join_does_not_take_the_session_back(
     new.inbound.put_nowait({"type": "websocket.disconnect", "code": 1000})
     assert await asyncio.wait_for(new_served, 1) == 1000
 
+
+async def test_a_socket_closed_during_its_committed_join_still_leaves_and_replaces() -> None:
+    registry, store, _ = await grace_registry()
+    await store.join("VOCAB-42", "u0", "Ann", "c2")
+    other = sender_of(Socket())
+    registry.bind(Connection("c2", "u0", "VOCAB-42"), other)
+    sock = Talking(json.dumps(JOIN))
+    sender, service = sender_of(sock, 0.1), QuizService(store, Bank(), lambda: 0)
+
+    class Overloaded:  # the join commits while a broadcast overloads this socket and closes it
+        async def handle(self, conn: Connection, msg: m.ClientMessage) -> Outcome:
+            outcome = await service.handle(conn, msg)
+            sender.close(1013)
+            return outcome
+
+    deps = Deps(cast("QuizService", Overloaded()), registry, 16 * KIB)
+    conn = Connection("c1", "u0")
+    code = await serve(cast("WebSocket", sock), conn, limiter(), sender, deps)
+    registry.drop(conn)  # as the endpoint does once serve returns
+    await asyncio.sleep(0.05)
+    assert (code, other.close_code, await online(store)) == (1013, 4001, 0)
