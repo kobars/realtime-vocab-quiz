@@ -39,9 +39,10 @@ class QuizState:
     seq: int = 0  # the last broadcast seq
     dirty: bool = False  # the standings changed since the last broadcast
     ended_ms: int | None = None  # set once, when quiz_ended is broadcast
+    marked: bool = False  # a host end: closed whatever the clock says, announced later
 
     def is_open(self, now: int) -> bool:
-        return self.ended_ms is None and now < self.deadline_ms
+        return self.ended_ms is None and not self.marked and now < self.deadline_ms
 
 
 def new_quiz(
