@@ -112,14 +112,6 @@ def _admin(deps: HttpDeps, token: str) -> APIRouter:
         await deps.store.create_quiz(body.quizId, questions, window_ms=window, time_limit_ms=limit)
         return await _info(deps, body.quizId)
 
-    @api.post("/quizzes/{quiz_id}/end", responses={404: {"model": h.Problem}})
-    async def end_quiz(quiz_id: str) -> h.Ended:
-        """MOCK: the host's "end now": mark the end, then announce it (docs/spec/redis.md §3.1)."""
-        end = await deps.store.end_quiz(quiz_id, "host")
-        if end.status == "marked":
-            end = await deps.store.end_quiz(quiz_id, "host")
-        return h.Ended(quizId=quiz_id, status="ended", endSeq=end.seq)
-
     return api
 
 
