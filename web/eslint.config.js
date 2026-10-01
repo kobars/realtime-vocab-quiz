@@ -12,5 +12,7 @@ export default defineConfig(
   {
     files: ['**/*.vue'],
     languageOptions: { parserOptions: { parser: tseslint.parser } },
+    // vue-tsc already reports undefined names; core no-undef does not know the DOM globals.
+    rules: { 'no-undef': 'off' },
   },
 )
