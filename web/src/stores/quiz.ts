@@ -35,7 +35,9 @@ export const PAGE_SIZE = 100
  */
 const REJOIN_ON: readonly ErrorCode[] = ['QUESTION_NOT_OPEN', 'INVALID_STATE', 'ALREADY_ANSWERED']
 /** The requests the client sends again after `UNAVAILABLE`, and the server message that replies to each. */
-const RETRIED_BY_REPLY: Partial<Record<ServerMessage['type'], string>> = { answer_result: 'answer', question: 'next', finished: 'next', snapshot: 'resync' }
+const RETRIED_BY_REPLY: Partial<Record<ServerMessage['type'], string>> = {
+  joined: 'join', answer_result: 'answer', question: 'next', finished: 'next', snapshot: 'resync',
+}
 const RETRIED_ON_UNAVAILABLE: readonly (string | null)[] = Object.values(RETRIED_BY_REPLY)
 /** Close 4001: another tab took the session (protocol §7). */
 const SESSION_REPLACED_CLOSE = 4001
@@ -204,7 +206,7 @@ export const useQuizStore = defineStore('quiz', () => {
       s.blocked = code === 'SESSION_REPLACED' ? 'replaced' : 'version'
       client.value?.stop()
     }
-    // A failed first join binds nothing and the client never sends it again (protocol §1): back to idle, to retry.
+    // A failed first join binds nothing (protocol §1): back to idle, which also stops the client's retry of it.
     else if (requestType === 'join' && s.quiz === null) idle()
     else if (REJOIN_ON.includes(code) && !s.ended) client.value?.rejoin()
   }

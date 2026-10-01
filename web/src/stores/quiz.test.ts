@@ -272,10 +272,25 @@ it('a retried answer keeps the choices locked while the server is busy', async (
   expect(store.busy).toBe(null)
 })
 
-it('UNAVAILABLE on a rejoin, which the client does not retry, shows no busy state', async () => {
+it('UNAVAILABLE on a rejoin after a reconnect: busy until the retried join succeeds on the same socket, with the answer kept', async () => {
   const { store, socket } = await playing()
-  socket.receive(error('UNAVAILABLE', 'join'))
-  expect(store.busy).toBe(null)
+  socket.receive(question(0))
+  store.answer(1)
+  socket.onclose?.({ code: 1006 })
+  await wait(130)
+  const second = sockets.at(-1) as FakeSocket
+  second.onopen?.()
+  second.receive(error('UNAVAILABLE', 'join'))
+  expect([store.connection, store.busy, store.pending?.submissionId]).toEqual(['connecting', 'join', 's-1'])
+  second.receive({ v: 1, type: 'pong', seq: 3 })
+  await wait(125)
+  expect(second.sent.map((message) => message.type)).toEqual(['join', 'join'])
+  second.receive(joined({ cursor: 0, cursorOpen: true }))
+  expect(second.sent.map((message) => message.type)).toEqual(['join', 'join', 'resync', 'answer'])
+  second.receive(snapshot(3))
+  expect([store.connection, store.busy, store.phase, store.pending?.submissionId]).toEqual(['joined', null, 'question', 's-1'])
+  second.receive(result(0, 's-1', 140))
+  expect([store.phase, store.pending, store.myScore]).toEqual(['feedback', null, 140])
 })
 
 it('a question that arrives after quiz_ended changes nothing, and no answer goes out', async () => {
