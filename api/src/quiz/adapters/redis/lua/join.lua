@@ -13,6 +13,10 @@ if meta[3] or now >= deadline then
   return {'QUIZ_ENDED', meta[4] or false}
 end
 
+if redis.call('SISMEMBER', KEYS[K.replaced], conn) == 1 then  -- a newer join took it over
+  return {'SESSION_REPLACED'}
+end
+
 if redis.call('HSETNX', KEYS[K.serve], uid, '[-1,0,0]') == 1 then  -- the first join
   redis.call('HSETNX', KEYS[K.names], uid, name)
   redis.call('HSETNX', KEYS[K.totals], uid, 0)
@@ -26,6 +30,7 @@ end
 redis.call('HSET', KEYS[K.present], uid, cjson.encode({conn, now}))
 redis.call('SET', KEYS[K.dirty], 1)
 if replaced then
+  redis.call('SADD', KEYS[K.replaced], replaced)
   redis.call('PUBLISH', KEYS[K.control],
     cjson.encode({type = 'session_replaced', uid = uid, connId = replaced}))
 end

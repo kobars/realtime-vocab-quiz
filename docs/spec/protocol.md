@@ -147,7 +147,7 @@ The server sends `error` before every application close of an open socket. A ref
 | `INVALID_STATE` | `next` with an index other than `cursor` or `cursor + 1` (or `N`), or a `join` for another quiz after a successful `join` | Rejoin to read `cursor`, then continue |
 | `QUIZ_ENDED` | Any write after the quiz ended. A `join` after the end first gets a `snapshot` of the final standings; the connection may then send `get_leaderboard` and `resync` | Show the final results |
 | `RATE_LIMITED` | More than 20 msg/s (burst 40), or more than 1 `resync` per second; the message is dropped. Also the server-side reason for HTTP 429 at the upgrade (more than 50 connections from one IP), which is never a frame; the client sees close 1006 | Wait 1 s, then retry the message. At the upgrade: a failed open (below) |
-| `SESSION_REPLACED` | The same user joined the same quiz on another socket; this older socket closes with 4001 | Show "opened elsewhere"; do not reconnect |
+| `SESSION_REPLACED` | The same user joined the same quiz on another socket; this older socket closes with 4001. A `join` that the older socket sent before the newer one took over gets the same reply, so it never takes the session back | Show "opened elsewhere"; do not reconnect |
 | `UNAVAILABLE` | Redis is unreachable (the request was not done), or the send buffer passed the hard limit (close 1013). Also the server-side reason for HTTP 503 at the upgrade (the node is full), which is never a frame; the client sees close 1006 | Retry the request after backoff (`next` and `answer` are safe to repeat); after 1013, wait 5 s plus the backoff. At the upgrade: a failed open (below) |
 | `INTERNAL` | An unexpected server fault; the server closes with 1011 | Reconnect with backoff |
 

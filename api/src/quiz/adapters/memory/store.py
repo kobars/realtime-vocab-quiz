@@ -29,6 +29,7 @@ class _Quiz:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     names: dict[str, str] = field(default_factory=dict)
     present: dict[str, str] = field(default_factory=dict)  # user id -> connection id
+    replaced: set[str] = field(default_factory=set)  # connection ids a newer join took over
     tick_until_ms: int = 0  # the tick token, limits.tick_ms long
     end_seq: int | None = None  # the seq of quiz_ended, once announced
     scored: set[str] = field(default_factory=set)  # who scored since the last broadcast
@@ -104,9 +105,14 @@ class MemoryStore:
         async with quiz.lock:
             now = self._clock()
             step = s.transition(quiz.state, s.Join(user_id), now)
+            if conn_id in quiz.replaced:
+                raise DomainError(ErrorCode.SESSION_REPLACED, f"{conn_id} was replaced")
             player = step.state.players[user_id]
             name = quiz.names.setdefault(user_id, display_name)
-            replaced = quiz.present.get(user_id)
+            if (replaced := quiz.present.get(user_id)) == conn_id:
+                replaced = None  # a repeat join on the same connection replaces nothing
+            if replaced is not None:
+                quiz.replaced.add(replaced)
             quiz.present[user_id] = conn_id
             quiz.state = state = replace(step.state, dirty=True)  # onlineCount may change
             return Joined(
@@ -119,7 +125,7 @@ class MemoryStore:
                 state.time_limit_ms,
                 max(0, state.deadline_ms - now),
                 name,
-                replaced if replaced != conn_id else None,
+                replaced,
             )
 
     async def leave(self, quiz_id: str, user_id: str, conn_id: str) -> bool:
