@@ -55,6 +55,7 @@ def test_explicit_origins_replace_the_defaults(monkeypatch: pytest.MonkeyPatch) 
         {"send_buffer_soft_bytes": 256 * 1024},  # soft must stay below hard
         {"rate_limit_per_s": 50, "rate_limit_burst": 40},
         {"tick_ms": 0},
+        {"max_payload_bytes": 32 * 1024},  # above the parser's 16 KiB: no close 1009
         {"admin_mock": True},  # the mock admin endpoints need a token
     ],
 )
