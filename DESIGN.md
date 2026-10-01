@@ -386,7 +386,7 @@ signed result, and the player sends that result to the quiz service as the answe
 service checks the signature and scores it with the same `score_answer` script, so the audio
 never travels over the WebSocket and the store's rules do not change. The time limit must allow
 for recording and scoring, so these questions get a longer `T`. The risks: lower scores for some
-accents, which is unfair and also ranks players on the board; background noise; a slow service
+accents, which is unfair and also moves players on the leaderboard; background noise; a slow service
 that makes answers late; and voice data, which needs consent, a short retention period and no
 use for training without permission. The metrics: correlation with human raters on a labeled
 set, the score gap between accent groups on that set, the rate of answers scored late because
