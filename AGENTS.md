@@ -10,7 +10,8 @@ These rules apply to every change, whether a person or a coding agent makes it.
 - Rebase on `origin/main` and run `make check` before you push. `main` stays green.
 - Every PR is reviewed before it merges, by two reviewers (Claude Code `/code-review` and Codex).
   Their findings are verified against the code, and the confirmed ones are fixed in the same PR
-  before the merge.
+  before the merge. A PR merges when CI and `make check` are green and the confirmed findings
+  are fixed.
 
 ## Tests
 
