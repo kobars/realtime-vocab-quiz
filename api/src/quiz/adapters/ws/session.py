@@ -44,6 +44,8 @@ async def _receive(
         event = await ws.receive()
         if event["type"] == "websocket.disconnect":
             return int(event.get("code", 1000))
+        if sender.close_code is not None:  # closing (replaced, say): act on no further frame
+            return sender.close_code
         text: str | None = event.get("text")
         raw = text.encode() if text is not None else event.get("bytes") or b""
         if len(raw) > deps.max_payload:
