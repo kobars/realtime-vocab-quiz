@@ -4,6 +4,7 @@
 from typing import NamedTuple
 
 QUIZ_TTL_MS = 24 * 60 * 60 * 1000  # the TTL that every write script sets on the data keys
+TICK_MS = 200  # the tick token's own expiry; never refreshed
 
 
 class QuizKeys(NamedTuple):

@@ -1,5 +1,5 @@
 -- AI-ASSISTED: helpers the loader puts in front of every quiz script (docs/spec/redis.md §1-§2).
--- The loader defines K (the KEYS index of each QuizKeys field), DATA_KEYS and QUIZ_TTL_MS above
+-- The loader defines K (the KEYS index of each QuizKeys field), DATA_KEYS and the constants above
 -- this file, from keys.py, so the KEYS order and the TTL exist once.
 
 -- The one server clock, in integer ms.
@@ -36,4 +36,43 @@ local function check_player(meta, now, uid, conn)
     return {'SESSION_REPLACED'}
   end
   return nil, cjson.decode(serve)
+end
+
+-- The standings from index first to last (0-based, inclusive) as {rank, uid, name, total}.
+local function standing_rows(first, last)
+  local ids = redis.call('ZRANGE', KEYS[K.board], first, last)
+  if #ids == 0 then
+    return {}
+  end
+  local names = redis.call('HMGET', KEYS[K.names], unpack(ids))
+  local totals = redis.call('HMGET', KEYS[K.totals], unpack(ids))
+  local rows = {}
+  for n, uid in ipairs(ids) do
+    rows[n] = {first + n, uid, names[n], tonumber(totals[n])}
+  end
+  return rows
+end
+
+-- The last index a broadcast carries: every player up to FULL_LIST_MAX, else the top TOP_N.
+local function frame_last(count)
+  return (count <= FULL_LIST_MAX and FULL_LIST_MAX or TOP_N) - 1
+end
+
+-- A JSON array of each item (cjson writes an empty table as {}).
+local function json_list(items)
+  local out = {}
+  for n, item in ipairs(items) do
+    out[n] = cjson.encode(item)
+  end
+  return '[' .. table.concat(out, ',') .. ']'
+end
+
+-- PUBLISH one broadcast on events: {"frame": <head fields + entries>, "ranks": [...]}.
+local function publish_frame(head, rows, ranks)
+  local entries = {}
+  for n, r in ipairs(rows) do
+    entries[n] = {rank = r[1], userId = r[2], displayName = r[3], score = r[4]}
+  end
+  local frame = cjson.encode(head):sub(1, -2) .. ',"entries":' .. json_list(entries) .. '}'
+  redis.call('PUBLISH', KEYS[K.events], '{"frame":' .. frame .. ',"ranks":' .. json_list(ranks) .. '}')
 end
