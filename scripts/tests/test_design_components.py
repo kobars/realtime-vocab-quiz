@@ -1,11 +1,9 @@
-# AI-ASSISTED: checks that DESIGN.md names every Lua script, route, mock setting and requirement.
+# AI-ASSISTED: checks that DESIGN.md names every Lua script, route and mock setting.
 """DESIGN.md §4 and §14 must name what the specs and the settings define.
 
 - The Store row of §4 names every script of the Redis spec's §3 (docs/spec/redis.md).
 - The Gateway row of §4 names every HTTP endpoint of the protocol spec's §8.
 - §14 names every setting that ``api/src/quiz/config.py`` marks ``MOCK:``.
-- Every requirement ID in a section heading is a row of docs/TRACEABILITY.md
-  whose evidence is not the video, since the video is not in DESIGN.md.
 """
 
 import re
@@ -18,7 +16,6 @@ DESIGN = ROOT / "DESIGN.md"
 REDIS_SPEC = ROOT / "docs" / "spec" / "redis.md"
 PROTOCOL_SPEC = ROOT / "docs" / "spec" / "protocol.md"
 CONFIG = ROOT / "api" / "src" / "quiz" / "config.py"
-TRACEABILITY = ROOT / "docs" / "TRACEABILITY.md"
 
 
 def section(path: Path, heading: str) -> str:
@@ -57,18 +54,6 @@ def mock_settings() -> list[str]:
     return [name.upper() for name in names]
 
 
-def heading_tags() -> list[str]:
-    text = DESIGN.read_text(encoding="utf-8")
-    groups = re.findall(r"^## \d+\. .*\(([A-Z]+-\d+(?:, [A-Z]+-\d+)*)\)$", text, re.MULTILINE)
-    assert groups, "no requirement IDs in the DESIGN headings"
-    return [tag for group in groups for tag in group.split(", ")]
-
-
-def evidence_types() -> dict[str, str]:
-    text = TRACEABILITY.read_text(encoding="utf-8")
-    return dict(re.findall(r"^\| ([A-Z]+-\d+) \|[^|]*\| (\w+) \|", text, re.MULTILINE))
-
-
 @pytest.mark.parametrize("script", redis_scripts())
 def test_store_row_names_every_redis_script(script: str) -> None:
     assert f"`{script}`" in component_row("Store")
@@ -82,10 +67,3 @@ def test_gateway_row_names_every_http_endpoint(path: str) -> None:
 @pytest.mark.parametrize("setting", mock_settings())
 def test_mocked_section_names_every_mock_setting(setting: str) -> None:
     assert f"`{setting}`" in section(DESIGN, "## 14. ")
-
-
-@pytest.mark.parametrize("tag", heading_tags())
-def test_heading_tags_are_written_requirements(tag: str) -> None:
-    evidence = evidence_types().get(tag)
-    assert evidence is not None, f"{tag} is not a row of docs/TRACEABILITY.md"
-    assert evidence != "video", f"{tag} is a video requirement, not a DESIGN section"

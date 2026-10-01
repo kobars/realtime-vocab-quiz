@@ -69,6 +69,5 @@ root filesystem until its healthcheck passes (locally: `make build && scripts/sm
 
 - [DESIGN.md](DESIGN.md) — the system design
 - [docs/DECISIONS.md](docs/DECISIONS.md) — architecture decision records
-- [docs/TRACEABILITY.md](docs/TRACEABILITY.md) — requirements and their evidence
 - [AGENTS.md](AGENTS.md) — rules for contributors and coding agents
 - [SECURITY.md](SECURITY.md) — how to report a vulnerability, and the security scans
