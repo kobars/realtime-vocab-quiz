@@ -42,10 +42,10 @@ def _pulled_images(path: Path) -> list[str]:
     images that ``make build`` makes here (``elsaquiz-*``)."""
     if path.name != "Dockerfile":
         lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
-        images = [
+        values = [
             line.removeprefix("image:").strip() for line in lines if line.startswith("image:")
         ]
-        return [image for image in images if not image.startswith("elsaquiz-")]
+        return [value for value in values if not value.startswith("elsaquiz-")]
     images: list[str] = []
     stage_names: set[str] = set()
     for stage in _stages(path):
