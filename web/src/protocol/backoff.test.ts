@@ -1,6 +1,6 @@
-// AI-ASSISTED: tests for the full-jitter backoff and the close-code rules.
+// AI-ASSISTED: tests for the full-jitter backoff, the close-code rules and the limit of failed connects.
 import { describe, expect, it } from 'vitest'
-import { Backoff, backoffDelay } from './backoff'
+import { Backoff, backoffDelay, MAX_FAILED_CONNECTS } from './backoff'
 
 const almostOne = () => 0.999999
 
@@ -53,5 +53,29 @@ describe('Backoff', () => {
     backoff.closed(1006, 0)
     backoff.joined(1_000)
     expect(backoff.closed(1006, 10_999)).toBe(499)
+  })
+
+  it('gives up after 10 connects in a row without a joined, whatever the codes', () => {
+    const backoff = new Backoff(almostOne)
+    const codes = [1006, 1009, 1011, 1012, 1013, 1006, 1006, 1006, 1006]
+    expect(codes.map((code) => backoff.closed(code, 0))).not.toContain(null)
+    expect(backoff.exhausted).toBe(false)
+    expect(backoff.closed(1006, 0)).toBeNull()
+    expect(backoff.exhausted).toBe(true)
+  })
+
+  it('counts failed connects again from zero after any joined, even one shorter than 10 s', () => {
+    const backoff = new Backoff(almostOne)
+    for (let i = 1; i < MAX_FAILED_CONNECTS; i++) backoff.closed(1006, 0)
+    backoff.joined(1_000)
+    // The close of the joined link, then 9 failed connects.
+    for (let i = 0; i < MAX_FAILED_CONNECTS; i++) expect(backoff.closed(1006, 2_000)).not.toBeNull()
+    expect(backoff.closed(1006, 2_000)).toBeNull()
+  })
+
+  it('a final close code does not count as exhausted', () => {
+    const backoff = new Backoff(almostOne)
+    expect(backoff.closed(1008, 0)).toBeNull()
+    expect(backoff.exhausted).toBe(false)
   })
 })

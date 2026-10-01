@@ -1,0 +1,2 @@
+# AI-ASSISTED: hadolint settings for every Dockerfile; any ignored rule is listed here with its reason.
+failure-threshold: warning

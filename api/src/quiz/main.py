@@ -13,7 +13,7 @@ from functools import cache
 
 from fastapi import FastAPI
 from redis import exceptions as redis_errors
-from redis.asyncio import Redis
+from redis.asyncio import BlockingConnectionPool, Redis
 
 from quiz.adapters.http import HttpDeps, install
 from quiz.adapters.memory import MemoryStore
@@ -25,10 +25,11 @@ from quiz.adapters.ws.endpoint import Gateway
 from quiz.adapters.ws.limits import AddressRateLimiter
 from quiz.app.service import QuizService
 from quiz.config import Settings
+from quiz.fanout.tick import Ticker
 from quiz.obs.logs import configure_logging
 from quiz.ports.clock import Clock
 from quiz.ports.questions import QuestionBank
-from quiz.ports.store import Limits, Store
+from quiz.ports.store import FeedStore, Limits
 from quiz.ports.tickets import TicketStore
 
 Hook = Callable[[], Awaitable[None]]
@@ -66,7 +67,7 @@ def redis_probe(client: Redis) -> Probe:
 class Services:
     settings: Settings
     clock: Clock
-    store: Store
+    store: FeedStore
     tickets: TicketStore
     bank: QuestionBank
     service: QuizService
@@ -91,7 +92,13 @@ def _wire(settings: Settings, clock: Clock | None) -> Services:
             settings, quiz_clock, memory, MemoryTicketStore(wall_clock_ms), bank, service
         )
     # Redis reads its own TIME for quiz time; the monotonic clock only paces the resync limit.
-    client = Redis.from_url(settings.redis_url, decode_responses=True)  # connects on first use
+    pool = BlockingConnectionPool.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        max_connections=settings.redis_max_connections,
+        timeout=settings.redis_pool_timeout_ms / 1000,
+    )
+    client = Redis.from_pool(pool)  # connects on first use; aclose() closes the pool too
     redis, tickets = RedisStore(client, limits=limits), RedisTicketStore(client)
     service = QuizService(redis, bank, monotonic_ms)
     start: list[Hook] = [redis.start]
@@ -139,6 +146,9 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         services.settings, services.tickets, services.service, services.store
     )
     app.add_api_websocket_route("/ws", gateway.endpoint)
+    ticker = Ticker(services.store, gateway.registry, services.settings.node_id)
+    gateway.registry.watcher = ticker
+    services.shutdown.append(ticker.stop)  # stop hooks run in reverse: before the store closes
     s, ttl_ms = services.settings, TICKET_TTL_S * 1000
     token = s.admin_token.get_secret_value() if s.admin_mock and s.admin_token else None
     burst = 2 * s.per_ip_conn_cap  # a session and a ticket for each socket one address may hold

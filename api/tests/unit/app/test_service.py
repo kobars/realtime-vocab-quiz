@@ -1,4 +1,5 @@
 # AI-ASSISTED: use-case tests: protocol messages in, replies out, on the memory store and a clock.
+import asyncio
 import logging
 from collections.abc import Sequence
 from typing import Any, Literal
@@ -118,8 +119,23 @@ async def test_join_after_end_is_read_only(service: QuizService, store: SpyStore
     snapshot, error = await send(service, conn, m.Join(quizId=QUIZ, displayName="A"))
     assert (snapshot.status, snapshot.you, error.code) == ("ended", None, E.QUIZ_ENDED)
     assert await refused(service, conn, m.Next(questionIndex=0)) == (E.QUIZ_ENDED, None)
+    assert await refused(service, conn, answer(0)) == (E.QUIZ_ENDED, None)
     [page] = await send(service, conn, m.GetLeaderboard(offset=0, limit=5))
     assert page.final
+
+
+async def test_lost_reply_replays_on_a_connection_opened_after_the_end(
+    service: QuizService, store: SpyStore
+) -> None:
+    conn = await joined(service)
+    await send(service, conn, m.Next(questionIndex=0))
+    [result] = await send(service, conn, answer(0))  # the reply is lost on the way
+    store.now[0] += 60_000
+    rejoined = Connection("c-a2", "a")
+    [_, error] = await send(service, rejoined, m.Join(quizId=QUIZ, displayName="A"))
+    assert error.code == E.QUIZ_ENDED
+    assert await send(service, rejoined, answer(0)) == [result]
+    assert await refused(service, rejoined, answer(1, sid=2)) == (E.QUIZ_ENDED, None)
 
 
 async def test_resync_answers_a_snapshot_at_most_once_a_second(
@@ -152,6 +168,23 @@ async def test_snapshot_caches_the_shared_part_per_seq(
     assert (store.snapshots, third.atSeq, third.entries[0].score) == (2, 1, 150)
     store.now[0] += 60_000  # the deadline passes before quiz_ended is announced
     assert (await service.snapshot(QUIZ, "a")).status == "ended"
+    assert store.pages == 0  # the ranks read carries the cache key: no page read
+
+
+async def test_concurrent_cold_snapshots_share_one_refill(
+    service: QuizService, store: SpyStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await joined(service)
+    read = store.snapshot
+
+    async def slow(quiz_id: str, user_id: str | None) -> Snapshot:
+        await asyncio.sleep(0)  # the other snapshots miss the cache meanwhile
+        return await read(quiz_id, user_id)
+
+    monkeypatch.setattr(store, "snapshot", slow)
+    replies = await asyncio.gather(*(service.snapshot(QUIZ, "a") for _ in range(10)))
+    assert store.snapshots == 1
+    assert all(reply == replies[0] for reply in replies)
 
 
 async def test_resync_adds_rank_update_outside_the_shown_entries(service: QuizService) -> None:

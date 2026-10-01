@@ -28,7 +28,8 @@ from quiz.contracts import messages as m
 from quiz.contracts.codec import encode
 from quiz.domain.session import Question
 from quiz.main import create_app, services_of
-from quiz.ports.store import Store
+from quiz.ports.questions import BankQuestion
+from quiz.ports.store import Joined, Served, Store
 
 ORIGIN, PING = "http://localhost:8080", '{"v":1,"type":"ping"}'
 ROWS = [
@@ -74,6 +75,10 @@ def sender_of(sock: Socket, flush_s: float = 5.0) -> Sender:
     return Sender(cast("WebSocket", sock), 64 * KIB, 256 * KIB, flush_s)
 
 
+def limiter() -> RateLimiter:
+    return RateLimiter(20, 40, lambda: 0)
+
+
 async def test_a_conflated_client_gets_rebase_true_and_sends_no_resync() -> None:
     slow, fast = Socket(reading=False), Socket()
     senders = [sender_of(slow), sender_of(fast)]
@@ -86,8 +91,11 @@ async def test_a_conflated_client_gets_rebase_true_and_sends_no_resync() -> None
     slow.reading.set()
     await asyncio.sleep(0.05)
     got = [(f["type"], f.get("seq"), f.get("rebase")) for f in slow.frames]
-    held = [("leaderboard", 20, True), ("leaderboard_page", None, None), ("leaderboard", 30, True)]
-    assert got == [("leaderboard", s, False) for s in range(1, 5)] + held
+    # Each frame past the soft limit replaces every leaderboard queued since the last barrier:
+    # 18 replaced 14-17, and 19, 20 queued below the limit again.
+    queued = [("leaderboard", 18, True), ("leaderboard", 19, False), ("leaderboard", 20, False)]
+    held = [("leaderboard_page", None, None), ("leaderboard", 30, True)]
+    assert got == [("leaderboard", 1, False), *queued, *held]
     assert resyncs(slow.frames) == 0
     assert [f.get("seq") for f in fast.frames] == [*range(1, 21), None, *range(21, 31)]
 
@@ -121,7 +129,7 @@ async def test_a_failed_leave_is_logged_and_not_raised(caplog: pytest.LogCapture
             raise ConnectionError(msg)
 
     registry = Registry(cast("Store", Down()), 1)
-    conn = Connection("c0", "u0", "VOCAB-42")
+    conn = Connection("c0", "u0", "VOCAB-42", present=True)
     registry.bind(conn, sender_of(Socket()))
     registry.drop(conn)
     await asyncio.sleep(0.05)
@@ -145,7 +153,7 @@ async def test_a_replaced_socket_that_drops_last_keeps_the_newer_sockets_leave(
     *, newest_bound_first: bool
 ) -> None:
     registry, store, _ = await grace_registry()
-    old, new = Connection("c-old", "u0", "VOCAB-42"), Connection("c-new", "u0", "VOCAB-42")
+    old, new = (Connection(c, "u0", "VOCAB-42", present=True) for c in ("c-old", "c-new"))
     for conn in (old, new):
         await store.join("VOCAB-42", "u0", "Ann", conn.conn_id)
     for conn in (new, old) if newest_bound_first else (old, new):
@@ -158,7 +166,7 @@ async def test_a_replaced_socket_that_drops_last_keeps_the_newer_sockets_leave(
 
 async def test_a_read_only_join_keeps_the_pending_leave() -> None:
     registry, store, now = await grace_registry()
-    first = Connection("c-a", "u0", "VOCAB-42")
+    first = Connection("c-a", "u0", "VOCAB-42", present=True)
     await store.join("VOCAB-42", "u0", "Ann", first.conn_id)
     registry.bind(first, sender_of(Socket()))
     registry.drop(first)
@@ -187,18 +195,25 @@ def open_ws(client: TestClient, ticket: str | None) -> Any:  # noqa: ANN401
     return client.websocket_connect(f"/ws?ticket={ticket}", ["quiz.v1"], headers={"origin": ORIGIN})
 
 
+def reply(ws: Any) -> dict[str, Any]:  # noqa: ANN401
+    """The next message that is not a leaderboard: the tick may relay one at any time."""
+    while (msg := ws.receive_json())["type"] == "leaderboard":
+        pass
+    return cast("dict[str, Any]", msg)
+
+
 def test_a_second_socket_of_the_user_closes_the_first_with_4001() -> None:
     with quiz_client() as client:
         first, second = tickets(client, 2)
         with open_ws(client, first) as old, open_ws(client, second) as new:
             old.send_json(JOIN)
-            assert old.receive_json()["type"] == "joined"
+            assert reply(old)["type"] == "joined"
             new.send_json(JOIN)
-            assert new.receive_json()["type"] == "joined"
-            assert old.receive_json()["code"] == "SESSION_REPLACED"
+            assert reply(new)["type"] == "joined"
+            assert reply(old)["code"] == "SESSION_REPLACED"
             assert old.receive()["code"] == 4001
             new.send_text(PING)
-            assert new.receive_json()["type"] == "pong"
+            assert reply(new)["type"] == "pong"
 
 
 def test_a_drop_leaves_after_the_grace_unless_the_player_comes_back() -> None:
@@ -341,6 +356,172 @@ async def test_a_closing_socket_hands_no_more_frames_to_the_use_cases() -> None:
     sender = sender_of(sock, 0.1)
     sender.close(4001)  # replaced; its writer is still flushing to a client that does not read
     deps = Deps(cast("QuizService", service), Registry(cast("Store", None), 10_000), 16 * KIB)
-    limiter = RateLimiter(20, 40, lambda: 0)
-    code = await serve(cast("WebSocket", sock), Connection("c0", "u0"), limiter, sender, deps)
+    code = await serve(cast("WebSocket", sock), Connection("c0", "u0"), limiter(), sender, deps)
     assert (code, service.handled) == (4001, [])
+
+
+class Bank:  # the one question of every quiz in these tests
+    async def questions(self, quiz_id: str) -> tuple[BankQuestion, ...]:  # noqa: ARG002
+        return (BankQuestion("q0", "word?", ("a", "b", "c", "d"), 1),)
+
+    async def title(self, quiz_id: str) -> str:
+        return quiz_id
+
+
+class Client(Socket):  # sends ``texts``, then each ``say``; it stays open
+    def __init__(self, *texts: str) -> None:
+        super().__init__()
+        self.inbound: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        for text in texts:
+            self.say(text)
+
+    def say(self, text: str) -> None:
+        self.inbound.put_nowait({"type": "websocket.receive", "text": text})
+
+    async def receive(self) -> dict[str, Any]:
+        return await self.inbound.get()
+
+
+async def test_a_replaced_socket_whose_join_reply_comes_last_is_closed_with_4001() -> None:
+    registry, store, _ = await grace_registry()
+    join, newer_joined = store.join, asyncio.Event()
+
+    async def older_reply_last(quiz_id: str, user_id: str, name: str, conn_id: str) -> Joined:
+        joined = await join(quiz_id, user_id, name, conn_id)
+        if conn_id == "c-old":  # the store took this join first; its reply reaches the node last
+            await newer_joined.wait()
+        else:
+            newer_joined.set()
+        return joined
+
+    store.join = older_reply_last  # type: ignore[assignment,method-assign]
+    deps = Deps(QuizService(store, Bank(), lambda: 0), registry, 16 * KIB)
+    old, new = Client(json.dumps(JOIN)), Client(json.dumps(JOIN))
+    conns = {old: Connection("c-old", "u0"), new: Connection("c-new", "u0")}
+    senders = {old: sender_of(old), new: sender_of(new)}
+
+    def serving(sock: Client) -> asyncio.Task[int]:
+        ws = cast("WebSocket", sock)
+        return asyncio.create_task(serve(ws, conns[sock], limiter(), senders[sock], deps))
+
+    older = serving(old)
+    await asyncio.sleep(0.01)  # the older join reaches the store first
+    newer = serving(new)
+    try:
+        await asyncio.wait({older}, timeout=1)
+        assert ([f.get("code") for f in old.frames], old.closed) == (["SESSION_REPLACED"], 4001)
+        assert (older.result(), [f["type"] for f in new.frames]) == (4001, ["joined"])
+        registry.drop(conns[old])  # as the endpoint does once serve returns
+        assert registry.senders("VOCAB-42") == [senders[new]]
+    finally:
+        older.cancel()
+        newer.cancel()
+
+
+class GatedStore(MemoryStore):  # joins pass the gate one at a time, in arrival order
+    def __init__(self) -> None:
+        super().__init__(lambda: 0)
+        self.gate = asyncio.Lock()
+
+    async def join(self, quiz_id: str, user_id: str, display_name: str, conn_id: str) -> Joined:
+        async with self.gate:
+            return await super().join(quiz_id, user_id, display_name, conn_id)
+
+
+async def test_a_replaced_sockets_in_flight_join_does_not_take_the_session_back() -> None:
+    store = GatedStore()
+    create = partial(store.create_quiz, window_ms=60_000, time_limit_ms=20_000)
+    await create("VOCAB-42", (Question("q0", 1),))
+    service = QuizService(store, Bank(), lambda: 0)
+    deps = Deps(service, Registry(store, 10_000), 16 * KIB)
+    old, new = Client(), Client()
+    old_served, new_served = (
+        asyncio.create_task(
+            serve(cast("WebSocket", s), Connection(conn_id, "u1"), limiter(), sender_of(s), deps)
+        )
+        for s, conn_id in ((old, "c1"), (new, "c2"))
+    )
+    old.say(json.dumps(JOIN))
+    await asyncio.sleep(0.01)
+    old.reading.clear()  # its writer is still flushing when the newer join closes it
+    async with store.gate:  # the newer join waits first, then the old socket's re-join
+        new.say(json.dumps(JOIN))
+        await asyncio.sleep(0.01)
+        old.say(json.dumps(JOIN))
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)
+    old.reading.set()
+    assert await asyncio.wait_for(old_served, 1) == 4001
+    assert (old.closed, new.closed, new_served.done()) == (4001, 0, False)
+    assert isinstance(await store.serve_next("VOCAB-42", "u1", 0, "c2"), Served)  # c2 present
+    new.inbound.put_nowait({"type": "websocket.disconnect", "code": 1000})
+    assert await asyncio.wait_for(new_served, 1) == 1000
+
+
+async def test_a_socket_closed_during_its_committed_join_still_leaves_and_replaces() -> None:
+    registry, store, _ = await grace_registry()
+    await store.join("VOCAB-42", "u0", "Ann", "c2")
+    other = sender_of(Socket())
+    registry.bind(Connection("c2", "u0", "VOCAB-42"), other)
+    sock = Talking(json.dumps(JOIN))
+    sender, service = sender_of(sock, 0.1), QuizService(store, Bank(), lambda: 0)
+
+    class Overloaded:  # the join commits while a broadcast overloads this socket and closes it
+        async def handle(self, conn: Connection, msg: m.ClientMessage) -> Outcome:
+            outcome = await service.handle(conn, msg)
+            sender.close(1013)
+            return outcome
+
+    deps = Deps(cast("QuizService", Overloaded()), registry, 16 * KIB)
+    conn = Connection("c1", "u0")
+    code = await serve(cast("WebSocket", sock), conn, limiter(), sender, deps)
+    registry.drop(conn)  # as the endpoint does once serve returns
+    await asyncio.sleep(0.05)
+    assert (code, other.close_code, await online(store)) == (1013, 4001, 0)
+
+
+class Stalled(Talking):  # a transport that is not writable: the close frame never goes out
+    async def close(self, code: int) -> None:  # noqa: ARG002
+        await asyncio.Event().wait()
+
+
+@pytest.mark.parametrize("drained", [True, False])
+async def test_a_close_that_stalls_is_given_up_and_the_handler_ends(*, drained: bool) -> None:
+    sock = Stalled()
+    sender = sender_of(sock, 0.1)
+    if not drained:
+        sender.send(page())  # the client reads nothing: the drain runs out first
+    sender.close(1013)
+    deps = Deps(cast("QuizService", Service()), Registry(cast("Store", None), 10_000), 16 * KIB)
+    handler = serve(cast("WebSocket", sock), Connection("c0", "u0"), limiter(), sender, deps)
+    assert await asyncio.wait_for(handler, 2) == 1013
+
+
+class Lagging(Socket):  # its close frame goes out a little after the drain
+    async def close(self, code: int) -> None:
+        await asyncio.sleep(0.07)
+        await super().close(code)
+
+
+async def test_a_close_frame_that_ends_just_after_the_deadline_is_still_sent() -> None:
+    sock = Lagging(reading=False)
+    sender = sender_of(sock, 0.2)
+    sender.send(page())
+    sender.close(4001)
+    asyncio.get_running_loop().call_later(0.18, sock.reading.set)  # the drain ends just in time
+    await asyncio.wait_for(sender.task, 2)
+    assert (len(sock.frames), sock.closed) == (1, 4001)
+
+
+async def test_a_present_socket_that_joins_again_after_the_end_still_leaves() -> None:
+    registry, store, now = await grace_registry()
+    service, conn = QuizService(store, Bank(), lambda: now[0]), Connection("c0", "u0")
+    join = m.Join(quizId="VOCAB-42", displayName="Ann")
+    assert [type(r) for r in (await service.handle(conn, join)).replies] == [m.Joined]
+    registry.bind(conn, sender_of(Socket()))
+    now[0] = 60_000  # past the deadline: the repeated join is answered read only
+    replies = (await service.handle(conn, join)).replies
+    assert [type(r) for r in replies] == [m.Snapshot, m.ProtocolError]
+    registry.drop(conn)
+    await asyncio.sleep(0.05)
+    assert await online(store) == 0

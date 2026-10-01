@@ -1,4 +1,5 @@
 // AI-ASSISTED: the quiz preview on the join screen: `GET /quizzes/{id}` read into a found, not-found or unavailable result.
+import { withTimeout } from '@/lib/timeout'
 
 export interface QuizPreview {
   title: string
@@ -48,20 +49,6 @@ export async function fetchQuizPreview(
   base = '/api',
   timeoutMs = PREVIEW_TIMEOUT_MS,
 ): Promise<PreviewResult> {
-  const controller = new AbortController()
-  let timer: ReturnType<typeof setTimeout> | undefined
-  // The timer wins even when the request ignores the abort signal.
-  const timedOut = new Promise<PreviewResult>((resolve) => {
-    timer = setTimeout(() => {
-      controller.abort()
-      resolve({ kind: 'unavailable' })
-    }, timeoutMs)
-  })
-  const looked = lookUp(`${base}/quizzes/${encodeURIComponent(quizId)}`, fetchFn, controller.signal)
-    .catch((): PreviewResult => ({ kind: 'unavailable' }))
-  try {
-    return await Promise.race([looked, timedOut])
-  } finally {
-    clearTimeout(timer)
-  }
+  const url = `${base}/quizzes/${encodeURIComponent(quizId)}`
+  return withTimeout(timeoutMs, (signal) => lookUp(url, fetchFn, signal)).catch((): PreviewResult => ({ kind: 'unavailable' }))
 }

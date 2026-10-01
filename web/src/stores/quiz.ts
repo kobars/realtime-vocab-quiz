@@ -8,8 +8,11 @@ import type { AnswerResult, Entry, ErrorCode, Joined, ProtocolError, Question, S
 /** `joined` is the UI spec's `live`: the standings are current. `connecting` also covers the open socket before `joined`. */
 export type Connection = 'idle' | 'connecting' | 'joined' | 'reconnecting' | 'resyncing' | 'closed'
 export type Phase = 'join' | 'intro' | 'question' | 'feedback' | 'finished' | 'results'
-/** The UI spec's `blocked` state: only the player can leave it, because another tab took the session or the client is outdated. */
-export type Blocked = 'replaced' | 'version'
+/**
+ * The UI spec's `blocked` state, which only the player can leave: another tab took the session, the client is outdated,
+ * the server closed with a policy violation (1008), or the client gave up after 10 connects without a `joined`.
+ */
+export type Blocked = 'replaced' | 'version' | 'policy' | 'unreachable'
 export type QuizClientPort = Pick<QuizClient, 'start' | 'next' | 'answer' | 'rejoin' | 'getLeaderboard' | 'stop'>
 
 export interface QuizStoreDeps {
@@ -35,10 +38,12 @@ export const PAGE_SIZE = 100
  */
 const REJOIN_ON: readonly ErrorCode[] = ['QUESTION_NOT_OPEN', 'INVALID_STATE', 'ALREADY_ANSWERED']
 /** The requests the client sends again after `UNAVAILABLE`, and the server message that replies to each. */
-const RETRIED_BY_REPLY: Partial<Record<ServerMessage['type'], string>> = { answer_result: 'answer', question: 'next', finished: 'next', snapshot: 'resync' }
+const RETRIED_BY_REPLY: Partial<Record<ServerMessage['type'], string>> = {
+  joined: 'join', answer_result: 'answer', question: 'next', finished: 'next', snapshot: 'resync',
+}
 const RETRIED_ON_UNAVAILABLE: readonly (string | null)[] = Object.values(RETRIED_BY_REPLY)
-/** Close 4001: another tab took the session (protocol §7). */
-const SESSION_REPLACED_CLOSE = 4001
+/** The final close codes that block the screen (protocol §7): 4001, another tab took the session; 1008, a policy violation. */
+const BLOCKED_BY_CLOSE: Partial<Record<number, Blocked>> = { 4001: 'replaced', 1008: 'policy' }
 
 /** The `joined` reply; `cursor` and `cursorOpen` follow later questions and results, `endsAt` is on the `now` clock. */
 export type QuizInfo = Joined & { endsAt: number }
@@ -80,6 +85,8 @@ const initial = () => ({
 export const useQuizStore = defineStore('quiz', () => {
   const s = reactive(initial())
   const client = shallowRef<QuizClientPort | null>(null)
+  /** The arguments of the last join, for `retry`: a blocked screen may have no `quiz` yet. */
+  let lastJoin: { quizId: string; displayName: string } | null = null
 
   const nextIndex = computed(() => {
     if (s.phase === 'question' && s.question) return s.question.questionIndex + 1
@@ -96,6 +103,7 @@ export const useQuizStore = defineStore('quiz', () => {
   const quizMsLeft = (at = deps.now()): number => (s.quiz === null ? 0 : Math.max(0, s.quiz.endsAt - at))
 
   function join(quizId: string, displayName: string): void {
+    lastJoin = { quizId, displayName }
     client.value?.stop()
     Object.assign(s, initial(), { connection: 'connecting', quizId })
     const created = deps.createClient((event) => {
@@ -103,6 +111,11 @@ export const useQuizStore = defineStore('quiz', () => {
     })
     client.value = created
     created.start(quizId, displayName)
+  }
+
+  /** Joins the last quiz again with a new client, so the connect attempts count from zero ("Use this tab", "Try again"). */
+  function retry(): void {
+    if (lastJoin !== null) join(lastJoin.quizId, lastJoin.displayName)
   }
 
   function answer(choiceIndex: number): void {
@@ -119,10 +132,11 @@ export const useQuizStore = defineStore('quiz', () => {
   function handle(event: ClientEvent): void {
     if (event.type !== 'status') return receive(event)
     s.closeCode = event.code
-    s.connection = event.status === 'open' ? 'connecting' : event.status
+    s.connection = event.status === 'open' ? 'connecting' : event.status === 'failed' ? 'closed' : event.status
     // A gap resync keeps the socket; any other status means a new or no socket, which drops the retry.
     if (event.status !== 'resyncing') s.busy = null
-    if (event.status === 'closed' && event.code === SESSION_REPLACED_CLOSE) s.blocked = 'replaced'
+    if (event.status === 'failed') s.blocked = 'unreachable'
+    else if (event.status === 'closed' && event.code !== null) s.blocked = BLOCKED_BY_CLOSE[event.code] ?? s.blocked
   }
 
   function receive(message: ServerMessage): void {
@@ -140,19 +154,19 @@ export const useQuizStore = defineStore('quiz', () => {
         return
       case 'answer_result':
         if (s.pending?.submissionId === message.submissionId) s.pending = null
-        s.lastResult = message
-        s.myScore = message.score
+        // A reply read before the end never changes the final standings either (protocol §3).
+        if (s.ended) return
+        Object.assign(s, { lastResult: message, myScore: message.score, phase: 'feedback' })
         setCursor(message.questionIndex, false)
-        if (!s.ended) s.phase = 'feedback'
         return
       case 'finished':
-        Object.assign(s, { finished: true, myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
-        if (!s.ended) s.phase = 'finished'
+        if (s.ended) return
+        Object.assign(s, { finished: true, phase: 'finished', myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
         return
       case 'leaderboard':
         return standings(message.seq, message.entries, message.playerCount, message.onlineCount, undefined, message.rebase)
       case 'rank_update':
-        Object.assign(s, { myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
+        if (!s.ended) Object.assign(s, { myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
         return
       case 'snapshot':
         // A snapshot read before the end never undoes it (protocol §3).
@@ -177,8 +191,9 @@ export const useQuizStore = defineStore('quiz', () => {
 
   function onJoined(message: Joined): void {
     s.quiz = { ...message, endsAt: deps.now() + message.quizRemainingMs }
-    Object.assign(s, { myScore: message.score, finished: message.finished, connection: 'resyncing' })
+    Object.assign(s, { finished: message.finished, connection: 'resyncing' })
     if (s.ended) return
+    s.myScore = message.score
     // Feedback for the answered, closed cursor stays, even on the last question (UI spec §4.2).
     if (!message.cursorOpen && s.phase === 'feedback' && s.lastResult?.questionIndex === message.cursor) return
     if (message.finished) s.phase = 'finished'
@@ -203,7 +218,7 @@ export const useQuizStore = defineStore('quiz', () => {
       s.blocked = code === 'SESSION_REPLACED' ? 'replaced' : 'version'
       client.value?.stop()
     }
-    // A failed first join binds nothing and the client never sends it again (protocol §1): back to idle, to retry.
+    // A failed first join binds nothing (protocol §1): back to idle, which also stops the client's retry of it.
     else if (requestType === 'join' && s.quiz === null) idle()
     else if (REJOIN_ON.includes(code) && !s.ended) client.value?.rejoin()
   }
@@ -232,5 +247,5 @@ export const useQuizStore = defineStore('quiz', () => {
     if (s.connection === 'resyncing') s.connection = 'joined'
   }
 
-  return { ...toRefs(s), nextIndex, msLeft, quizMsLeft, join, answer, next, loadPage, now: (): number => deps.now() }
+  return { ...toRefs(s), nextIndex, msLeft, quizMsLeft, join, retry, answer, next, loadPage, now: (): number => deps.now() }
 })

@@ -160,6 +160,21 @@ it('the end: results with my final rank; a late open snapshot and finished never
   expect(store.page).toEqual({ offset: 1, atSeq: 4, final: true, rows: [me] })
 })
 
+it('the end keeps my final rank, score and player count against late replies, and sends no answer retry', async () => {
+  const { store, socket } = await playing()
+  socket.receive(question(0))
+  store.answer(1)
+  socket.receive(error('UNAVAILABLE', 'answer'))
+  socket.receive({ type: 'quiz_ended', seq: 4, playerCount: 2, entries: [rival, me], you: { rank: 2, score: 0 } })
+  await wait(10_000)
+  expect(socket.sent.filter((message) => message.type === 'answer')).toHaveLength(1)
+  socket.receive({ type: 'finished', atSeq: 3, score: 150, rank: 1, playerCount: 3 })
+  socket.receive({ type: 'rank_update', atSeq: 3, rank: 3, score: 10, playerCount: 4 })
+  socket.receive(result(0, 's-1', 140))
+  socket.receive(joined({ score: 140 }))
+  expect([store.phase, store.myRank, store.myScore, store.playerCount]).toEqual(['results', 2, 0, 2])
+})
+
 it('a join after the end: the final snapshot, then QUIZ_ENDED, shows the results', async () => {
   const { store, socket } = await joinQuiz()
   socket.receive(snapshot(9, 'ended'))
@@ -212,6 +227,32 @@ it('close 4001 blocks the screen as session-replaced and never reconnects; a new
   expect(store.blocked).toBe(null)
 })
 
+it('close 1008 blocks the screen as a policy close and never reconnects', async () => {
+  const { store, socket } = await playing()
+  socket.onclose?.({ code: 1008 })
+  await wait(30_000)
+  expect([sockets.length, store.blocked, store.connection]).toEqual([1, 'policy', 'closed'])
+})
+
+it('10 connects in a row without a joined block the screen as unreachable; retry joins with attempts from zero', async () => {
+  const { store } = await joinQuiz()
+  for (let i = 0; i < 10; i++) {
+    expect([sockets.length, store.blocked]).toEqual([i + 1, null])
+    const socket = sockets.at(-1) as FakeSocket
+    socket.onopen?.()
+    socket.onclose?.({ code: 1006 })
+    // The longest backoff wait with random() = 0.5 is 5 s.
+    await wait(5_100)
+  }
+  expect([sockets.length, store.blocked, store.connection]).toEqual([10, 'unreachable', 'closed'])
+  await wait(60_000)
+  expect(sockets.length).toBe(10)
+  store.retry()
+  for (let i = 0; i < 3; i++) await wait(0)
+  ;(sockets.at(-1) as FakeSocket).onclose?.({ code: 1006 })
+  expect([sockets.length, store.blocked, store.connection]).toEqual([11, null, 'reconnecting'])
+})
+
 it('ALREADY_ANSWERED unlocks the choices and rejoins on the same socket', async () => {
   const { store, socket } = await playing()
   socket.receive(question(0))
@@ -257,10 +298,25 @@ it('a retried answer keeps the choices locked while the server is busy', async (
   expect(store.busy).toBe(null)
 })
 
-it('UNAVAILABLE on a rejoin, which the client does not retry, shows no busy state', async () => {
+it('UNAVAILABLE on a rejoin after a reconnect: busy until the retried join succeeds on the same socket, with the answer kept', async () => {
   const { store, socket } = await playing()
-  socket.receive(error('UNAVAILABLE', 'join'))
-  expect(store.busy).toBe(null)
+  socket.receive(question(0))
+  store.answer(1)
+  socket.onclose?.({ code: 1006 })
+  await wait(130)
+  const second = sockets.at(-1) as FakeSocket
+  second.onopen?.()
+  second.receive(error('UNAVAILABLE', 'join'))
+  expect([store.connection, store.busy, store.pending?.submissionId]).toEqual(['connecting', 'join', 's-1'])
+  second.receive({ v: 1, type: 'pong', seq: 3 })
+  await wait(125)
+  expect(second.sent.map((message) => message.type)).toEqual(['join', 'join'])
+  second.receive(joined({ cursor: 0, cursorOpen: true }))
+  expect(second.sent.map((message) => message.type)).toEqual(['join', 'join', 'resync', 'answer'])
+  second.receive(snapshot(3))
+  expect([store.connection, store.busy, store.phase, store.pending?.submissionId]).toEqual(['joined', null, 'question', 's-1'])
+  second.receive(result(0, 's-1', 140))
+  expect([store.phase, store.pending, store.myScore]).toEqual(['feedback', null, 140])
 })
 
 it('a question that arrives after quiz_ended changes nothing, and no answer goes out', async () => {

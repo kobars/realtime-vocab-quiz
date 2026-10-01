@@ -18,7 +18,7 @@ async function receive(...messages: (Partial<ServerMessage> | ClientEvent)[]) {
   await nextTick()
   await nextTick()
 }
-const status = (value: 'reconnecting' | 'open' | 'closed', code: number | null = null) => ({ type: 'status', status: value, code }) as ClientEvent
+const status = (value: 'reconnecting' | 'open' | 'closed' | 'failed', code: number | null = null) => ({ type: 'status', status: value, code }) as ClientEvent
 const joined = (over: Partial<Joined> = {}): Joined => ({ v: 1, type: 'joined', atSeq: 3, quizId: 'VOCAB-42', userId: 'u1', displayName: 'Ana', questionCount: 10,
   timeLimitMs: 20_000, quizRemainingMs: 600_000, cursor: -1, cursorOpen: false, finished: false, score: 0, ...over })
 const snapshot = (score: number): Snapshot => ({ v: 1, type: 'snapshot', atSeq: 3, status: 'open', playerCount: 2, onlineCount: 2,
@@ -206,6 +206,35 @@ it('close 4001: the session-replaced card with Use this tab, and no Disconnected
   expect(w.find('[data-choice="0"]').exists()).toBe(false)
 })
 
+it("close 1008: a blocking Can't connect to this quiz card with Reload and a link back to the start", async () => {
+  const reload = vi.fn()
+  vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, reload })
+  const w = await playing()
+  await receive(status('closed', 1008))
+  expect(w.get('[role="alert"]').text()).toContain("Can't connect to this quiz.")
+  expect(w.get('[data-test="home"]').attributes('href')).toBe('/')
+  expect(w.get('[data-test="connection"]').text()).toBe('')
+  expect(w.find('[data-choice="0"]').exists()).toBe(false)
+  await w.get('[role="alert"] button').trigger('click')
+  expect(reload).toHaveBeenCalledTimes(1)
+  expect(port.start).toHaveBeenCalledTimes(1)
+})
+
+it("10 connects without a joined: a blocking Still can't connect card whose Try again joins again, also after a second give-up", async () => {
+  const w = await playing()
+  await receive(status('failed', 1006))
+  expect(w.get('[role="alert"]').text()).toContain("Still can't connect.")
+  expect(w.get('[data-test="connection"]').text()).toBe('')
+  expect(w.find('[data-choice="0"]').exists()).toBe(false)
+  expect(document.activeElement?.textContent?.trim()).toBe('Try again')
+  await w.get('[role="alert"] button').trigger('click')
+  expect(w.find('[role="alert"]').exists()).toBe(false)
+  // The new join has no `joined` yet, so the second card has no quiz to read the ID from.
+  await receive(status('failed', 1006))
+  await w.get('[role="alert"] button').trigger('click')
+  expect(port.start.mock.calls).toEqual([['VOCAB-42', 'Ana'], ['VOCAB-42', 'Ana'], ['VOCAB-42', 'Ana']])
+})
+
 it('UNSUPPORTED_VERSION: a blocking A new version is available card with Reload that stays', async () => {
   const w = await playing()
   await receive(error('UNSUPPORTED_VERSION'), status('closed', 1000))
@@ -376,7 +405,7 @@ it('the rank is announced in its own polite region only when it changes, at most
 })
 
 it.each([
-  ['a final close', status('closed', 1008)],
+  ['a final close', status('closed', 1000)],
   ['QUIZ_NOT_FOUND', error('QUIZ_NOT_FOUND')],
 ])('after %s no Waiting for the connection note stays, and the choices stay locked', async (_, event) => {
   const w = await playing()

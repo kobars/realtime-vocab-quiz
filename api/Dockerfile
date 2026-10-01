@@ -20,7 +20,13 @@ FROM python:3.14-slim AS runtime
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
-RUN groupadd --system --gid 10001 quiz \
+# The base tag lags behind the Debian security fixes. pip is never used at run time, and its
+# vendored libraries carry their own advisories.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall --yes pip \
+    && groupadd --system --gid 10001 quiz \
     && useradd --system --uid 10001 --gid quiz --no-create-home --shell /usr/sbin/nologin quiz
 WORKDIR /app
 # Only the virtual environment and the source; the venv's editable install points at /app/src.
