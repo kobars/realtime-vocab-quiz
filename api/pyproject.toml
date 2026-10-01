@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
     "redis[hiredis]>=8.1.0",
+    "starlette>=1.7.0",
     "structlog>=26.1.0",
     "uvicorn[standard]>=0.54.0",
 ]
@@ -20,6 +21,8 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "anyio>=4.15.1",
+    "deptry>=0.25.1",
     "httpx>=0.28.1",
     "httpx2>=2.13.1",
     "hypothesis>=6.168.3",
@@ -29,6 +32,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
+    "pytest-timeout>=2.4.0",
     "ruff>=0.16.9",
     "typos>=1.50.3",
 ]
@@ -63,6 +67,10 @@ known-first-party = ["quiz", "check_internal", "bots", "latency", "player"]
 "../load/*.py" = ["T201"]
 "../load/tests/**" = ["S101", "PLR2004"]
 
+# make check runs deptry on src, and on tests, ../scripts and ../load with the Makefile's extra flags.
+[tool.deptry]
+known_first_party = ["quiz"]
+
 [tool.mypy]
 strict = true
 python_version = "3.14"
@@ -90,6 +98,9 @@ addopts = ["--strict-markers", "--strict-config", "-ra", "--import-mode=importli
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 xfail_strict = true
+# A hung test fails in a minute with every thread's stack; the default signal method fails only
+# that test, so the rest of the run, its fixture teardown and its summary still happen.
+timeout = 60
 filterwarnings = ["error"]
 markers = [
     "unit: fast tests of pure code (set by folder)",

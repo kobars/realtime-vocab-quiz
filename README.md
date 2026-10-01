@@ -14,7 +14,7 @@ and the document skeletons exist; the service itself is being built.
 |---|---|
 | Server | Python 3.14, uv, FastAPI, uvicorn, Pydantic v2, redis-py, structlog, prometheus-client |
 | Store | Redis 8 (sorted sets, Lua scripts, pub/sub) |
-| Server tests and quality | pytest, pytest-asyncio, pytest-cov, Hypothesis, httpx, ruff, mypy, import-linter |
+| Server tests and quality | pytest, pytest-asyncio, pytest-cov, Hypothesis, httpx, ruff, mypy, import-linter, deptry |
 | Client | Node 24, pnpm 11, Vue 3, Vite, TypeScript, Pinia, Vue Router, Tailwind CSS, shadcn-vue, VueUse, lucide |
 | Client tests and quality | Vitest (v8 coverage), @vue/test-utils, happy-dom, ESLint, vue-tsc |
 | Infra | Docker Compose, nginx |
@@ -46,7 +46,9 @@ The API refuses a WebSocket upgrade from an origin it does not allow (HTTP 403).
 (`pnpm install --frozen-lockfile`); every pre-commit hook on every file (the
 internal-content guard `scripts/check_internal.py`, ruff lint and format, ESLint,
 typos, and lychee in Docker on the relative links and anchors of the tracked
-Markdown); mypy (strict); import-linter; pytest (without the `integration` and
+Markdown); mypy (strict); import-linter; deptry (every import in `api/src` is a
+declared dependency and every runtime dependency is used; `api/tests`, `scripts/`
+and `load/` import only declared packages); pytest (without the `integration` and
 `acceptance` markers) with a branch-coverage floor (`api/pyproject.toml`);
 the contract drift check; vue-tsc; Vitest with coverage thresholds
 (`web/vitest.config.ts`); and the client build (`pnpm -C web build`). Every pull
@@ -60,7 +62,10 @@ infrastructure files: hadolint (settings in `.hadolint.yaml`), shellcheck,
 and on any `nginx.conf` under `infra/`), Trivy on the configuration (fails on any
 finding) and on both images (fails on a CRITICAL or HIGH finding that has a fix), and
 `scripts/smoke_images.sh`, which runs each image as a non-root user on a read-only
-root filesystem until its healthcheck passes (locally: `make build && scripts/smoke_images.sh`).
+root filesystem until its healthcheck passes, then checks that the web image sends every
+security header of `web/security-headers.conf` (CSP, `nosniff`, `Referrer-Policy`,
+`Permissions-Policy`) on `/` and on a hashed asset (locally:
+`make build && scripts/smoke_images.sh`).
 
 `make help` lists every target; a target whose work has not landed yet prints
 `not yet`.
@@ -69,6 +74,5 @@ root filesystem until its healthcheck passes (locally: `make build && scripts/sm
 
 - [DESIGN.md](DESIGN.md) — the system design
 - [docs/DECISIONS.md](docs/DECISIONS.md) — architecture decision records
-- [docs/TRACEABILITY.md](docs/TRACEABILITY.md) — requirements and their evidence
 - [AGENTS.md](AGENTS.md) — rules for contributors and coding agents
 - [SECURITY.md](SECURITY.md) — how to report a vulnerability, and the security scans

@@ -29,12 +29,12 @@ are mocks behind ports, and quiz admin is a mock host action (§14).
 
 ## 2. Assumptions and non-goals
 
-**How we read the README.** The README asks for joining by quiz ID, scores that update in real
-time and a leaderboard that updates promptly. It does not say who opens and closes questions.
-We read "real-time" as live scores and one shared live board, and let each player set their own
-pace. A host-led quiz would need one owner per quiz to open and close questions on time, with a
-failover story; the self-paced model needs no owner, because no rule depends on a timer
-(ADR-002, ADR-006). Host-led stays future work.
+**Requirements.** Players join by quiz ID, scores update in real time and the leaderboard
+updates promptly; nothing says who opens and closes questions. We read "real-time" as live
+scores and one shared live board, and let each player set their own pace. A host-led quiz
+would need one owner per quiz to open and close questions on time, with a failover story;
+the self-paced model needs no owner, because no rule depends on a timer (ADR-002, ADR-006).
+Host-led stays future work.
 
 **Assumptions.**
 
@@ -45,14 +45,14 @@ failover story; the self-paced model needs no owner, because no rule depends on 
 | Time | The server decides time on one clock (Redis `TIME`); the client countdown is display only |
 | Clients | Current browsers with WebSocket support; phones and desktops |
 | Store | One Redis 8 (Valkey 8 also works) with AOF `everysec`; a crash can lose about 1 s of answers (§11) |
-| Load (our target, not a README requirement) | Thousands of concurrent sockets over **two API nodes** behind nginx, with a cap of 10,000 sockets per process |
-| Latency (our target, not a README requirement) | C5: p99 below 500 ms from "answer accepted" to "leaderboard delivered", measured by the load bots |
+| Load (our target) | Thousands of concurrent sockets over **two API nodes** behind nginx, with a cap of 10,000 sockets per process |
+| Latency (our target) | C5: p99 below 500 ms from "answer accepted" to "leaderboard delivered", measured by the load bots |
 
-The README asks the system to "perform well even under heavy load" (F-2) without a number. Our
-measurable reading of F-2 is the load and latency rows above, run on one and on two nodes and
-reported in §9. Two nodes are our choice: they make the scale-out claims of §10 real.
+There is no load number in the requirements; our targets are the rows above, run on one and on
+two nodes and reported in §9. Two nodes are our choice: they make the scale-out claims of §10
+real.
 
-**Why the design meets each README acceptance criterion.**
+**How the design meets each acceptance criterion.**
 
 | ID | Criterion | How the design meets it |
 |---|---|---|
@@ -69,7 +69,7 @@ answer log beyond AOF; a graceful drain when a node stops (clients reconnect and
 metrics or dashboard containers (the API serves `/metrics` only, §13); native apps;
 translations.
 
-## 3. Architecture (D-1)
+## 3. Architecture
 
 **Context.** The quiz service is the one component built for real. The identity provider and the
 content service are mocks behind ports, so a real one can replace each without touching the
@@ -141,7 +141,7 @@ own sockets. Redis is the only database: the mock identity keeps its sessions an
 there, so a ticket made on one node works on the other. The mock question bank is read from
 JSON files when a node starts.
 
-## 4. Components (D-2)
+## 4. Components
 
 The server is one Python package, `quiz` (`api/src/quiz/`), split into layers. The
 import-linter contracts in `api/pyproject.toml`, run by `make check`, enforce these rules: the
@@ -174,12 +174,12 @@ composition root alone wires them is a convention, not a check.
 
 <!-- AI-ASSISTED-END -->
 
-## 5. Data flow (D-3)
+## 5. Data flow
 TODO: the flow from joining a quiz to a leaderboard update.
 
-## 6. Technologies and justification (D-4)
+## 6. Technologies and justification
 
-<!-- AI-ASSISTED-BEGIN: drafted with Claude Code from docs/DECISIONS.md, api/pyproject.toml and web/package.json; the versions were read from api/uv.lock and web/pnpm-lock.yaml. -->
+<!-- AI-ASSISTED-BEGIN: drafted with Claude Code from docs/DECISIONS.md, api/pyproject.toml and web/package.json. -->
 
 Each choice is set against the alternative it beat and the cost we accept for it. The ADR
 column points to the full reasoning in [docs/DECISIONS.md](docs/DECISIONS.md).
@@ -196,35 +196,18 @@ column points to the full reasoning in [docs/DECISIONS.md](docs/DECISIONS.md).
 | Packaging and running | Docker Compose: Redis, two API nodes, nginx and the built client | Kubernetes (kind or minikube); processes started by hand | One command brings the whole stack up the same way on any machine with Docker; the tests start their own Redis container on a free port | One host: no autoscaling, rolling deploy or node spread; production would need an orchestrator | — |
 | Build and test tooling | uv and pnpm with committed lock files; pytest, pytest-asyncio and Hypothesis; Vitest | pip or Poetry; npm; unittest | Fast, reproducible installs from the lock files in CI and locally; property tests for the rules that must hold for every input | Two toolchains (Python and Node) to install; the lock files are regenerated, never merged by hand | — |
 
-**Resolved versions.** Read from the lock files (`api/uv.lock`, `web/pnpm-lock.yaml`) and the
-version pins next to them; a lock-file change updates this table.
-
-| Package | Version | Source |
-|---|---|---|
-| Python | 3.14 | `.python-version` |
-| FastAPI / Starlette | 0.142.2 / 1.7.0 | `api/uv.lock` |
-| uvicorn (uvloop, httptools, websockets) | 0.54.0 (0.23.0, 0.8.0, 17.1) | `api/uv.lock` |
-| Pydantic / pydantic-settings | 2.13.5 / 2.15.0 | `api/uv.lock` |
-| redis-py (hiredis) | 8.1.0 (3.4.2) | `api/uv.lock` |
-| prometheus-client | 0.26.0 | `api/uv.lock` |
-| structlog | 26.1.0 | `api/uv.lock` |
-| pytest / Hypothesis | 9.1.1 / 6.168.3 | `api/uv.lock` |
-| Redis server | `redis:8-alpine` | `compose.yaml` |
-| Node / pnpm | 24 / 11.20.0 | `.nvmrc`, `web/package.json` |
-| Vue / Vue Router / Pinia | 3.5.43 / 5.3.1 / 4.0.3 | `web/pnpm-lock.yaml` |
-| Vite / TypeScript | 8.3.1 / 6.0.3 | `web/pnpm-lock.yaml` |
-| Tailwind CSS / reka-ui | 4.3.3 / 2.10.5 | `web/pnpm-lock.yaml` |
-| Vitest | 5.0.2 | `web/pnpm-lock.yaml` |
+Exact versions: `api/uv.lock` and `web/pnpm-lock.yaml`; runtimes in `.python-version`,
+`.nvmrc`, `web/package.json` (`packageManager`) and `compose.yaml`.
 
 <!-- AI-ASSISTED-END -->
 
-## 7. Consistency contract (AC-4)
+## 7. Consistency contract
 TODO: the scoring and ordering guarantees, their mechanisms and the tests that prove them.
 
 ## 8. Non-functional requirements
 TODO: latency, throughput, availability and durability targets.
 
-## 9. Capacity estimate (F-1, F-2)
+## 9. Capacity estimate
 
 <!-- AI-ASSISTED-BEGIN: sections 9 and 10 drafted with Claude Code from api/src/quiz/config.py, the contracts, docs/spec/ and docs/DECISIONS.md; the frame sizes were computed by encoding sample frames in compact JSON. -->
 
@@ -334,7 +317,7 @@ TODO: the measured runs from `load/README.md` and `load/results/` (scenario, con
 msg/s, p50, p95 and p99 in ms, CPU %, RSS in MB, the machine used) and whether C5 (p99 below
 500 ms) was met.
 
-## 10. Scalability and trade-offs (F-1)
+## 10. Scalability and trade-offs
 
 **How it scales out today.** Any node can take any socket and score any answer, because every
 write is one Lua script in Redis and no node owns a quiz (ADR-006). Adding an API node adds
@@ -371,7 +354,7 @@ every quiz runs there.
    Above 200 players the frame shrinks to the top 50, and each other player gets their own
    `rank_update`.
 6. **What changes at 100,000 players.** We chose a design sized for thousands of sockets on two
-   nodes over one built for 100,000 now, because the README asks for a working real-time quiz,
+   nodes over one built for 100,000 now, because the goal is a working real-time quiz,
    and we accept these changes for 100,000 players:
    - Sockets: at least 10 processes at the 10,000 cap, more if the measured per-node number is
      lower, and a load balancer layer instead of one nginx, which would hold 200,000 sockets
@@ -423,16 +406,16 @@ and each node would hold one `SSUBSCRIBE` connection per shard.
 
 <!-- AI-ASSISTED-END -->
 
-## 11. Reliability and failure modes (F-3)
+## 11. Reliability and failure modes
 TODO: the failure table (failure, detection, system behavior, user-visible effect, mitigation, proving test).
 
 ## 12. Security
 TODO: authentication, input limits, origin checks and abuse limits.
 
-## 13. Observability (F-5)
+## 13. Observability
 TODO: logs, metrics and how to diagnose a slow or stuck quiz.
 
-## 14. Implemented and mocked (I-1)
+## 14. Implemented and mocked
 
 <!-- AI-ASSISTED-BEGIN: drafted with Claude Code from the ADR index and the mock adapters' docstrings, checked by hand against the code. -->
 
@@ -463,7 +446,7 @@ it.
 
 <!-- AI-ASSISTED-END -->
 
-## 15. AI Collaboration in Design (D-5, S-6)
+## 15. AI Collaboration in Design
 
 <!-- AI-ASSISTED-BEGIN: drafted with Claude Code from the design-phase and spec-PR AI-LOG entries, checked by hand against the specs and the named tests, which were run. -->
 
@@ -553,71 +536,7 @@ commands and results are in each AI-LOG entry.
 
 <!-- AI-ASSISTED-END -->
 
-## 16. GenAI roadmap (X-8)
-
-<!-- AI-ASSISTED-BEGIN: drafted with Claude Code from the ports and the data the store already keeps, checked by hand against the architecture. -->
-
-**One rule for all of it: generative AI stays off the real-time path.** Scoring must stay exact,
-cheap and repeatable (AC-4), and the tick has a 200 ms budget. So a model never decides points
-during a quiz and never runs inside a Lua script or a socket handler. It runs before the quiz
-(content), between quizzes (difficulty) or in its own service with its own latency budget
-(speech). Each feature enters through a port that already exists or a new one beside it, so
-the quiz core does not change.
-
-| Feature | Where it fits | Main risks | How to measure it |
-|---|---|---|---|
-| Question generation with evals | An offline pipeline writes vocabulary items into the content service behind the `QuestionBank` port | Wrong answer keys, ambiguous distractors, items at the wrong level, unsafe or biased content | An eval suite gates every batch; live item statistics after release |
-| Adaptive difficulty | Picks the next quiz's difficulty band for a player or a group, between quizzes | Unfair standings if players in one quiz get different questions; a cold start with no history | Calibration of the predicted against the real correct rate; completion and return rates |
-| Pronunciation feedback | A speaking question type for ELSA's core skill: the player says the word, a speech service scores it | Bias against accents, noisy rooms, latency, privacy of voice recordings | Agreement with human raters, the gap between accent groups, p95 scoring latency |
-
-**Question generation with evals.** A model drafts items (the word, a sentence that uses it, one
-correct meaning and three distractors at a target level) as JSON. Each batch must pass an eval
-suite before an editor sees it: the schema and the bank's existing load checks (four unique
-choices, one answer, valid positions); an independent model that answers each item without the
-key and must agree with it; a duplicate and near-duplicate check against the bank; a safety
-filter; and a fixed golden set of reviewed items that every prompt or model change is scored
-against in CI. Editors approve items before they reach a quiz. After release, the store holds
-each answer's choice, points and elapsed time per (player, question), but every key of a quiz
-expires 24 h after its last write (Redis §2) and nothing exports them yet. So the pipeline adds
-an export step: a job copies the answer rows of each quiz into durable analytics storage before
-that TTL, and the item statistics are computed there. Items whose correct rate is near 0 or 100
-%, or whose wrong answers all land on one distractor, go back to review. The metrics: the share
-of generated items that pass the evals, the share editors reject, and the share later pulled
-after release; the target for wrong keys in released items is zero.
-
-**Adaptive difficulty.** The model estimates each player's level from past answers (an item
-response model or an Elo-style rating per item and player; a language model is not needed for
-this part) and picks the difficulty band of the next quiz. Inside one quiz everyone still gets
-the same questions in the same order, so the shared leaderboard stays fair; mixing levels in one
-quiz would need a handicap in the score, which is a product decision, not a technical one. The
-risks: a wrong estimate that makes quizzes too hard or too easy, and new players with no
-history (start them at a middle band). The metrics: calibration (predicted against real correct
-rate per band), quiz completion rate, and how often players return, compared with fixed
-difficulty in an A/B test.
-
-**Pronunciation feedback.** A new question type: the client records the word, uploads it over
-HTTP to a speech-scoring service, and gets back a score per phoneme. The service returns a
-signed result that binds the user, the quiz, the question index, the serve time and an expiry,
-so it cannot be replayed or reused for another player or question. The player sends that result
-to the quiz service as the answer, and the quiz service checks the signature, so the audio never
-travels over the WebSocket. `score_answer` takes a choice index 0…3 and compares it with the
-answer key, so it cannot score a phoneme result as it is: this question type needs a new scoring
-input or script, with the same rules (one answer per (player, question), and the deadline and
-the time limit on Redis `TIME`). The time limit must allow for recording and scoring, so these
-questions get a longer `T`. The risks: lower scores for some accents, which is unfair and also
-moves players on the leaderboard; background noise; a slow service that makes answers late; and
-voice data, which needs consent, a short retention period and no use for training without
-permission. The metrics: correlation with human raters on a labeled set, the score gap between
-accent groups on that set, the rate of answers scored late because of scoring latency, and p95
-scoring latency against its budget.
-
-**Cost and change control.** Prompts and model versions are pinned and versioned with the eval
-results, so a model upgrade is a reviewed change with numbers, like an ADR. Generation runs in
-batches, so its cost is per item, not per player.
-
-<!-- AI-ASSISTED-END -->
-
-## 17. ADR index
+## 16. ADR index
 
 <!-- AI-ASSISTED-BEGIN: one-line summaries drafted with Claude Code from docs/DECISIONS.md. -->
 
