@@ -155,8 +155,9 @@ it('the end: results with my final rank; a late open snapshot and finished never
   store.loadPage(0)
   expect(socket.sent.at(-1)).toEqual({ v: 1, type: 'get_leaderboard', offset: 0, limit: 100 })
   socket.receive({ type: 'leaderboard_page', atSeq: 4, offset: 0, playerCount: 2, final: true, entries: [rival, me] })
+  expect(store.page).toEqual({ offset: 0, atSeq: 4, final: true, rows: [rival, me] })
   socket.receive({ type: 'leaderboard_page', atSeq: 4, offset: 1, playerCount: 2, final: true, entries: [me] })
-  expect([store.allPlayers, store.pageFinal, store.pageAtSeq]).toEqual([[rival, me], true, 4])
+  expect(store.page).toEqual({ offset: 1, atSeq: 4, final: true, rows: [me] })
 })
 
 it('a join after the end: the final snapshot, then QUIZ_ENDED, shows the results', async () => {
