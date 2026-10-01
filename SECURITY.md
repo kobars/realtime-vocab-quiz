@@ -33,4 +33,5 @@ the security workflow (`.github/workflows/security.yml`): a gitleaks scan of the
 history, dependency review that blocks a new dependency with a high-severity advisory, and
 audits of the locked Python (`pip-audit`) and production web (`pnpm audit`) dependencies.
 Both workflows also run weekly. `make audit` runs the audits and the secret scan locally; it
-needs the network and `gitleaks` on the `PATH`.
+needs the network, a full clone (not shallow) and gitleaks 8.25 or later on the `PATH` (CI
+uses 8.30.1).

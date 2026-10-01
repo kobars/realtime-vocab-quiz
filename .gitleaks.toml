@@ -2,6 +2,7 @@
 [extend]
 useDefault = true
 
+# The [[allowlists]] table needs gitleaks 8.25 or later; older releases ignore it.
 [[allowlists]]
 description = "The sample Sec-WebSocket-Key nonce from RFC 6455, section 1.3, used by the handshake tests"
 regexes = ['''dGhlIHNhbXBsZSBub25jZQ''']
