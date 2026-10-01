@@ -357,7 +357,7 @@ commands and results are in each AI-LOG entry.
 
 <!-- AI-ASSISTED-END -->
 
-## 16. GenAI roadmap (V-11)
+## 16. GenAI roadmap (X-8)
 
 <!-- AI-ASSISTED-BEGIN: drafted with Claude Code from the ports and the data the store already keeps, checked by hand against the architecture. -->
 
