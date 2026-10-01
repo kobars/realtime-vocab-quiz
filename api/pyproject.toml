@@ -79,6 +79,10 @@ files = ["src", "tests", "../scripts", "../load"]
 # Test folders have no __init__.py: name modules by path so same-named test files can coexist.
 explicit_package_bases = true
 warn_unreachable = true
+enable_error_code = [
+    "ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined",
+    "explicit-override", "unused-awaitable", "mutable-override", "deprecated",
+]
 
 # pre-commit ships no py.typed; its sources are typed, so read them instead of skipping them.
 [[tool.mypy.overrides]]

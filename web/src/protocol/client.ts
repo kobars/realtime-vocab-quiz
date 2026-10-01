@@ -29,7 +29,7 @@ export interface QuizSocket {
  * `closed` follows a final close code or `stop`; `failed` means the client gave up after 10 connects without a `joined`.
  */
 export type ClientEvent =
-  | ServerMessage
+  | Exclude<ServerMessage, { type: 'pong' }>
   | { type: 'status'; status: 'connecting' | 'open' | 'resyncing' | 'reconnecting' | 'closed' | 'failed'; code: number | null }
 
 export interface QuizClientOptions {
@@ -216,6 +216,9 @@ export class QuizClient {
       case 'answer_result':
         this.settle(message.submissionId)
         this.inFlight = this.inFlight.filter((id) => id !== message.submissionId)
+        break
+      case 'rank_update':
+      case 'leaderboard_page':
         break
       case 'quiz_ended':
         // Ui spec §4.3: the end drops any pending request.

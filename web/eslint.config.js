@@ -1,4 +1,4 @@
-// AI-ASSISTED: ESLint flat config: typescript-eslint strict and eslint-plugin-vue recommended.
+// AI-ASSISTED: ESLint flat config: typescript-eslint strict, a type-aware rule subset and eslint-plugin-vue recommended.
 import js from '@eslint/js'
 import pluginVue from 'eslint-plugin-vue'
 import { defineConfig, globalIgnores } from 'eslint/config'
@@ -14,6 +14,23 @@ export default defineConfig(
     languageOptions: { parserOptions: { parser: tseslint.parser } },
     // vue-tsc already reports undefined names; core no-undef does not know the DOM globals.
     rules: { 'no-undef': 'off' },
+  },
+  {
+    // A type-aware subset, not strictTypeChecked: unhandled union members and lost promises.
+    files: ['src/**/*.{ts,vue}', '*.config.ts'],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+        extraFileExtensions: ['.vue'],
+      },
+    },
+    rules: {
+      '@typescript-eslint/switch-exhaustiveness-check': 'error',
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/await-thenable': 'error',
+    },
   },
   {
     // Copied in by the shadcn-vue CLI: one-word names and optional props without defaults.

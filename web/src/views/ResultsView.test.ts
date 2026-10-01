@@ -20,7 +20,7 @@ const me = (rank: number, score: number): Entry => ({ rank, userId: 'u1', displa
 const steps = (w: VueWrapper) => w.findAll('[data-rank]').map((step) => step.attributes('data-rank'))
 
 async function receive(...messages: Partial<ServerMessage>[]) {
-  for (const message of messages) emit({ v: 1, ...message } as ServerMessage)
+  for (const message of messages) emit({ v: 1, ...message } as ClientEvent)
   await nextTick()
 }
 

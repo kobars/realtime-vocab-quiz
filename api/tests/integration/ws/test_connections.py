@@ -7,7 +7,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import partial
-from typing import Any, cast
+from typing import Any, cast, override
 
 import pytest
 import uvicorn
@@ -286,7 +286,8 @@ def test_the_server_pings_and_drops_a_socket_that_never_pongs() -> None:
 
 
 class BrokenSocket(Socket):  # the peer is gone: every write fails
-    async def send_text(self, text: str) -> None:  # noqa: ARG002
+    @override
+    async def send_text(self, text: str) -> None:
         raise ConnectionResetError
 
 
@@ -442,6 +443,7 @@ class GatedStore(MemoryStore):  # joins pass the gate one at a time, in arrival 
         super().__init__(lambda: 0)
         self.gate = asyncio.Lock()
 
+    @override
     async def join(self, quiz_id: str, user_id: str, display_name: str, conn_id: str) -> Joined:
         async with self.gate:
             return await super().join(quiz_id, user_id, display_name, conn_id)
@@ -500,7 +502,8 @@ async def test_a_socket_closed_during_its_committed_join_still_leaves_and_replac
 
 
 class Stalled(Talking):  # a transport that is not writable: the close frame never goes out
-    async def close(self, code: int) -> None:  # noqa: ARG002
+    @override
+    async def close(self, code: int) -> None:
         await asyncio.Event().wait()
 
 
@@ -517,6 +520,7 @@ async def test_a_close_that_stalls_is_given_up_and_the_handler_ends(*, drained: 
 
 
 class Lagging(Socket):  # its close frame goes out a little after the drain
+    @override
     async def close(self, code: int) -> None:
         await asyncio.sleep(0.07)
         await super().close(code)

@@ -26,6 +26,8 @@ repos:
         entry: bash -c 'cd web && pnpm exec eslint --max-warnings 0 --no-warn-ignored "${@/#web\//}"' --
         language: system
         files: ^web/.*\.(js|ts|vue)$
+        # Each eslint process builds the TypeScript program for the type-aware rules, so one process lints every file.
+        require_serial: true
       - id: typos
         name: typos
         entry: uv run --project api --locked typos --force-exclude
