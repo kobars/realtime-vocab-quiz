@@ -38,6 +38,19 @@ async def test_refresh_gives_every_data_key_the_quiz_ttl(
     assert set(NO_QUIZ_TTL) == {"tick", "events", "control"}
 
 
+async def test_check_player_ends_the_quiz_at_the_deadline_ms_itself(
+    redis_client: Redis, redis_prefix: str
+) -> None:
+    keys = quiz_keys("T-END", redis_prefix)
+    body = """
+    local meta, deadline = {'0', ARGV[1]}, tonumber(ARGV[1])
+    local before = check_player(meta, deadline - 1, 'a', 'c')
+    return {before[1], check_player(meta, deadline, 'a', 'c')[1]}
+    """
+    replies = await redis_client.eval(compose(body), len(keys), *keys, 1_000_000)
+    assert replies == ["NOT_JOINED", "QUIZ_ENDED"]  # one ms before, the player check runs
+
+
 async def test_test_redis_runs_with_aof_on(redis_client: Redis) -> None:
     assert await redis_client.config_get("appendonly") == {"appendonly": "yes"}
 
