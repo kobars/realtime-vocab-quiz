@@ -123,14 +123,16 @@ markers = [
 ]
 
 # make check runs the unit, property and contract tests with --cov; the Redis adapter and the
-# WebSocket gateway are covered mostly by the integration tests, which it does not run.
+# WebSocket gateway are covered mostly by the integration tests, which it does not run. CI
+# combines the coverage data of its test jobs.
 [tool.coverage.run]
 branch = true
 source_pkgs = ["quiz"]
 
 [tool.coverage.report]
-# The measured branch coverage of make check's test run, rounded down; raise it as tests grow.
-fail_under = 84
+# The floor of CI's combined report, below its measured 98%; make check's unit-only run has its
+# own floor in the Makefile.
+fail_under = 95
 show_missing = true
 skip_covered = true
 
