@@ -99,8 +99,7 @@ export class QuizClient {
     this.quizId = quizId
     this.displayName = displayName
     this.stopped = false
-    this.unsettled.clear()
-    this.unavailable.clear()
+    this.dropRequests()
     void this.connect()
   }
 
@@ -119,7 +118,7 @@ export class QuizClient {
   /**
    * Answers question `questionIndex` with one new `submissionId`, which it returns. The client sends that same
    * answer until the server settles it: again after each `joined`, 1 s after `RATE_LIMITED` and after the backoff
-   * after `UNAVAILABLE`.
+   * after `UNAVAILABLE`. `quiz_ended` forgets it.
    */
   answer(questionIndex: number, choiceIndex: number): string {
     const submissionId = crypto.randomUUID()
@@ -210,8 +209,7 @@ export class QuizClient {
         break
       case 'quiz_ended':
         // Ui spec §4.3: the end drops any pending request.
-        this.cancelNextRetry()
-        this.pendingNext = null
+        this.dropRequests()
         return this.run(this.tracker.broadcast(message))
       case 'leaderboard':
         return this.run(this.tracker.broadcast(message))
@@ -337,6 +335,15 @@ export class QuizClient {
 
   private sendNext(): void {
     if (this.pendingNext !== null) this.send({ v: 1, type: 'next', questionIndex: this.pendingNext.questionIndex })
+  }
+
+  /** Forgets the pending `next` and every unsettled answer, so a scheduled answer resend finds nothing to send. */
+  private dropRequests(): void {
+    this.cancelNextRetry()
+    this.pendingNext = null
+    this.unsettled.clear()
+    this.unavailable.clear()
+    this.inFlight = []
   }
 
   private cancelNextRetry(): void {

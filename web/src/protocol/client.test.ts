@@ -630,6 +630,19 @@ it('drops the pending next and its retry on quiz_ended', async () => {
   expect(nexts(socket)).toEqual([5])
 })
 
+it('drops unsettled answers and their retries on quiz_ended', async () => {
+  uuids('s-1', 's-2')
+  const client = start(() => 0.5)
+  const socket = await joinedSocket()
+  client.answer(0, 2)
+  client.answer(1, 3)
+  socket.receive(answerError('UNAVAILABLE'))
+  socket.receive({ type: 'quiz_ended', seq: 1 } as Partial<ServerMessage>)
+  socket.receive(rateLimited)
+  await wait(5_000)
+  expect(answers(socket)).toEqual([answerMsg('s-1'), answerMsg('s-2', 1, 3)])
+})
+
 it('retries only the newest next when the player asks again before the retry', async () => {
   const client = start()
   const socket = await joinedSocket()
