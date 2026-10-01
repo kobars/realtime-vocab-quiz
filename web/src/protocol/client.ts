@@ -1,4 +1,4 @@
-// AI-ASSISTED: QuizClient owns the socket: connect with a fresh ticket, reconnect through Backoff, SeqTracker wiring, liveness and answer retries (protocol spec §2.1, §3, §7, §9).
+// AI-ASSISTED: QuizClient owns the socket: connect with a fresh ticket, reconnect through Backoff, SeqTracker wiring, liveness, answer retries, rejoin and leaderboard pages (protocol spec §2.1, §3, §7, §9).
 import { Backoff, backoffDelay, OPEN_TIMEOUT_MS } from './backoff'
 import { type AuthApi, connectTicket } from './identity'
 import { SeqTracker, type SeqStep } from './seq'
@@ -25,7 +25,7 @@ export interface QuizSocket {
 /** Server messages in the order to apply them (broadcasts only once SeqTracker releases them), plus status changes. */
 export type ClientEvent =
   | ServerMessage
-  | { type: 'status'; status: 'connecting' | 'open' | 'reconnecting' | 'closed'; code: number | null }
+  | { type: 'status'; status: 'connecting' | 'open' | 'resyncing' | 'reconnecting' | 'closed'; code: number | null }
 
 export interface QuizClientOptions {
   api: AuthApi
@@ -107,6 +107,16 @@ export class QuizClient {
     return submissionId
   }
 
+  /** Sends `join` again on the open socket; the `joined` reply carries the stored `cursor` and `score`. */
+  rejoin(): void {
+    this.send({ v: 1, type: 'join', quizId: this.quizId, displayName: this.displayName })
+  }
+
+  /** Asks for `limit` standings rows from rank `offset + 1`; the reply is `leaderboard_page`. */
+  getLeaderboard(offset: number, limit: number): void {
+    this.send({ v: 1, type: 'get_leaderboard', offset, limit })
+  }
+
   /** The user left: close with 1000 and never reconnect. */
   stop(): void {
     this.stopped = true
@@ -136,7 +146,7 @@ export class QuizClient {
       this.emit({ type: 'status', status: 'open', code: null })
       this.ping = setInterval(() => this.send({ v: 1, type: 'ping' }), PING_INTERVAL_MS)
       this.alive(socket)
-      this.send({ v: 1, type: 'join', quizId: this.quizId, displayName: this.displayName })
+      this.rejoin()
     }
     socket.onmessage = (event) => {
       this.alive(socket)
@@ -200,6 +210,7 @@ export class QuizClient {
     if (check !== null) this.after(check.delayMs, () => this.run(this.tracker.pongCheck(check.pongSeq)))
     if (resync === null) return
     const send = () => {
+      this.emit({ type: 'status', status: 'resyncing', code: null })
       this.lastResync = resync.lastSeq
       this.send({ v: 1, type: 'resync', lastSeq: resync.lastSeq })
     }
