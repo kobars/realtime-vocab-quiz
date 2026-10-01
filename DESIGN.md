@@ -240,39 +240,55 @@ formula is given), or a measurement from a load-run file. The measured table is 
 | A3 | Rows per `leaderboard` frame | every player up to 200 (`FULL_LIST_MAX`), else the top 50 (`TOP_N`) | `api/src/quiz/contracts/messages.py` |
 | A4 | Socket caps | 10,000 per process (`MAX_CONNECTIONS`), 50 per client address | `api/src/quiz/config.py` |
 | A5 | Send buffer per socket | soft 64 KiB (conflate leaderboards), hard 256 KiB (close 1013) | `api/src/quiz/config.py` |
-| A6 | Inbound limits | 16 KiB per message after parsing, 64 KiB per transport frame; 20 msg/s, burst 40 | `api/src/quiz/contracts/codec.py`, `api/src/quiz/adapters/ws/heartbeat.py`, `api/src/quiz/config.py` |
+| A6 | Inbound limits | 16 KiB per message, checked before parsing; 64 KiB per transport frame; 20 msg/s, burst 40 | `api/src/quiz/contracts/codec.py`, `api/src/quiz/adapters/ws/heartbeat.py`, `api/src/quiz/config.py` |
 | A7 | Messages per connection per tick | at most 2: one `leaderboard` and, above 200 players, one `rank_update` | ADR-004 |
 | A8 | `userId` length | 18 characters (`u_` and 16 base64url characters) | `api/src/quiz/adapters/mock_auth/tokens.py` |
-| A9 | `displayName` length | 12 characters typical (our assumption), 32 at most | our assumption; [domain spec](docs/spec/domain.md) |
+| A9 | `displayName` length | 12 characters typical (our assumption), 32 characters at most (not bytes) | our assumption; `api/src/quiz/contracts/messages.py` |
 | A10 | Highest total | 1,500 (10 × 150), so a score has at most 4 digits | the scoring rule (ADR-002) |
-| A11 | Player pace | one answer per player every 5 s (reading plus thinking) | our assumption; the load bots set it with `--think-ms` |
-| A12 | API nodes | 2, each one Python process on one event loop | `compose.yaml`; ADR-003 |
+| A11 | Player pace | one answer per player every 5 s (reading plus thinking) | our assumption; the load bot's think time `think_s` (`load/player.py`) |
+| A12 | API nodes | 2, each one Python process on one event loop | ADR-001; ADR-003 |
 
 **Leaderboard frame size** (computed). One row is
 `{"rank":123,"userId":"u_…","displayName":"…","score":1234}`: 84 bytes with A8, a 12-character
 name and A10. A frame is about `100 + 85 × rows` bytes. Encoding sample frames gives:
 
-| Frame | Rows | Bytes, 12-character names | Bytes, 32-character names |
+| Frame | Rows | Bytes, 12-character names | Bytes, 32 ASCII characters |
 |---|---|---|---|
 | 10 players | 10 | 932 | 1,132 |
 | 200 players (largest full frame) | 200 | 16,995 | 20,995 |
 | Above 200 players (top 50) | 50 | 4,296 | 5,296 |
 
-**Per-connection memory** (computed bounds). A healthy socket's send queue is empty between
-ticks; one queued 200-row frame is 17 KB. The soft limit (A5) holds `64 KiB / 16,995 B` ≈ 3.9
-full frames, so a client about 0.8 s behind at 5 frames/s gets conflated frames. The hard limit
-caps the queue at 256 KiB, and the transport accepts at most 64 KiB per inbound frame (A6), so
-the application buffers of one socket are at most 320 KiB. At the 10,000-socket cap that is
-10,000 × 320 KiB ≈ 3.05 GiB in the worst case, where every client is slow at once; the
-kernel's socket buffers come on top and are not in the process. The steady-state memory per
-socket (RSS divided by sockets) comes from the measured runs below.
+The cap of A9 counts characters, not bytes, and allows any text: the JSON writes non-ASCII
+characters as raw UTF-8 (up to 4 bytes each) and control characters as 6-byte `\u00XX` escapes.
+So a 200-row frame of 32-character names is at most about 40 KB with 4-byte characters
+(`20,995 + 200 × 32 × 3`) and about 53 KB with control characters (`20,995 + 200 × 32 × 5`).
+The rest of this section uses the 12-character column.
+
+**Per-connection memory** (computed, a partial estimate). A healthy socket's send queue is
+empty between ticks; one queued 200-row frame is 17 KB. The soft limit (A5) holds
+`64 KiB / 16,995 B` ≈ 3.9 full frames, so a client about 0.8 s behind at 5 frames/s gets
+conflated frames. A slow or abusive socket can fill these buffers in the process:
+
+| Buffer | Bound | Source |
+|---|---|---|
+| Send queue (`Sender.buffered`, the frame in flight included) | 256 KiB, then close 1013 | A5 |
+| asyncio transport write buffer | 64 KiB high-water mark, plus the one frame that crossed it | asyncio's default; uvicorn waits for `resume_writing` before the next write |
+| Inbound messages parsed from one read | 256 KiB: asyncio reads up to 256 KiB at a time, and uvicorn queues every complete frame of that read before reading pauses | asyncio's read size; uvicorn's WebSocket protocol |
+| Partial inbound frame in the parser | 64 KiB (A6) | A6 |
+
+Their sum is about 640 KiB per socket plus one outbound frame, or 10,000 × 640 KiB ≈ 6.1 GiB
+at the 10,000-socket cap if every client is slow and floods at once. Python's object overhead,
+the decoded copies of queued messages and the kernel's socket buffers come on top, so this is
+not an upper bound. The steady-state memory per socket (RSS divided by sockets) comes from the
+measured runs below.
 
 **Connections per node** (computed). The cap is 10,000 sockets per process (A4); two nodes
 hold 20,000. In one hot quiz above 200 players, each socket gets at most 5 frames per second
 (A2), so 10,000 sockets need 50,000 frame writes per second, which is
 `50,000 × 4,296 B` ≈ 215 MB/s of egress per node, plus at most one `rank_update` per socket
-per tick (A7). All of it runs on one core (A12), so CPU, not memory, sets the practical number
-below the cap; the measured runs give it.
+per tick (A7). All of it runs on one core (A12), so CPU or the network, not memory, sets the
+practical number below the cap: 215 MB/s is about 1.7 Gbit/s before framing, above a 1 Gbit/s
+link. The measured runs give the number.
 
 **Messages per question** (computed). For a quiz of `N` players, per player and question:
 
@@ -282,9 +298,11 @@ below the cap; the measured runs give it.
   `100 × N` frame writes per quiz per question window;
 - above 200 players, at most one `rank_update` per socket per tick (A7).
 
-The tick publishes only after a change. With A11, answers arrive at `N / 5` per second, so a
-200 ms tick sees none with probability `e^(−N/25)` (Poisson arrivals): about 2 % at
-`N` = 100. From about 100 players on, nearly every tick publishes.
+The tick publishes only after a change, and only an answer that scores sets `dirty`
+(`score_answer.lua`). With A11, answers arrive at `N / 5` per second; if a share `p` of them
+scores, a 200 ms tick sees no change with probability `e^(−pN/25)` (Poisson arrivals): 1.8 % at
+`N` = 100 when every answer scores, 37 % when a quarter does. From about `100 / p` players on,
+nearly every tick publishes.
 
 | Players in one quiz | Frame | Frame writes per second (`5 × N`) | Egress per second (`5 × N × bytes`) | Answers per second (`N / 5`) |
 |---|---|---|---|---|
@@ -293,10 +311,21 @@ The tick publishes only after a change. With A11, answers arrive at `N / 5` per 
 | 1,000 | top 50, 4,296 B | 5,000 | 21.5 MB | 200 |
 | 5,000 | top 50, 4,296 B | 25,000 | 107.4 MB | 1,000 |
 
-Redis load per second (computed): `N / 5` scoring scripts and `N / 5` serving scripts for
-`next`, plus 5 tick-script calls per active quiz for every node that holds a socket of the
-quiz (ADR-006, §10); 5,000 players in one quiz on two nodes cost 1,000 + 1,000 + 10 script
-calls per second, and the frames cost one `PUBLISH` per tick per quiz.
+Redis load per second (computed, a subtotal of the main calls):
+
+- `N / 5` scoring scripts and `N / 5` serving scripts for `next`;
+- 5 tick-script calls per active quiz for every node that holds a socket of the quiz (ADR-006,
+  §10); above 200 players each call also runs one `ZRANK` and one `HGET` for each scorer since
+  the last tick, and the frames cost one `PUBLISH` per tick per quiz;
+- one `GET` per `ping` for `pong.seq`: sockets / 25 s, 400 per second for 10,000 sockets
+  (ADR-004);
+- above 200 players, one `read_standings` per node per quiz per second for players whose rank
+  only shifted ([redis spec](docs/spec/redis.md), "Reads at one `seq`").
+
+5,000 players in one quiz on two nodes cost 1,000 + 1,000 + 10 + 2 script calls and 200 `GET`s
+per second, plus up to 2,000 calls inside the tick script. Not counted: snapshots (2 to 4
+script calls each), the presence renew every 3 s per node and quiz, joins and reconnects, and
+clients that send faster than A11 (up to 20 messages per second per socket, A6).
 
 **Measured numbers.**
 
@@ -328,8 +357,9 @@ every quiz runs there.
 3. **Redis AOF against a durable log.** We chose Redis with AOF `everysec` as the only
    database over a durable answer log (PostgreSQL or Kafka), because one script on one clock
    gives the whole consistency contract (§7) in one round trip, and we accept that a crash can
-   lose about 1 s of answers (clients retry them; an announced end survives through `WAITAOF`)
-   and that results expire 24 h after the last write (ADR-005, ADR-008).
+   lose about 1 s of answers: a client retries only answers that have no `answer_result` yet,
+   so acknowledged answers in that second are lost (an announced end survives through
+   `WAITAOF`). We also accept that results expire 24 h after the last write (ADR-005, ADR-008).
 4. **A coalescing tick against a frame per answer.** We chose one frame per quiz per 200 ms
    over a broadcast per answer, because the cost per socket stays at most 5 frames per second
    whatever the answer rate (§9), and we accept up to 200 ms of the 500 ms C5 budget spent
@@ -343,18 +373,29 @@ every quiz runs there.
    nodes over one built for 100,000 now, because the README asks for a working real-time quiz,
    and we accept these changes for 100,000 players:
    - Sockets: at least 10 processes at the 10,000 cap, more if the measured per-node number is
-     lower, and an L4 load balancer instead of one nginx, which would hold 200,000 sockets
+     lower, and a load balancer layer instead of one nginx, which would hold 200,000 sockets
      (client side and upstream side).
-   - Many small quizzes (10,000 quizzes of 10): with sockets spread at random, each of 10
-     nodes serves nearly every quiz, so the ticks alone cost `5 × 10 × 10,000` = 500,000 script
-     calls per second. Routing by quiz ID (the ID in the `/ws` URL and a consistent hash in the
-     load balancer) brings each quiz to one or two nodes: 50,000 to 100,000 calls per second.
-     Past that, a `control` message when `dirty` is first set would replace the polling.
-   - One quiz of 100,000: frames still leave Redis once per tick, but the nodes write
-     `5 × 100,000` = 500,000 frames per second, 2.1 GB/s of egress for the top-50 frame,
-     spread over the nodes. The quiz's 20,000 scoring scripts per second (`N / 5`) all run on
-     one Redis shard, because one quiz stays in one slot. The `rank_update` reads (up to one
-     per player per second) would move to read replicas or to coarser rank bands.
+   - Many small quizzes (10,000 quizzes of 10): with sockets spread at random over 10 nodes, a
+     node holds a socket of a given quiz with probability `1 − 0.9^10` ≈ 0.65, so a quiz is on
+     about 6.5 nodes and the ticks alone cost `5 × 6.5 × 10,000` ≈ 326,000 script calls per
+     second. Routing by quiz ID brings each quiz to one or two nodes: 50,000 to 100,000 calls
+     per second. It needs the quiz ID in the `/ws` URL (today the URL carries only the ticket,
+     and the quiz ID arrives later in `join`) and an L7 balancer that hashes on it, since an L4
+     balancer sees only the TCP connection; a lookup before connecting that returns the node
+     for the quiz also works. Past that, a `control` message when `dirty` is first set would
+     replace the polling.
+   - One quiz of 100,000: the nodes write `5 × 100,000` = 500,000 frames per second, 2.1 GB/s
+     of egress for the top-50 frame, spread over the nodes. One Redis shard runs all of the
+     quiz's scripts, because one quiz stays in one slot: 20,000 scoring and 20,000 serving
+     scripts per second (`N / 5` each), plus the ticks. Each tick also ranks every scorer since
+     the last tick outside the top 50: up to 4,000 scorers, so about 8,000 `ZRANK` and `HGET`
+     calls inside one blocking script, and a `ranks` array of about 135 KB in every `PUBLISH`,
+     5 times a second, to every node. These run in a write script, so read replicas cannot take
+     them; the tick would rank only the top band and leave the rest to the once-per-second
+     reads. Those reads (`read_standings`, one per node per second) could move to read replicas
+     only as read-only scripts (`EVALSHA_RO`; the loader uses `EVALSHA` today), and only if
+     ranks that lag behind the primary under asynchronous replication are acceptable; coarser
+     rank bands are the other option.
 
 **Redis as one process: failure.** Today a Redis outage stops the service: scripts fail with
 `UNAVAILABLE` and `/readyz` returns 503 (§11). The next step is a replica with Sentinel, or a
@@ -362,10 +403,14 @@ managed Redis with automatic failover. Replication is asynchronous, so a failove
 last acknowledged writes like an AOF crash does, and `seq` can go back. A client already
 resyncs on `seq < lastSeq`, but if the counter goes back and then climbs past `lastSeq` before
 the client sees a frame, the numbers alone do not show the reset. So frames would carry a
-`seq` epoch next to `seq`: a random value stored with the counter, which a node renews with
-one script after it sees a failover (a new replication ID). A client that sees a new epoch
-resyncs, whatever the number. The host end would wait for the replica too (`WAITAOF 1 1`), so
-an announced end survives the failover.
+`seq` epoch next to `seq`: a random value stored with the counter, together with the
+replication ID it was made under. A node that sees a new replication ID (`master_replid` in
+`INFO replication`) passes it to one script, which renews the epoch only when the stored ID
+differs, so one failover renews it once however many nodes see it. A client that sees a new
+epoch resyncs, whatever the number. The host end would wait for the replica too
+(`WAITAOF 1 1 <timeout>`, with `appendonly yes` on the replica), so an announced end survives
+a failover when the promoted replica is the one that confirmed it; with one replica that always
+holds, and Redis gives no stronger guarantee.
 
 **Redis as one process: growth.** Past one Redis, a Redis Cluster spreads quizzes over shards.
 The hash tag in every key (`quiz:{<quizId>}:*`) keeps one quiz in one slot, so each script
