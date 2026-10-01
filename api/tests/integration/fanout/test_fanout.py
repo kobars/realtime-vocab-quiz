@@ -1,13 +1,12 @@
-# AI-ASSISTED: the coalescing tick, the relay and the resubscribe on one node, on both stores.
+# AI-ASSISTED: the coalescing tick and the relay on one node, on the memory and the Redis store.
 import asyncio
 import json
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
 from itertools import pairwise
-from typing import Any, Self, cast
+from typing import Any, cast
 
 import pytest
 
@@ -20,7 +19,7 @@ from quiz.app.service import Connection, QuizService
 from quiz.domain.session import Question
 from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
-from quiz.ports.store import FeedStore, Limits, Publish, Ranks, Row, Store
+from quiz.ports.store import FeedStore, Limits, Ranks, Row, Store
 
 QUESTIONS = (Question("q0", 1), Question("q1", 3))
 
@@ -212,47 +211,6 @@ async def test_a_host_mark_is_announced_at_the_deadline(redis_store: RedisStore)
     await asyncio.sleep(1.0)
     await ticker.stop()
     assert [update["type"] for _, update in sink.updates["a"]] == ["quiz_ended"]
-
-
-class Dropped:  # the feed of a subscription whose connection dropped
-    def __aiter__(self) -> Self:
-        return self
-
-    async def __anext__(self) -> str:
-        raise ConnectionError
-
-
-@pytest.mark.parametrize("failure", ["subscribe", "feed", "tick"])
-async def test_after_a_failure_the_loop_subscribes_again_and_sends_each_player_a_snapshot(
-    store: FeedStore, failure: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    quiz_id = await quiz_with(store, "a")
-    subscribe, publish, subscribed = store.subscribe, store.publish_if_dirty, list[str]()
-
-    @asynccontextmanager
-    async def flaky(quiz_id: str) -> AsyncIterator[AsyncIterator[str]]:
-        subscribed.append(quiz_id)
-        if failure == "subscribe" and len(subscribed) == 1:
-            raise ConnectionError
-        async with subscribe(quiz_id) as messages:
-            yield Dropped() if failure == "feed" and len(subscribed) == 1 else messages
-
-    async def fails_first(quiz_id: str, node_id: str) -> Publish:
-        if failure == "tick" and len(subscribed) == 1:
-            raise RuntimeError
-        return await publish(quiz_id, node_id)
-
-    monkeypatch.setattr(store, "subscribe", flaky)
-    monkeypatch.setattr(store, "publish_if_dirty", fails_first)
-    sink = Sink("a")
-    (ticker := ticker_of(store, sink)).open(quiz_id)
-    await asyncio.sleep(0.6)  # the first backoff is at most 250 ms
-    await store.join(quiz_id, "b", "B", "c-b")
-    await asyncio.sleep(0.4)
-    await ticker.stop()
-    assert len(subscribed) == 2
-    assert [update["type"] for _, update in sink.updates["a"]] == ["snapshot"]
-    assert sink.frames[-1]["playerCount"] == 2  # relaying again
 
 
 class Reads:

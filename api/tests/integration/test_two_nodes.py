@@ -25,9 +25,7 @@ from quiz.main import Services, create_app, services_of
 from quiz.ports.questions import BankQuestion
 
 ORIGIN, TICK_S = "http://localhost:8080", 0.2
-QUESTIONS = tuple(
-    BankQuestion(f"q{i}", f"word {i}", ("a", "b", "c", "d"), i % 4) for i in range(10)
-)
+QUESTIONS = tuple(BankQuestion(f"q{i}", "w", ("a", "b", "c", "d"), i % 4) for i in range(10))
 PUSHED = {"leaderboard", "rank_update", "quiz_ended"}  # never the reply to a request
 Got = list[tuple[float, dict[str, Any]]]
 
@@ -148,44 +146,31 @@ async def play(player: Player, gap_s: float) -> list[tuple[float, int]]:
 
 def shown_at(reader: Player, user_id: str, total: int) -> float:
     """When the reader first got a leaderboard that shows the user with at least that total."""
-    return next(
-        t
-        for t, msg in reader.of("leaderboard")
-        if any(e["userId"] == user_id and e["score"] >= total for e in msg["entries"])
-    )
+    shown = ((t, e) for t, f in reader.of("leaderboard") for e in f["entries"])
+    return next(t for t, e in shown if e["userId"] == user_id and e["score"] >= total)
 
 
-async def test_answers_reach_both_nodes_within_a_tick_in_seq_order(
-    redis_url: str, quiz_id: str
-) -> None:
+async def test_clients_converge_after_quiet_period(redis_url: str, quiz_id: str) -> None:
+    """Also: answers reach the other node within a tick, in seq order, at 5 frames/s or fewer."""
     async with cluster(redis_url, quiz_id) as (a, b):
         players = [(await n.player(quiz_id))[0] for n in (a, a, b, b)]
         start = time.monotonic()
-        answers = await asyncio.gather(*(play(p, 0.15) for p in players))
+        answers = await asyncio.gather(*(play(p, 0.15 + 0.01 * n) for n, p in enumerate(players)))
         end = time.monotonic()
-        await asyncio.sleep(2 * TICK_S)
+        await asyncio.sleep(3 * TICK_S)  # quiet: the last change gets its frame
+        final = await a.services.store.snapshot(quiz_id, None)
     for writer, sent in zip(players, answers, strict=True):
         readers = players[2:] if writer in players[:2] else players[:2]  # the other node's
         delays = [shown_at(r, writer.user_id, total) - t for r in readers for t, total in sent]
         assert max(delays) < TICK_S + 0.15
-    seqs = [[f["seq"] for f in p.applied()] for p in players]
-    assert all(s[-1] == seqs[0][-1] for s in seqs)  # every socket ends on the newest frame
-    times = [t for t, msg in players[0].of("leaderboard") if start <= t <= end]
-    assert len(times) >= 6  # ticking all along
-    assert (len(times) - 1) / (times[-1] - times[0]) <= 5.1  # one publish per tick per quiz
-
-
-async def test_clients_converge_after_quiet_period(redis_url: str, quiz_id: str) -> None:
-    async with cluster(redis_url, quiz_id) as (a, b):
-        players = [(await n.player(quiz_id))[0] for n in (a, b, a, b)]
-        await asyncio.gather(*(play(p, 0.01 * n) for n, p in enumerate(players)))
-        await asyncio.sleep(3 * TICK_S)  # quiet: the last change gets its frame
-        final = await a.services.store.snapshot(quiz_id, None)
     expected = [[r.rank, r.user_id, r.score] for r in final.rows]
-    for player in players:
+    for player in players:  # no gap on any socket, each ends on the same standings
         last = player.applied()[-1]
         assert last["seq"] == final.at_seq
         assert [[e["rank"], e["userId"], e["score"]] for e in last["entries"]] == expected
+    times = [t for t, msg in players[0].of("leaderboard") if start <= t <= end]
+    assert len(times) >= 6  # ticking all along
+    assert (len(times) - 1) / (times[-1] - times[0]) <= 5.1  # one publish per tick per quiz
 
 
 async def test_a_dropped_subscription_gets_each_local_socket_a_snapshot(

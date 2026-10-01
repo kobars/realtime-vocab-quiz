@@ -9,6 +9,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from quiz.app.service import QuizService
+from quiz.contracts import messages as m
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
@@ -62,9 +64,9 @@ def last_sent(sockets: Mock) -> dict[str, Any]:
     return cast("dict[str, Any]", json.loads(sockets.send_to.call_args.args[2]))
 
 
-async def run(store: ScriptedStore, sockets: Mock) -> None:
+async def run(store: ScriptedStore, sockets: Mock, service: Mock | None = None) -> None:
     """Run quiz Q's loop on this node until it ends by itself."""
-    ticker = Ticker(cast("FeedStore", store), sockets, "n1")
+    ticker = Ticker(cast("FeedStore", store), sockets, service or Mock(spec=QuizService), "n1")
     ticker.open("Q")
     await asyncio.wait_for(ticker._loops["Q"], 1)  # noqa: SLF001 - the loop under test
 
@@ -96,15 +98,21 @@ async def test_a_quiz_the_store_lost_ends_the_loop_quietly(
     assert logged(caplog, logging.ERROR) == []
 
 
-async def test_another_refusal_stops_the_loop_with_its_traceback(
+async def test_another_refusal_logs_its_traceback_and_the_loop_subscribes_again_with_a_snapshot(
     sockets: Mock, caplog: pytest.LogCaptureFixture
 ) -> None:
-    store = ScriptedStore(DomainError(ErrorCode.UNAVAILABLE, "no reply"))
-    await run(store, sockets)
+    store = ScriptedStore(DomainError(ErrorCode.UNAVAILABLE, "no reply"), Publish("ended", SEQ))
+    service = Mock(spec=QuizService)
+    snapshot = m.Snapshot(
+        atSeq=SEQ, status="open", playerCount=1, onlineCount=1, entries=[], you=None
+    )
+    service.standing.return_value = (snapshot,)
+    await run(store, sockets, service)
     (record,) = [r for r in caplog.records if r.levelno == logging.ERROR]
-    assert record.getMessage() == "fan-out of quiz Q stopped"
+    assert record.getMessage() == "fan-out of quiz Q failed: subscribing again"
     assert record.exc_info is not None
     assert isinstance(record.exc_info[1], DomainError)
+    assert last_sent(sockets)["type"] == "snapshot"  # pub/sub does not replay what was lost
 
 
 async def test_an_end_published_before_the_subscribe_ends_the_loop_without_waiting(
