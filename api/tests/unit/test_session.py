@@ -13,6 +13,7 @@ from quiz.domain.session import (
     QuizState,
     ServeNext,
     Step,
+    Tick,
     new_quiz,
     transition,
 )
@@ -91,6 +92,32 @@ def test_quiz_ended_is_broadcast_once() -> None:
     assert transition(ended.state, End(), DEADLINE + 9) == Step(ended.state, (), None)
     host = transition(SERVED.state, End(), START + 7).state
     assert refused(host, Join("bob"), START + 8) == "QUIZ_ENDED"
+
+
+def test_tick_broadcasts_once_per_change_and_ends_after_the_deadline() -> None:
+    joined = transition(QUIZ, Join("ann"), START)
+    assert joined.state.dirty
+    ticked = transition(joined.state, Tick(), START + 200)
+    assert isinstance(ticked.reply, ev.StandingsBroadcast)
+    assert (ticked.events, ticked.reply.seq, ticked.state.dirty) == ((ticked.reply,), 1, False)
+    assert [row.standing.user_id for row in ticked.reply.entries] == ["ann"]
+    assert transition(ticked.state, Tick(), START + 400) == Step(ticked.state, (), None)
+    ended = transition(ticked.state, Tick(), DEADLINE + 5)
+    assert isinstance(ended.reply, ev.QuizEnded)
+    assert (ended.events, ended.reply.seq, ended.reply.at_ms) == ((ended.reply,), 2, DEADLINE)
+    assert transition(ended.state, Tick(), DEADLINE + 9) == Step(ended.state, (), None)
+
+
+def test_only_a_join_or_points_make_the_standings_dirty() -> None:
+    clean = transition(SERVED.state, Tick(), START + 100).state
+    assert not clean.dirty
+    late = transition(clean, Answer("ann", 0, 2, "s1"), START + 100 + T + 1).state
+    assert not late.dirty  # 0 points: no frame
+    scored = transition(clean, Answer("ann", 0, 2, "s1"), START + 100).state
+    assert scored.dirty
+    frame = transition(scored, Tick(), START + 300).reply
+    assert isinstance(frame, ev.StandingsBroadcast)
+    assert frame.entries[0].standing.total == 150
 
 
 def test_domain_error_codes_are_wire_codes() -> None:

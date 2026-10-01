@@ -46,6 +46,12 @@ class PlayerFinished:
 
 
 @dataclass(frozen=True, slots=True)
+class StandingsBroadcast:  # one leaderboard frame
+    seq: int
+    entries: tuple[RankedStanding, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class QuizEnded:
     seq: int
     at_ms: int
@@ -53,5 +59,11 @@ class QuizEnded:
 
 
 type Event = (
-    ParticipantJoined | QuestionServed | QuestionSkipped | AnswerScored | PlayerFinished | QuizEnded
+    ParticipantJoined
+    | QuestionServed
+    | QuestionSkipped
+    | AnswerScored
+    | PlayerFinished
+    | StandingsBroadcast
+    | QuizEnded
 )
