@@ -20,6 +20,7 @@ FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
 USER 0
 RUN apk upgrade --no-cache
 COPY web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY web/security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=builder /web/dist /usr/share/nginx/html
 USER 101:101
 EXPOSE 8080
