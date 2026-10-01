@@ -11,17 +11,22 @@ from quiz.ports.store import Store
 # A store under test, and how to move its clock on by ms (a real clock just waits).
 type Harness = tuple[Store, Callable[[int], Awaitable[None]]]
 
+# The longest step a test may take: a real clock sleeps through every step.
+MAX_ADVANCE_MS = 1_000
+
 
 def memory_harness() -> Harness:
     now = [1_000_000]
 
     async def advance(ms: int) -> None:
+        assert ms <= MAX_ADVANCE_MS, f"advance({ms}) would sleep {ms / 1000} s on a real clock"
         now[0] += ms
 
     return MemoryStore(lambda: now[0]), advance
 
 
 async def real_advance(ms: int) -> None:
+    assert ms <= MAX_ADVANCE_MS, f"advance({ms}) would sleep {ms / 1000} s"
     await asyncio.sleep(ms / 1000)
 
 

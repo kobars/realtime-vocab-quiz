@@ -22,8 +22,10 @@ async def refused(call: Awaitable[object]) -> ErrorCode:
     return info.value.code
 
 
-async def started(store: Store, quiz_id: str, *users: str, limit_ms: int = LIMIT_MS) -> None:
-    await store.create_quiz(quiz_id, QUESTIONS, window_ms=WINDOW_MS, time_limit_ms=limit_ms)
+async def started(
+    store: Store, quiz_id: str, *users: str, limit_ms: int = LIMIT_MS, window_ms: int = WINDOW_MS
+) -> None:
+    await store.create_quiz(quiz_id, QUESTIONS, window_ms=window_ms, time_limit_ms=limit_ms)
     for user in users:
         await store.join(quiz_id, user, user.upper(), f"c-{user}")
         await store.serve_next(quiz_id, user, 0, f"c-{user}")
@@ -157,10 +159,10 @@ async def test_finished_player_gets_only_the_retry_rows(store: Store, quiz_id: s
 
 
 async def test_refusals_after_the_deadline(store: Store, advance: Advance, quiz_id: str) -> None:
-    await started(store, quiz_id, "a")
+    await started(store, quiz_id, "a", window_ms=300)  # a short window: real clocks wait it out
     first = await store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-a")
     await store.serve_next(quiz_id, "a", 1, "c-a")
-    await advance(WINDOW_MS)
+    await advance(350)
     for user in ("a", "nobody"):  # the deadline check comes before the player check
         conn = f"c-{user}"
         assert await refused(store.join(quiz_id, user, "X", conn)) == ErrorCode.QUIZ_ENDED
