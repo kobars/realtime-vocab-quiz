@@ -29,7 +29,9 @@ async def test_frames_snapshot_and_final_standings_use_the_configured_limits(
     await redis_client.sadd(keys.scored, "c")
 
     assert (await store.publish_if_dirty(quiz_id, "n1")).status == "published"
-    assert 0 < await redis_client.pttl(keys.tick) <= 50  # the configured tick_ms
+    pttl = await redis_client.pttl(keys.tick)
+    # -2: expired; 0: its last millisecond, still there; -1 (no expiry) or > 50: not the tick_ms.
+    assert pttl == -2 or 0 <= pttl <= 50
     frame = json.loads((await pubsub.get_message(timeout=5) or {})["data"])
     assert [e["userId"] for e in frame["frame"]["entries"]] == ["a"]
     assert frame["ranks"] == [["c", 3, 0]]
