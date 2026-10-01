@@ -1,4 +1,4 @@
-# AI-ASSISTED: the store port of docs/spec/redis.md §3; the memory and Redis stores implement it.
+# AI-ASSISTED: the store and feed ports of docs/spec/redis.md §3 and §5; both stores implement them.
 """The quiz store: every write that changes quiz state, behind one interface.
 
 The store reads its own clock and computes points itself: no method takes a time or
@@ -6,7 +6,8 @@ points from the caller. Refusals raise ``DomainError`` and write nothing; a ``QU
 refusal carries ``end_seq``, None while no ``quiz_ended`` was published yet.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -187,3 +188,18 @@ class Store(Protocol):
     async def mark_dirty(self, quiz_id: str) -> None:
         """Make the next tick publish, as after a Redis restart (docs/spec/redis.md §5)."""
         ...
+
+
+class Feed(Protocol):
+    def subscribe(self, quiz_id: str) -> AbstractAsyncContextManager[AsyncIterator[str]]:
+        """The quiz's broadcasts as published, ``{"frame": …, "ranks": [[uid, rank, score], …]}``.
+
+        Subscribed once entered: every later broadcast arrives, in ``seq`` order.
+        """
+        ...
+
+
+class FeedStore(Store, Feed, Protocol):
+    """A store that also delivers its quiz broadcasts: what the fan-out runs on."""
+
+    limits: Limits
