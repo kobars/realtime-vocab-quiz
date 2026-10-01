@@ -35,7 +35,7 @@ test: ## Run unit, property and contract tests (no Redis)
 	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance")
 	$(call step,vitest,$(VITEST))
 test-integration: ## Run the tests that need Redis (REDIS_URL or a container per run)
-	$(call step,pytest integration,$(PYTEST) tests/integration tests/contract -m integration; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ])
+	$(call step,pytest integration,$(PYTEST) tests/integration tests/contract -m integration)
 check: ## Run every check a change must pass
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,pre-commit hooks,uv run --project api --locked pre-commit run --all-files)
@@ -54,8 +54,8 @@ audit-web: ## Audit the production web dependencies (high severity and above)
 audit-secrets: ## Scan the whole git history for secrets with gitleaks 8.25 or later (.gitleaks.toml)
 	$(call step,full history,[ "$$(git rev-parse --is-shallow-repository 2>/dev/null)" = false ] || { echo 'not a full git clone: the secret scan needs the whole history' >&2; false; })
 	$(call step,secret scan,gitleaks git --redact --verbose --no-banner .)
-acceptance: ## Run the acceptance tests
-	@echo "not yet"
+acceptance: ## Run the acceptance tests (ACCEPTANCE_STORE=redis: on a Redis of their own)
+	$(call step,pytest acceptance,$(PYTEST) tests/acceptance)
 load: ## Run the load scenarios with the bot swarm
 	@echo "not yet"
 contracts: ## Regenerate the JSON Schema and TypeScript types

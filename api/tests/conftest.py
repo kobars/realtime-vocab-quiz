@@ -90,6 +90,14 @@ def redis_url() -> Iterator[str]:
         _docker("rm", "-f", container, check=False)
 
 
+@pytest.fixture(autouse=True)
+def acceptance_redis(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Redis acceptance harness flushes REDIS_URL: hand it this session's Redis instead."""
+    redis_mode = os.environ.get("ACCEPTANCE_STORE") == "redis"
+    if redis_mode and request.node.get_closest_marker("acceptance"):
+        monkeypatch.setenv("REDIS_URL", request.getfixturevalue("redis_url"))
+
+
 @pytest.fixture
 def redis_prefix() -> str:
     """A key prefix of this test alone; ``redis_client`` deletes its keys afterwards."""

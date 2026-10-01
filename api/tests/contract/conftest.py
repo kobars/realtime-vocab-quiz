@@ -2,17 +2,33 @@
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import NamedTuple
 
 import pytest
+from redis.asyncio import Redis
 
 from quiz.adapters.memory import MemoryStore
+from quiz.adapters.redis.keys import quiz_keys
+from quiz.domain.session import MAX_WINDOW_MS
 from quiz.ports.store import Store
-
-# A store under test, and how to move its clock on by ms (a real clock just waits).
-type Harness = tuple[Store, Callable[[int], Awaitable[None]]]
 
 # The longest step a test may take: a real clock sleeps through every step.
 MAX_ADVANCE_MS = 1_000
+# Far above the 200 ms tick, so no slow step lets a held token lapse; a busy publish cuts it back.
+HOLD_TICK_MS = 10_000
+
+
+class Harness(NamedTuple):
+    """A store under test and how a test moves its time.
+
+    On a real clock no step races an expiry: the test sets up its state first, then the
+    harness moves the expiry.
+    """
+
+    store: Store
+    advance: Callable[[int], Awaitable[None]]  # the clock on by ms; a real clock just waits
+    pass_deadline: Callable[[str], Awaitable[None]]  # the quiz's window is over from now on
+    hold_tick: Callable[[str], Awaitable[None]]  # the tick token holds until a publish cuts it
 
 
 def memory_harness() -> Harness:
@@ -22,12 +38,31 @@ def memory_harness() -> Harness:
         assert ms <= MAX_ADVANCE_MS, f"advance({ms}) would sleep {ms / 1000} s on a real clock"
         now[0] += ms
 
-    return MemoryStore(lambda: now[0]), advance
+    async def pass_deadline(_: str) -> None:
+        now[0] += MAX_WINDOW_MS  # past the longest window of any quiz started by now
+
+    async def hold_tick(_: str) -> None:
+        """The injected clock stands still between steps: the token already holds."""
+
+    return Harness(MemoryStore(lambda: now[0]), advance, pass_deadline, hold_tick)
 
 
 async def real_advance(ms: int) -> None:
     assert ms <= MAX_ADVANCE_MS, f"advance({ms}) would sleep {ms / 1000} s"
     await asyncio.sleep(ms / 1000)
+
+
+def redis_harness(store: Store, client: Redis, prefix: str) -> Harness:
+    async def pass_deadline(quiz_id: str) -> None:
+        seconds, micros = await client.time()
+        await client.hset(
+            quiz_keys(quiz_id, prefix).meta, "deadlineMs", seconds * 1000 + micros // 1000
+        )
+
+    async def hold_tick(quiz_id: str) -> None:
+        await client.set(quiz_keys(quiz_id, prefix).tick, "held", px=HOLD_TICK_MS)
+
+    return Harness(store, real_advance, pass_deadline, hold_tick)
 
 
 @pytest.fixture(
@@ -40,17 +75,28 @@ def harness(request: pytest.FixtureRequest) -> Harness:
     if request.param == "memory":
         return memory_harness()
     store: Store = request.getfixturevalue("redis_store")
-    return store, real_advance
+    client: Redis = request.getfixturevalue("redis_client")
+    return redis_harness(store, client, request.getfixturevalue("redis_prefix"))
 
 
 @pytest.fixture
 def store(harness: Harness) -> Store:
-    return harness[0]
+    return harness.store
 
 
 @pytest.fixture
 def advance(harness: Harness) -> Callable[[int], Awaitable[None]]:
-    return harness[1]
+    return harness.advance
+
+
+@pytest.fixture
+def pass_deadline(harness: Harness) -> Callable[[str], Awaitable[None]]:
+    return harness.pass_deadline
+
+
+@pytest.fixture
+def hold_tick(harness: Harness) -> Callable[[str], Awaitable[None]]:
+    return harness.hold_tick
 
 
 @pytest.fixture
