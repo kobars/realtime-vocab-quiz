@@ -290,7 +290,7 @@ async def test_tick_token_holds_at_most_200_ms_after_a_clock_step_back(
     busy = await store.publish_if_dirty(quiz_id, "n2")
     assert busy.status == "busy"
     assert 0 < busy.retry_ms <= 200
-    await advance(200)
+    await advance(busy.retry_ms + 1)  # the tick loop's wait: a Redis key lives through PTTL 0
     assert await store.publish_if_dirty(quiz_id, "n2") == Publish("published", 2)
 
 
