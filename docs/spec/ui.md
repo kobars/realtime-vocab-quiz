@@ -22,7 +22,7 @@ Switching the look later means replacing the token values in one file (§7.3); n
 | Route | Screen |
 |---|---|
 | `/` | Landing and join (§3.1) |
-| `/quiz/:quizId` | Everything after the join: intro, question, feedback, finished and results, chosen by the client state (§4) |
+| `/quiz/:quizId` | Everything after the join: intro, question, feedback, finished and results, chosen by the client state (§4). Without a join to this quiz (a direct load, a refresh, another ID) it redirects to `/?quiz=:quizId` |
 | `/q/:quizId` | Short share link; redirects to `/?quiz=:quizId`, the join screen with the quiz ID filled in |
 | any other path | "Page not found" with a link back to `/` |
 
