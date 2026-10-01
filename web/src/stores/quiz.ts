@@ -37,6 +37,8 @@ const REJOIN_ON: readonly ErrorCode[] = ['QUESTION_NOT_OPEN', 'INVALID_STATE', '
 export type QuizInfo = Joined & { endsAt: number }
 /** `deadlineAt` = arrival on the `now` clock + `remainingMs` (the server's serve time + `timeLimitMs`). */
 export type CurrentQuestion = Question & { deadlineAt: number }
+/** A `leaderboard_page`: `rows` from rank `offset + 1`, read from the standings at `atSeq`; `final` once they are the final standings. */
+export interface StandingsPage { offset: number; atSeq: number; final: boolean; rows: Entry[] }
 
 const initial = () => ({
   connection: 'idle' as Connection,
@@ -54,11 +56,10 @@ const initial = () => ({
   onlineCount: 0,
   myRank: null as number | null,
   myScore: 0,
-  /** Rows of "Show all players", by rank; `pageFinal` once they are the final standings. */
-  allPlayers: [] as Entry[],
-  /** The `atSeq` of the last `leaderboard_page`: the standings that page was read from. */
-  pageAtSeq: null as number | null,
-  pageFinal: false,
+  /** Counts the standings applied as a full replacement (`snapshot`, `rebase: true`), which swap in one step (UI spec §5.1). */
+  replacements: 0,
+  /** The last page of "Show all players". */
+  page: null as StandingsPage | null,
   finished: false,
   ended: false,
   lastError: null as Omit<ProtocolError, 'v' | 'type'> | null,
@@ -133,14 +134,14 @@ export const useQuizStore = defineStore('quiz', () => {
         if (!s.ended) s.phase = 'finished'
         return
       case 'leaderboard':
-        return standings(message.seq, message.entries, message.playerCount, message.onlineCount)
+        return standings(message.seq, message.entries, message.playerCount, message.onlineCount, undefined, message.rebase)
       case 'rank_update':
         Object.assign(s, { myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
         return
       case 'snapshot':
         // A snapshot read before the end never undoes it (protocol §3).
         if (s.ended && message.status === 'open') return
-        standings(message.atSeq, message.entries, message.playerCount, message.onlineCount, message.you)
+        standings(message.atSeq, message.entries, message.playerCount, message.onlineCount, message.you, true)
         if (message.status === 'ended') end()
         if (s.connection === 'resyncing') s.connection = 'joined'
         return
@@ -148,8 +149,7 @@ export const useQuizStore = defineStore('quiz', () => {
         standings(message.seq, message.entries, message.playerCount, s.onlineCount, message.you)
         return end()
       case 'leaderboard_page':
-        s.allPlayers = [...s.allPlayers.slice(0, message.offset), ...message.entries]
-        Object.assign(s, { pageAtSeq: message.atSeq, pageFinal: message.final })
+        s.page = { offset: message.offset, atSeq: message.atSeq, final: message.final, rows: message.entries }
         s.playerCount = message.playerCount
         return
       case 'error':
@@ -186,8 +186,9 @@ export const useQuizStore = defineStore('quiz', () => {
     else if (REJOIN_ON.includes(code) && !s.ended) client.value?.rejoin()
   }
 
-  function standings(seq: number, rows: Entry[], players: number, online: number, you?: You | null): void {
+  function standings(seq: number, rows: Entry[], players: number, online: number, you?: You | null, replace = false): void {
     Object.assign(s, { seq, entries: rows, playerCount: players, onlineCount: online })
+    if (replace) s.replacements += 1
     const mine = you ?? rows.find((row) => row.userId === s.quiz?.userId)
     if (mine) Object.assign(s, { myRank: mine.rank, myScore: mine.score })
   }
@@ -199,5 +200,5 @@ export const useQuizStore = defineStore('quiz', () => {
     if (s.connection === 'resyncing') s.connection = 'joined'
   }
 
-  return { ...toRefs(s), nextIndex, msLeft, quizMsLeft, join, answer, next, loadPage }
+  return { ...toRefs(s), nextIndex, msLeft, quizMsLeft, join, answer, next, loadPage, now: (): number => deps.now() }
 })

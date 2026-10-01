@@ -35,6 +35,7 @@ const pinned = computed(() => store.myRank !== null && !store.entries.some((row)
     <LeaderboardRows
       :entries="store.entries"
       :my-user-id="me"
+      :replacements="store.replacements"
     />
     <p
       v-if="pinned"

@@ -42,13 +42,22 @@ const track = <W extends VueWrapper>(wrapper: W): W => (wrappers.push(wrapper), 
 const render = (component: typeof LeaderboardPanel) => track(mount(component, options))
 const rows = (entries: Entry[]) => track(mount(LeaderboardRows, { ...options, props: { entries } }))
 const ranks = (w: VueWrapper) => w.findAll('li').map((li) => li.find('span').text())
+const pageRanks = (w: VueWrapper) => w.findAll('section section li:not([class*="-leave-"])').map((li) => li.find('span').text())
 const sent = () => port.getLeaderboard.mock.calls
+const button = (w: VueWrapper, text: string) => w.findAll('button').find((b) => b.text() === text)
+async function openAll() {
+  await joinedStore()
+  const w = render(LeaderboardPanel)
+  await w.find('button').trigger('click')
+  return w
+}
 
 beforeEach(() => {
-  vi.useFakeTimers()
+  // performance.now() is the store's monotonic clock; moving the wall clock never changes it.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
   setActivePinia(createPinia())
   port = { start: vi.fn(), next: vi.fn(), answer: vi.fn(() => 's-1'), rejoin: vi.fn(), getLeaderboard: vi.fn(), stop: vi.fn() }
-  configureQuizStore({ now: () => 0, createClient: (onEvent) => ((emit = onEvent), port as unknown as QuizClientPort) })
+  configureQuizStore({ now: () => performance.now(), createClient: (onEvent) => ((emit = onEvent), port as unknown as QuizClientPort) })
 })
 afterEach(() => {
   wrappers.splice(0).forEach((w) => w.unmount())
@@ -119,8 +128,6 @@ it('pages through get_leaderboard, shows the page atSeq and reloads it at most o
   expect([w.find('[data-test="page-seq"]').text(), w.find('[data-user="p101"]').text()]).toEqual(['As of update 10', expect.stringContaining('9999')])
   await vi.advanceTimersByTimeAsync(5_000)
   expect(sent()).toHaveLength(3)
-  await w.find('section section').trigger('keydown', { key: 'Escape' })
-  expect(w.find('button').text()).toBe('Show all players')
 })
 
 it('a final page is never reloaded', async () => {
@@ -130,4 +137,107 @@ it('a final page is never reloaded', async () => {
   await receive(page(9, 0, top(100), true), board(10, top(50)))
   await vi.advanceTimersByTimeAsync(3_000)
   expect([sent(), w.find('[data-test="page-seq"]').text()]).toEqual([[[0, 100]], 'Final standings'])
+})
+
+it('opening the panel moves the focus into it, so Escape closes it and focuses the button again', async () => {
+  await joinedStore()
+  const w = render(LeaderboardPanel)
+  const toggle = w.find('button').element as HTMLElement
+  toggle.focus()
+  await w.find('button').trigger('click')
+  await nextTick()
+  expect(w.find('section section').element.contains(document.activeElement)).toBe(true)
+  document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  await nextTick()
+  await nextTick()
+  expect([w.find('button').text(), document.activeElement?.textContent?.trim()]).toEqual(['Show all players', 'Show all players'])
+})
+
+it('Previous or Next cancels a pending reload, and the final page it loads is not read again', async () => {
+  const w = await openAll()
+  await receive(page(7, 0, top(100)))
+  await vi.advanceTimersByTimeAsync(100)
+  await receive(board(8, top(50)))
+  await vi.advanceTimersByTimeAsync(800)
+  await button(w, 'Next')?.trigger('click')
+  await receive(page(9, 100, top(100, 101), true))
+  await vi.advanceTimersByTimeAsync(3_000)
+  expect(sent()).toEqual([[0, 100], [100, 100]])
+})
+
+it('a page shows the ranks from its offset, even when an earlier page was short', async () => {
+  const w = await openAll()
+  await receive(page(7, 0, top(90)))
+  await button(w, 'Next')?.trigger('click')
+  await receive(page(7, 100, top(10, 101)))
+  expect(pageRanks(w).slice(0, 2)).toEqual(['#101', '#102'])
+  await button(w, 'Previous')?.trigger('click')
+  expect(pageRanks(w)).toHaveLength(0)
+  await receive(page(7, 0, top(90)))
+  expect([pageRanks(w).length, pageRanks(w).at(-1)]).toEqual([90, '#90'])
+})
+
+it('a store restart (a snapshot with a lower seq) makes the open page stale', async () => {
+  const w = await openAll()
+  await receive(board(5_000, top(50)), page(5_000, 0, top(100)))
+  await receive({ type: 'snapshot', atSeq: 3, status: 'open', playerCount: 300, onlineCount: 290, entries: top(50), you: null })
+  await receive(board(4, top(50)), board(5, top(50)))
+  await vi.advanceTimersByTimeAsync(1_000)
+  expect([sent(), w.find('[data-test="page-seq"]').text()]).toEqual([[[0, 100], [0, 100]], 'As of update 5000'])
+})
+
+it('a page request with no reply, or a refused one, is sent again at most once per second', async () => {
+  const w = await openAll()
+  await vi.advanceTimersByTimeAsync(999)
+  expect(sent()).toHaveLength(1)
+  await vi.advanceTimersByTimeAsync(1)
+  expect(sent()).toHaveLength(2)
+  await receive({ type: 'error', code: 'RATE_LIMITED', message: '', requestType: 'get_leaderboard' })
+  await receive(board(4, top(50)), board(5, top(50)))
+  await vi.advanceTimersByTimeAsync(1_000)
+  expect(sent()).toEqual([[0, 100], [0, 100], [0, 100]])
+  await receive(page(5, 0, top(100)))
+  await vi.advanceTimersByTimeAsync(5_000)
+  expect([sent().length, pageRanks(w).length]).toEqual([3, 100])
+})
+
+it('the reload throttle runs on the monotonic clock, so moving the wall clock back does not delay it', async () => {
+  await openAll()
+  await receive(page(3, 0, top(100)))
+  vi.setSystemTime(Date.now() - 3_600_000)
+  await receive(board(4, top(50)))
+  await vi.advanceTimersByTimeAsync(1_000)
+  expect(sent()).toEqual([[0, 100], [0, 100]])
+})
+
+it('a snapshot or a rebase frame swaps the rows in one step; an ordinary frame moves them', async () => {
+  await joinedStore()
+  const w = render(LeaderboardPanel)
+  const flip = () => w.find('ol').attributes('data-flip')
+  const swapped = [row(1, 140, 'p3'), me(2, 0), row(3, 0, 'p1')]
+  await receive({ type: 'snapshot', atSeq: 4, status: 'open', playerCount: 3, onlineCount: 2, entries: swapped, you: { rank: 2, score: 0 } })
+  expect(flip()).toBe('false')
+  await receive(board(5, [row(1, 140), me(2, 0), row(3, 0)]))
+  expect(flip()).toBe('true')
+  await receive({ ...board(6, swapped), rebase: true })
+  expect(flip()).toBe('false')
+})
+
+it('my row gets a 1 s tint when it moves up, and none when it moves down', async () => {
+  const w = track(mount(LeaderboardRows, { ...options, props: { entries: [row(1, 140), me(2, 0)], myUserId: 'u1' } }))
+  const mine = () => w.find('[aria-current="true"]').classes()
+  await w.setProps({ entries: [me(1, 150), row(2, 140)] })
+  expect(mine()).toContain('lb-rise')
+  await vi.advanceTimersByTimeAsync(1_000)
+  expect(mine()).not.toContain('lb-rise')
+  await w.setProps({ entries: [row(1, 160), me(2, 150)] })
+  expect(mine()).not.toContain('lb-rise')
+})
+
+it('a leaving row fades where it was, not at the top of the list', async () => {
+  const w = rows(top(3))
+  const leaving = w.find('[data-user="p2"]').element as HTMLElement
+  vi.spyOn(leaving, 'offsetTop', 'get').mockReturnValue(40)
+  await w.setProps({ entries: [row(1, 1_490), row(2, 1_470, 'p3')] })
+  expect([leaving.classList.contains('lb-leave-active'), leaving.style.top]).toEqual([true, '40px'])
 })
