@@ -478,3 +478,20 @@ async def test_a_socket_closed_during_its_committed_join_still_leaves_and_replac
     registry.drop(conn)  # as the endpoint does once serve returns
     await asyncio.sleep(0.05)
     assert (code, other.close_code, await online(store)) == (1013, 4001, 0)
+
+
+class Stalled(Talking):  # a transport that is not writable: the close frame never goes out
+    async def close(self, code: int) -> None:  # noqa: ARG002
+        await asyncio.Event().wait()
+
+
+@pytest.mark.parametrize("drained", [True, False])
+async def test_a_close_that_stalls_still_ends_the_handler_within_flush_s(*, drained: bool) -> None:
+    sock = Stalled()
+    sender = sender_of(sock, 0.1)
+    if not drained:
+        sender.send(page())  # the client reads nothing: the drain runs out first
+    sender.close(1013)
+    deps = Deps(cast("QuizService", Service()), Registry(cast("Store", None), 10_000), 16 * KIB)
+    handler = serve(cast("WebSocket", sock), Connection("c0", "u0"), limiter(), sender, deps)
+    assert await asyncio.wait_for(handler, 1) == 1013

@@ -6,7 +6,8 @@ The buffer counts the bytes not yet written, the frame in flight included. Above
 a ``leaderboard`` takes the place of every ``leaderboard`` queued after the last other message,
 and goes out with ``rebase: true``; every other message is a barrier and is never dropped.
 Above the hard limit the queue makes way for ``error UNAVAILABLE`` and close 1013. A socket
-that does not take its queue within ``flush_s`` of a close is closed anyway."""
+that does not take its queue and the close frame within ``flush_s`` of a close is given up, so
+its handler returns and the server drops the transport."""
 
 import asyncio
 from collections import deque
@@ -94,8 +95,11 @@ class Sender:
             return
         finally:
             self._deadline = None  # a finished timeout cannot be rescheduled by a later close()
-        with suppress(Exception):  # it may have dropped meanwhile
-            await self._ws.close(self.close_code or 1000)
+        # The close frame also waits for a writable transport, so the same deadline bounds it:
+        # once that has passed, a close that cannot finish at once is given up.
+        with suppress(Exception):  # TimeoutError, or the socket dropped meanwhile
+            async with asyncio.timeout_at(self._close_by):
+                await self._ws.close(self.close_code or 1000)
 
     async def _write(self) -> None:
         while True:
