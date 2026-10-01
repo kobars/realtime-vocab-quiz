@@ -3,11 +3,13 @@
 """Fail when tracked files, commit messages or PR text contain internal content.
 
     check_internal.py [PATH ...]       scan the given files, or every tracked file
-    check_internal.py --commits RANGE  scan the commit messages in a git range
+    check_internal.py --commits RANGE  scan the commit messages and emails in a git range
     check_internal.py --stdin          scan text read from standard input
 
 Some patterns use a one-letter character class (``[a]``) so that this file
-passes its own scan. Exit status: 0 clean, 1 findings, 2 git error.
+passes its own scan. A symlink is scanned as the target path git stores, not
+followed. File names are reported relative to the repository root. Exit status:
+0 clean, 1 findings, 2 usage or git error.
 """
 
 import argparse
@@ -68,16 +70,39 @@ def _git(*args: str) -> str:
     ).stdout
 
 
+def _repo_root() -> Path:
+    return Path(_git("rev-parse", "--show-toplevel").strip())
+
+
 def _tracked_files() -> list[tuple[str, Path]]:
-    root = Path(_git("rev-parse", "--show-toplevel").strip())
+    root = _repo_root()
     names = _git("-C", str(root), "ls-files", "-z").split("\0")
     return [(name, root / name) for name in names if name]
+
+
+def _given_files(paths: Sequence[Path]) -> list[tuple[str, Path]]:
+    """Name each path relative to the repository root, so its parent folders are not scanned."""
+    try:
+        root = _repo_root().resolve()
+    except subprocess.CalledProcessError:
+        root = Path.cwd().resolve()
+    files: list[tuple[str, Path]] = []
+    for path in paths:
+        # Resolve the parent only: the path itself may be a symlink, which is never followed.
+        real = path.absolute().parent.resolve() / path.name
+        name = real.relative_to(root).as_posix() if real.is_relative_to(root) else str(path)
+        files.append((name, path))
+    return files
 
 
 def _scan_files(files: Sequence[tuple[str, Path]]) -> Iterator[str]:
     for name, path in files:
         for finding in scan_text(name):
             yield f"{name}: file name: {finding.rule}: {finding.match}"
+        if path.is_symlink():
+            for finding in scan_text(str(path.readlink())):
+                yield f"{name}: symlink target: {finding.rule}: {finding.match}"
+            continue
         if not path.is_file():
             continue
         data = path.read_bytes()
@@ -88,9 +113,14 @@ def _scan_files(files: Sequence[tuple[str, Path]]) -> Iterator[str]:
 
 
 def _scan_commits(revision_range: str) -> Iterator[str]:
-    log = _git("log", "--format=%h%x1f%B%x1e", revision_range)
+    log = _git("log", "--format=%h%x1f%ae%x1f%ce%x1f%B%x1e", revision_range)
     for record in log.split("\x1e"):
-        sha, _, message = record.strip().partition("\x1f")
+        if not record.strip():
+            continue
+        sha, author, committer, message = record.strip().split("\x1f", 3)
+        for role, email in (("author", author), ("committer", committer)):
+            for finding in scan_text(email):
+                yield f"commit {sha}: {role} email: {finding.rule}: {finding.match}"
         for finding in scan_text(message):
             yield f"commit {sha}:{finding.line}: {finding.rule}: {finding.match}"
 
@@ -102,15 +132,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode.add_argument("--stdin", action="store_true", help="scan standard input")
     parser.add_argument("paths", nargs="*", type=Path, help="files to scan")
     args = parser.parse_args(argv)
+    if args.commits is not None and not args.commits.strip():
+        print("check_internal: --commits needs a revision range; it is empty", file=sys.stderr)
+        return 2
 
     try:
         if args.stdin:
             text = sys.stdin.read()
             problems = [f"stdin:{f.line}: {f.rule}: {f.match}" for f in scan_text(text)]
-        elif args.commits:
+        elif args.commits is not None:
             problems = list(_scan_commits(args.commits))
         elif args.paths:
-            problems = list(_scan_files([(str(path), path) for path in args.paths]))
+            problems = list(_scan_files(_given_files(args.paths)))
         else:
             problems = list(_scan_files(_tracked_files()))
     except subprocess.CalledProcessError as error:
