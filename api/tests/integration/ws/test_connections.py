@@ -282,7 +282,7 @@ def test_the_server_pings_and_drops_a_socket_that_never_pongs() -> None:
             assert b"\x89" in received  # a ping frame came
             time.sleep(0.6)  # three more heartbeats: the socket that answers pings stays open
             alive.send(PING)
-            assert json.loads(alive.recv())["type"] == "pong"
+            assert json.loads(alive.recv(timeout=2))["type"] == "pong"
 
 
 class BrokenSocket(Socket):  # the peer is gone: every write fails

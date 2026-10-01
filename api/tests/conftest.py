@@ -1,18 +1,22 @@
-# AI-ASSISTED: shared pytest setup: Hypothesis profiles, folder markers and the one Redis fixture.
+# AI-ASSISTED: shared pytest setup: Hypothesis profiles, folder markers, the one Redis fixture and
+# a deadline on the in-process WebSocket client's receive.
 import os
 import shutil
 import subprocess
 import time
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from urllib.parse import urlparse
 
+import anyio
 import pytest
 from hypothesis import settings
 from redis import Redis as SyncRedis
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
+from starlette.testclient import WebSocketTestSession
+from starlette.types import Message
 
 from quiz.adapters.redis import RedisStore
 
@@ -31,6 +35,32 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             folder = item.path.relative_to(_TESTS).parts[0]
             if folder in _FOLDER_MARKERS:
                 item.add_marker(folder)
+
+
+WS_RECEIVE_DEADLINE_S = 10.0  # well inside the per-test timeout
+
+
+def receive_within(deadline_s: float) -> Callable[[WebSocketTestSession], Message]:
+    def receive(ws: WebSocketTestSession) -> Message:
+        async def next_message() -> Message:
+            with anyio.fail_after(deadline_s):
+                return await ws._send_rx.receive()  # noqa: SLF001 - the stream receive() reads
+
+        return ws.portal.call(next_message)
+
+    return receive
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ws_receive() -> Iterator[Callable[[float], Callable[[WebSocketTestSession], Message]]]:
+    """Give TestClient's WebSocket receive a deadline; yield the factory for a shorter one.
+
+    Starlette's receive waits forever, so a server that never answers holds the test until the
+    per-test timeout; with the deadline the receive itself raises TimeoutError much sooner.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(WebSocketTestSession, "receive", receive_within(WS_RECEIVE_DEADLINE_S))
+        yield receive_within
 
 
 DEV_REDIS_PORT = 6381  # `make up`; tests never touch it
