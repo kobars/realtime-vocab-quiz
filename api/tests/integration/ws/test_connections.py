@@ -28,7 +28,8 @@ from quiz.contracts import messages as m
 from quiz.contracts.codec import encode
 from quiz.domain.session import Question
 from quiz.main import create_app, services_of
-from quiz.ports.store import Store
+from quiz.ports.questions import BankQuestion
+from quiz.ports.store import Joined, Store
 
 ORIGIN, PING = "http://localhost:8080", '{"v":1,"type":"ping"}'
 ROWS = [
@@ -344,3 +345,58 @@ async def test_a_closing_socket_hands_no_more_frames_to_the_use_cases() -> None:
     limiter = RateLimiter(20, 40, lambda: 0)
     code = await serve(cast("WebSocket", sock), Connection("c0", "u0"), limiter, sender, deps)
     assert (code, service.handled) == (4001, [])
+
+
+class Bank:  # the one question of every quiz in these tests
+    async def questions(self, quiz_id: str) -> tuple[BankQuestion, ...]:  # noqa: ARG002
+        return (BankQuestion("q0", "word?", ("a", "b", "c", "d"), 1),)
+
+    async def title(self, quiz_id: str) -> str:
+        return quiz_id
+
+
+class Client(Socket):  # sends ``texts``, then stays open
+    def __init__(self, *texts: str) -> None:
+        super().__init__()
+        self.inbound: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        for text in texts:
+            self.inbound.put_nowait({"type": "websocket.receive", "text": text})
+
+    async def receive(self) -> dict[str, Any]:
+        return await self.inbound.get()
+
+
+async def test_a_replaced_socket_whose_join_reply_comes_last_is_closed_with_4001() -> None:
+    registry, store, _ = await grace_registry()
+    join, newer_joined = store.join, asyncio.Event()
+
+    async def older_reply_last(quiz_id: str, user_id: str, name: str, conn_id: str) -> Joined:
+        joined = await join(quiz_id, user_id, name, conn_id)
+        if conn_id == "c-old":  # the store took this join first; its reply reaches the node last
+            await newer_joined.wait()
+        else:
+            newer_joined.set()
+        return joined
+
+    store.join = older_reply_last  # type: ignore[assignment,method-assign]
+    deps = Deps(QuizService(store, Bank(), lambda: 0), registry, 16 * KIB)
+    old, new = Client(json.dumps(JOIN)), Client(json.dumps(JOIN))
+    conns = {old: Connection("c-old", "u0"), new: Connection("c-new", "u0")}
+    senders = {old: sender_of(old), new: sender_of(new)}
+
+    def serving(sock: Client) -> asyncio.Task[int]:
+        ws, limiter = cast("WebSocket", sock), RateLimiter(20, 40, lambda: 0)
+        return asyncio.create_task(serve(ws, conns[sock], limiter, senders[sock], deps))
+
+    older = serving(old)
+    await asyncio.sleep(0.01)  # the older join reaches the store first
+    newer = serving(new)
+    try:
+        await asyncio.wait({older}, timeout=1)
+        assert ([f.get("code") for f in old.frames], old.closed) == (["SESSION_REPLACED"], 4001)
+        assert (older.result(), [f["type"] for f in new.frames]) == (4001, ["joined"])
+        registry.drop(conns[old])  # as the endpoint does once serve returns
+        assert registry.senders("VOCAB-42") == [senders[new]]
+    finally:
+        older.cancel()
+        newer.cancel()
