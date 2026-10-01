@@ -12,6 +12,7 @@ from quiz.app.service import Connection, QuizService
 from quiz.contracts import messages as m
 from quiz.domain import errors as domain
 from quiz.domain.session import Question
+from quiz.obs import metrics
 from quiz.ports.questions import BankQuestion
 from quiz.ports.store import End, Limits, Page, Ranks, Snapshot
 
@@ -299,3 +300,16 @@ async def test_first_writes_after_the_deadline_announce_the_end(
     late = m.Join(quizId=QUIZ, displayName="B")
     [snapshot, error] = await send(service, Connection("c-b", "b"), late)
     assert (snapshot.status, error.code, store.ends) == ("ended", E.QUIZ_ENDED, 3)
+
+
+async def test_clock_step_back_counts_once_and_never_on_a_replay(
+    service: QuizService, store: SpyStore
+) -> None:
+    before = metrics.REDIS_CLOCK_STEP._value.get()  # noqa: SLF001 - the counter's raw value
+    conn = await joined(service)
+    await send(service, conn, m.Next(questionIndex=0))
+    store.now[0] -= 5
+    [result] = await send(service, conn, answer(0))
+    assert result.pointsAwarded == 150  # elapsed is clamped to 0
+    assert await send(service, conn, answer(0)) == [result]
+    assert metrics.REDIS_CLOCK_STEP._value.get() == before + 1  # noqa: SLF001
