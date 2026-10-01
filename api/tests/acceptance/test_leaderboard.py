@@ -12,9 +12,7 @@ def assert_ranked(entries: list[Msg], player_count: int) -> None:
     assert [e["score"] for e in entries] == sorted((e["score"] for e in entries), reverse=True)
 
 
-async def test_ac5_standings_order_by_score_then_reach_time_then_user_id(
-    quiz_server: QuizServer,
-) -> None:
+async def test_ac5_order_score_then_reach_time_then_user(quiz_server: QuizServer) -> None:
     quiz_server.require_manual_clock()
     await quiz_server.create_quiz()
     key = await quiz_server.answer_key()
@@ -31,9 +29,7 @@ async def test_ac5_standings_order_by_score_then_reach_time_then_user_id(
     second = await bob.answer(0, key)  # elapsed 1000 ms, the same score, reached later
     await tied[0].request("next", questionIndex=0)
     wrong = await tied[0].answer(0, (key + 1) % 4)  # 0 points keep the join time as reach time
-
     snapshot = await zed.request("resync", lastSeq=0)
-
     assert first["score"] == second["score"] == 147
     assert wrong["pointsAwarded"] == 0
     entries = snapshot["entries"]
@@ -44,15 +40,11 @@ async def test_ac5_standings_order_by_score_then_reach_time_then_user_id(
     assert [e["userId"] for e in entries if e["userId"] in expected] == expected
 
 
-async def test_ac5_pages_stitch_into_the_full_standings_above_200_players(
-    quiz_server: QuizServer,
-) -> None:
+async def test_ac5_pages_stitch_above_200_players(quiz_server: QuizServer) -> None:
     await quiz_server.create_quiz()
     players = await quiz_server.join_many(205)
-
     first = await players[0].request("get_leaderboard", offset=0, limit=200)
     rest = await players[0].request("get_leaderboard", offset=200, limit=200)
-
     assert (first["type"], first["offset"], rest["offset"]) == ("leaderboard_page", 0, 200)
     assert first["playerCount"] == rest["playerCount"] == 205
     entries = first["entries"] + rest["entries"]
@@ -60,16 +52,13 @@ async def test_ac5_pages_stitch_into_the_full_standings_above_200_players(
     assert {e["userId"] for e in entries} == {p.user_id for p in players}
 
 
-async def test_ac6_leaderboard_broadcast_follows_an_accepted_answer_within_500_ms(
-    quiz_server: QuizServer,
-) -> None:
+async def test_ac6_broadcast_within_500_ms_of_an_answer(quiz_server: QuizServer) -> None:
     await quiz_server.create_quiz()
     key = await quiz_server.answer_key()
     alice = await quiz_server.join("alice")
     bob = await quiz_server.join("bob")
     await bob.request("next", questionIndex=0)
     loop = asyncio.get_running_loop()
-
     sent = loop.time()
     result = await bob.answer(0, key)
 

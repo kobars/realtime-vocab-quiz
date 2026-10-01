@@ -1,21 +1,18 @@
 # AI-ASSISTED: black-box acceptance harness: the app on a free port, a clock, a WebSocket client.
 """Harness for the acceptance tests: they drive the server over HTTP and the WebSocket only.
 
-The app comes from ``quiz.main:create_app``; while that factory is missing, every test skips.
-The harness relies on this interface (docs/spec/protocol.md for the messages):
+The app comes from ``quiz.main:create_app``; until it exists, every test skips. The interface:
 
-- ``create_app(clock=...)``: ``clock`` is a ``Callable[[], int]`` in ms, used by the memory
-  store for quiz time (serve, answer, deadline, reach time). The 200 ms tick runs on real time.
-  The Redis store reads Redis ``TIME`` and gets no clock. Settings come from the environment:
-  ``STORE``, ``REDIS_URL``, ``PER_IP_CONN_CAP``, ``QUIZ_PORT``, ``ADMIN_MOCK``, ``ADMIN_TOKEN``.
-- ``POST /sessions {displayName}`` returns ``{userId, sessionToken}``; ``POST /tickets`` with
-  ``Authorization: Bearer <sessionToken>`` returns ``{ticket, expiresInMs}``.
-- ``POST /admin/quizzes {quizId, timeLimitMs, windowMs}`` with the ``X-Admin-Token`` header
-  creates the mock question bank's quiz of that ID: 201, or 409 when it already exists.
+- ``create_app(clock=...)``: a ``Callable[[], int]`` (ms) that the memory store uses for quiz
+  time; the 200 ms tick runs on real time. The Redis store reads ``TIME`` and gets no clock.
+  Settings come from the environment variables that the fixture sets.
+- ``POST /sessions {displayName}`` -> ``{userId, sessionToken}``; ``POST /tickets`` with
+  ``Authorization: Bearer <sessionToken>`` -> ``{ticket, expiresInMs}``.
+- ``POST /admin/quizzes {quizId, timeLimitMs, windowMs}`` with ``X-Admin-Token`` creates the
+  mock question bank's quiz of that ID: 201, or 409 when it exists.
 
-``ACCEPTANCE_STORE=redis`` runs the suite on the throwaway Redis at ``REDIS_URL``, which each
-test flushes. Redis reads its own clock, so there the clock waits in real time, quizzes use a
-300 ms time limit, timing checks use bounds, and the exact-time tests skip.
+``ACCEPTANCE_STORE=redis`` runs on the throwaway Redis at ``REDIS_URL`` (flushed per test). Its
+clock is real, so quizzes use a 300 ms limit, checks use bounds and exact-time tests skip.
 """
 
 import asyncio
@@ -24,7 +21,7 @@ import json
 import os
 import uuid
 from collections.abc import AsyncIterator, Callable
-from typing import Any, cast
+from typing import Any
 
 import httpx
 import pytest
@@ -35,6 +32,7 @@ from websockets.typing import Origin, Subprotocol
 
 Msg = dict[str, Any]
 ADMIN_TOKEN = "acceptance-admin-token"  # noqa: S105 - a test value, not a secret
+ADMIN_HEADERS = {"X-Admin-Token": ADMIN_TOKEN}
 ORIGIN = Origin("http://localhost:8080")
 BROADCASTS = frozenset({"leaderboard", "quiz_ended", "rank_update"})
 STORE = os.environ.get("ACCEPTANCE_STORE", "memory")
@@ -67,11 +65,9 @@ class Player:
         await self.send(kind, **fields)
         return await self.reply()
 
-    async def answer(self, index: int, choice: int, submission_id: str | None = None) -> Msg:
-        submission_id = submission_id or str(uuid.uuid4())
-        return await self.request(
-            "answer", questionIndex=index, choiceIndex=choice, submissionId=submission_id
-        )
+    async def answer(self, index: int, choice: int, submission: str | None = None) -> Msg:
+        fields = {"questionIndex": index, "choiceIndex": choice}
+        return await self.request("answer", **fields, submissionId=submission or str(uuid.uuid4()))
 
 
 class QuizServer:
@@ -80,11 +76,8 @@ class QuizServer:
         self.now_ms = 1_800_000_000_000
         self.time_limit_ms = 20_000 if self.manual_clock else 300
         self.margin_ms = 1 if self.manual_clock else 100
-        self.http = httpx.AsyncClient()
+        self.http: httpx.AsyncClient  # set once the server listens
         self.players: list[Player] = []
-
-    def clock(self) -> int:
-        return self.now_ms
 
     def require_manual_clock(self) -> None:
         if not self.manual_clock:
@@ -99,9 +92,7 @@ class QuizServer:
 
     async def create_quiz(self, quiz_id: str = "VOCAB-42", window_ms: int = 600_000) -> None:
         body = {"quizId": quiz_id, "timeLimitMs": self.time_limit_ms, "windowMs": window_ms}
-        resp = await self.http.post(
-            "/admin/quizzes", json=body, headers={"X-Admin-Token": ADMIN_TOKEN}
-        )
+        resp = await self.http.post("/admin/quizzes", json=body, headers=ADMIN_HEADERS)
         assert resp.status_code in {201, 409}, resp.text
 
     async def connect(self, name: str, session: tuple[str, str] | None = None) -> Player:
@@ -113,11 +104,8 @@ class QuizServer:
         ticket = await self.http.post("/tickets", headers={"Authorization": f"Bearer {session[1]}"})
         ticket.raise_for_status()
         ws_url = str(self.http.base_url).replace("http", "ws", 1)
-        ws = await connect(
-            f"{ws_url}/ws?ticket={ticket.json()['ticket']}",
-            origin=ORIGIN,
-            subprotocols=[Subprotocol("quiz.v1")],
-        )
+        url = f"{ws_url}/ws?ticket={ticket.json()['ticket']}"
+        ws = await connect(url, origin=ORIGIN, subprotocols=[Subprotocol("quiz.v1")])
         self.players.append(Player(ws, *session))
         return self.players[-1]
 
@@ -146,39 +134,30 @@ class QuizServer:
         return int(result["correctChoiceIndex"])
 
 
-def _factory() -> Callable[..., Any]:
+@pytest.fixture
+async def quiz_server(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[QuizServer]:
     try:
         module = importlib.import_module("quiz.main")
     except ModuleNotFoundError as exc:
         if exc.name != "quiz.main":
             raise
+        module = None
+    if (create_app := getattr(module, "create_app", None)) is None:
         pytest.skip("quiz.main:create_app does not exist yet")
-    factory = getattr(module, "create_app", None)
-    if factory is None:
-        pytest.skip("quiz.main:create_app does not exist yet")
-    return cast("Callable[..., Any]", factory)
-
-
-@pytest.fixture
-async def quiz_server(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[QuizServer]:
-    create_app = _factory()
     server = QuizServer()
-    env = {"STORE": STORE, "PER_IP_CONN_CAP": "1000", "QUIZ_PORT": "8080"}
-    env |= {"ADMIN_MOCK": "1", "ADMIN_TOKEN": ADMIN_TOKEN}
-    for name, value in env.items():
+    # Explicit settings: a per-IP cap above the 205 sockets that one test opens from 127.0.0.1.
+    env = {"STORE": STORE, "PER_IP_CONN_CAP": "1000", "QUIZ_PORT": "8080", "ADMIN_MOCK": "1"}
+    for name, value in (env | {"ADMIN_TOKEN": ADMIN_TOKEN}).items():
         monkeypatch.setenv(name, value)
     if server.manual_clock:
-        app = create_app(clock=server.clock)
+        app = create_app(clock=lambda: server.now_ms)
     else:
-        redis_url = os.environ.get("REDIS_URL") or pytest.skip(
-            "ACCEPTANCE_STORE=redis needs REDIS_URL"
-        )
-        client = aioredis.from_url(redis_url)
-        await client.flushdb()
-        await client.aclose()
+        url = os.environ.get("REDIS_URL") or pytest.skip("ACCEPTANCE_STORE=redis needs REDIS_URL")
+        async with aioredis.from_url(url) as client:
+            await client.flushdb()
         app = create_app()
     runner = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning", ws="websockets-sansio")
+        uvicorn.Config(app, port=0, log_level="warning", ws="websockets-sansio")
     )
     task = asyncio.create_task(runner.serve())
     while not runner.started:
