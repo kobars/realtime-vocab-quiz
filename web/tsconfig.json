@@ -6,9 +6,11 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "types": ["vite/client"],
+    "paths": { "@/*": ["./src/*"] },
     "strict": true,
     "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
+    // Off: reka-ui, vue-sonner and VueUse types pass `undefined` to optional props.
+    "exactOptionalPropertyTypes": false,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
@@ -18,5 +20,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "vitest.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts", "vitest.config.ts"]
 }

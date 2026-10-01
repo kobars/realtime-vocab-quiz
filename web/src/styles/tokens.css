@@ -1,0 +1,38 @@
+/* AI-ASSISTED: design tokens of direction A "Slate" (docs/spec/ui.md §7.2); the only file that names a color, radius or duration. */
+:root {
+  --background: #F8FAFC;
+  --card: #FFFFFF;
+  --foreground: #0F172A;
+  --muted-foreground: #475569;
+  --border: #E2E8F0;
+  --input: #64748B;
+  --primary: #4338CA;
+  --primary-foreground: #FFFFFF;
+  --accent: #EEF2FF;
+  --ring: #4338CA;
+  --success: #15803D;
+  --success-soft: #F0FDF4;
+  --destructive: #B91C1C;
+  --destructive-soft: #FEF2F2;
+  --warning: #B45309;
+  /* Names the shadcn-vue components read, mapped onto the tokens above. */
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --secondary: var(--accent);
+  --secondary-foreground: var(--foreground);
+  --muted: var(--border);
+  --accent-foreground: var(--foreground);
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --radius: 0.625rem;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.06), 0 4px 12px rgb(15 23 42 / 0.06);
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 320ms;
+  --motion-count: 600ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-fast: 0ms; --motion-base: 0ms; --motion-slow: 0ms; --motion-count: 0ms; }
+}

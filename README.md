@@ -29,13 +29,14 @@ uvx pre-commit install       # run the guard, ruff and ESLint on staged files at
 make check                   # every check a change must pass; stops at the first failing step
 make test                    # the server and client unit tests
 make test-integration        # the tests that need Redis (set REDIS_URL to use your own)
+pnpm -C web dev              # client on :5173; /api and /ws go to 127.0.0.1:8001 or QUIZ_API_URL
 ```
 
 `make check` runs, in order: the internal-content guard
 (`scripts/check_internal.py`), ruff (lint and format), mypy (strict), pytest
 (without the `integration` and `acceptance` markers), the client install from
-the lock file (`pnpm install --frozen-lockfile`), ESLint, vue-tsc and Vitest.
-Every pull request runs the same gate in GitHub Actions
+the lock file (`pnpm install --frozen-lockfile`), ESLint, vue-tsc, Vitest and
+the client build (`pnpm -C web build`). Every pull request runs the same gate in GitHub Actions
 (`.github/workflows/ci.yml`), plus the Redis integration tests and the guard on
 the commit messages and the PR text (run again when the PR text is edited).
 
