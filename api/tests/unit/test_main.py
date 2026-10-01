@@ -32,7 +32,8 @@ def test_redis_store_is_built_without_connecting() -> None:
     services = services_of(create_app(Settings(store="redis", redis_url="redis://unused:1/0")))
     assert isinstance(services.store, RedisStore)
     assert isinstance(services.tickets, RedisTicketStore)
-    assert len(services.startup) == len(services.shutdown) == 1  # load scripts, close client
+    assert len(services.startup) == 1  # load the scripts
+    assert len(services.shutdown) == 2  # close the client; stop the fan-out, which runs first
 
 
 async def test_hooks_run_in_order_and_shutdown_runs_after_a_failed_start() -> None:
@@ -99,7 +100,7 @@ def test_the_store_limits_come_from_the_settings(store: Literal["memory", "redis
         {"store": store, "redis_url": "redis://unused:1/0", "tick_ms": 50}
         | {"top_n": 1, "full_list_max": 2}
     )
-    limits = services_of(create_app(settings)).store.limits  # type: ignore[attr-defined]
+    limits = services_of(create_app(settings)).store.limits
     assert limits == Limits(tick_ms=50, top_n=1, full_list_max=2)
 
 

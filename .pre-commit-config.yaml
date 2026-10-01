@@ -1,5 +1,6 @@
-# AI-ASSISTED: pre-commit hooks on staged files: internal-content guard, ruff and ESLint.
-# Install once with `uvx pre-commit install`; the hooks use the locked tools of api/ and web/.
+# AI-ASSISTED: pre-commit hooks: internal-content guard, ruff, ESLint, typos and Markdown links.
+# make check runs them on every file, so the hooks and CI check the same things.
+# Install once with `uv run --project api pre-commit install`; the hooks use the locked tools.
 repos:
   - repo: local
     hooks:
@@ -7,6 +8,9 @@ repos:
         name: internal content
         entry: uv run --project api --locked python scripts/check_internal.py
         language: system
+        # Symlinks too: the guard scans their target paths. The default `types: [file]` drops them.
+        types: []
+        types_or: [file, symlink]
       - id: ruff-check
         name: ruff lint
         entry: bash -c 'cd api && uv run --locked ruff check --force-exclude "${@/#/../}"' --
@@ -22,3 +26,14 @@ repos:
         entry: bash -c 'cd web && pnpm exec eslint --max-warnings 0 --no-warn-ignored "${@/#web\//}"' --
         language: system
         files: ^web/.*\.(js|ts|vue)$
+      - id: typos
+        name: typos
+        entry: uv run --project api --locked typos --force-exclude
+        language: system
+      - id: markdown-links
+        name: markdown links
+        # A heading change can break links in other files, so every Markdown file is checked.
+        entry: scripts/check_links.sh --offline
+        language: system
+        files: \.md$
+        pass_filenames: false

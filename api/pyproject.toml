@@ -25,10 +25,12 @@ dev = [
     "hypothesis>=6.168.3",
     "import-linter>=2.15",
     "mypy>=2.3.1",
+    "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.9",
+    "typos>=1.50.3",
 ]
 load = [
     "httpx>=0.28.1",
@@ -70,6 +72,11 @@ files = ["src", "tests", "../scripts", "../load"]
 explicit_package_bases = true
 warn_unreachable = true
 
+# pre-commit ships no py.typed; its sources are typed, so read them instead of skipping them.
+[[tool.mypy.overrides]]
+module = ["pre_commit.*"]
+follow_untyped_imports = true
+
 [tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = ["tests", "../scripts/tests", "../load/tests"]
@@ -88,6 +95,18 @@ markers = [
     "acceptance: the locked acceptance tests (set by folder)",
     "slow: tests that take more than a second",
 ]
+
+# make check runs the unit, property and contract tests with --cov; the Redis adapter and the
+# WebSocket gateway are covered mostly by the integration tests, which it does not run.
+[tool.coverage.run]
+branch = true
+source_pkgs = ["quiz"]
+
+[tool.coverage.report]
+# The measured branch coverage of make check's test run, rounded down; raise it as tests grow.
+fail_under = 84
+show_missing = true
+skip_covered = true
 
 # The layer rules. main is the composition root: it may import everything, and nothing imports it.
 [tool.importlinter]

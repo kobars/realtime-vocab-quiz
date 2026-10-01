@@ -8,6 +8,8 @@ export const SUBPROTOCOL = 'quiz.v1'
 export const PING_INTERVAL_MS = 25_000
 export const LIVENESS_TIMEOUT_MS = 50_000
 export const RETRY_AFTER_MS = 1_000
+/** A resync whose `snapshot` has not arrived by then is sent again: the token bucket may have dropped it silently. */
+export const SNAPSHOT_TIMEOUT_MS = 5_000
 /** A failed or slow open, a failed ticket request and a silent link all count as this close code. */
 const DEAD_LINK = 1006
 /** Answer errors that mean "not done": the answer stays unsettled. Every other answer error settles it. */
@@ -22,10 +24,13 @@ export interface QuizSocket {
   close(code?: number): void
 }
 
-/** Server messages in the order to apply them (broadcasts only once SeqTracker releases them), plus status changes. */
+/**
+ * Server messages in the order to apply them (broadcasts only once SeqTracker releases them), plus status changes.
+ * `closed` follows a final close code or `stop`; `failed` means the client gave up after 10 connects without a `joined`.
+ */
 export type ClientEvent =
   | ServerMessage
-  | { type: 'status'; status: 'connecting' | 'open' | 'resyncing' | 'reconnecting' | 'closed'; code: number | null }
+  | { type: 'status'; status: 'connecting' | 'open' | 'resyncing' | 'reconnecting' | 'closed' | 'failed'; code: number | null }
 
 export interface QuizClientOptions {
   api: AuthApi
@@ -53,10 +58,14 @@ export class QuizClient {
   private generation = 0
   private quizId = ''
   private displayName = ''
-  /** The `lastSeq` of the last resync sent, repeated when the server rate-limits it or is unavailable. */
-  private lastResync = 0
+  /** The `lastSeq` of the resync sent on the current socket with no `snapshot` yet, or null. */
+  private outstandingResync: number | null = null
+  /** The one timer of the outstanding resync: its retry after an error, or else its snapshot deadline. */
+  private resyncRetry: Timer | undefined
   /** `UNAVAILABLE` replies to resyncs since the last snapshot: the backoff attempt of the next retry. */
   private resyncFailures = 0
+  /** `UNAVAILABLE` replies to joins since the last `joined`: the backoff attempt of the next retry. */
+  private joinFailures = 0
   /** Answers the server has not settled yet, by `submissionId`, oldest first; kept across reconnects. */
   private readonly unsettled = new Map<string, Answer>()
   /** The `submissionId`s sent on the current socket and not answered yet, oldest first. */
@@ -70,7 +79,7 @@ export class QuizClient {
   private nextRetry: Timer | undefined
   /** True once the current socket got `joined`, and false again after `NOT_JOINED`: answers go out only while true. */
   private joined = false
-  /** True from a `join` sent on the current socket until its `joined` or its error. */
+  /** True from a `join` sent on the current socket until its `joined` or its error, through its retries after `UNAVAILABLE`. */
   private joining = false
   /** `UNAVAILABLE` retries so far, by `submissionId`: the backoff attempt of the next one. */
   private readonly unavailable = new Map<string, number>()
@@ -99,8 +108,7 @@ export class QuizClient {
     this.quizId = quizId
     this.displayName = displayName
     this.stopped = false
-    this.unsettled.clear()
-    this.unavailable.clear()
+    this.dropRequests()
     void this.connect()
   }
 
@@ -119,7 +127,7 @@ export class QuizClient {
   /**
    * Answers question `questionIndex` with one new `submissionId`, which it returns. The client sends that same
    * answer until the server settles it: again after each `joined`, 1 s after `RATE_LIMITED` and after the backoff
-   * after `UNAVAILABLE`.
+   * after `UNAVAILABLE`. `quiz_ended` forgets it.
    */
   answer(questionIndex: number, choiceIndex: number): string {
     const submissionId = crypto.randomUUID()
@@ -184,6 +192,7 @@ export class QuizClient {
         this.backoff.joined(this.o.now())
         this.run(this.tracker.joined())
         this.joining = false
+        this.joinFailures = 0
         if (!this.joined) {
           this.joined = true
           for (const submissionId of this.unsettled.keys()) this.sendAnswer(submissionId)
@@ -210,8 +219,7 @@ export class QuizClient {
         break
       case 'quiz_ended':
         // Ui spec §4.3: the end drops any pending request.
-        this.cancelNextRetry()
-        this.pendingNext = null
+        this.dropRequests()
         return this.run(this.tracker.broadcast(message))
       case 'leaderboard':
         return this.run(this.tracker.broadcast(message))
@@ -219,6 +227,8 @@ export class QuizClient {
         // A snapshot read before the end that arrives after quiz_ended changes nothing, so the UI never sees it.
         const stale = this.tracker.readBeforeEnd(message.atSeq, message.status)
         const step = this.tracker.snapshot(message.atSeq, message.status)
+        this.outstandingResync = null
+        this.cancel(this.resyncRetry)
         this.resyncFailures = 0
         if (!stale) this.emit(message)
         return this.run(step)
@@ -226,11 +236,14 @@ export class QuizClient {
       case 'pong':
         return this.run(this.tracker.pong(message.seq))
       case 'error':
-        if (message.requestType === 'join') this.joining = false
+        if (message.requestType === 'join') this.joinFailed(message.code)
         // This layer alone repairs a lost join, so one `join` goes out for any number of NOT_JOINED replies.
         if (message.code === 'NOT_JOINED') this.joinAgain()
         if (message.requestType === 'resync') this.resyncFailed(message.code)
-        if (message.code === 'RATE_LIMITED' && message.requestType === null) this.resendInFlight()
+        if (message.code === 'RATE_LIMITED' && message.requestType === null) {
+          this.resendInFlight()
+          this.retryResync(RETRY_AFTER_MS)
+        }
         if (message.requestType === 'answer') this.answerFailed(message.code)
         // A bucket RATE_LIMITED comes before parsing, so its requestType is null: it may be the dropped `next`.
         if (message.requestType === 'next' || (message.requestType === null && message.code === 'RATE_LIMITED')) {
@@ -241,14 +254,34 @@ export class QuizClient {
     this.emit(message)
   }
 
-  /** Repeats the last resync: 1 s after `RATE_LIMITED`, after a backoff wait after `UNAVAILABLE` (spec §7). */
+  /**
+   * Repeats the outstanding resync 1 s after `RATE_LIMITED` and after a backoff wait after `UNAVAILABLE` (spec §7);
+   * after any other error its snapshot deadline repeats it.
+   */
   private resyncFailed(code: ErrorCode): void {
-    let wait: number
-    if (code === 'RATE_LIMITED') wait = RETRY_AFTER_MS
-    else if (code === 'UNAVAILABLE') wait = backoffDelay(this.resyncFailures++, this.o.random)
-    else return
-    const lastSeq = this.lastResync
-    this.after(wait, () => this.send({ v: 1, type: 'resync', lastSeq }))
+    if (code === 'RATE_LIMITED') this.retryResync(RETRY_AFTER_MS)
+    else if (code === 'UNAVAILABLE') this.retryResync(backoffDelay(this.resyncFailures++, this.o.random))
+  }
+
+  /** Sends a resync and gives its `snapshot` SNAPSHOT_TIMEOUT_MS before sending it again. */
+  private sendResync(lastSeq: number): void {
+    this.outstandingResync = lastSeq
+    this.send({ v: 1, type: 'resync', lastSeq })
+    this.retryResync(SNAPSHOT_TIMEOUT_MS)
+  }
+
+  /** Sends the outstanding resync, if any, again after `wait` ms instead of at its earlier retry or deadline. */
+  private retryResync(wait: number): void {
+    const lastSeq = this.outstandingResync
+    if (lastSeq === null) return
+    this.cancel(this.resyncRetry)
+    this.resyncRetry = this.after(wait, () => this.sendResync(lastSeq))
+  }
+
+  /** Sends a `join` that got `UNAVAILABLE` again after the backoff (a failed join binds nothing, spec §1). */
+  private joinFailed(code: ErrorCode): void {
+    if (code !== 'UNAVAILABLE') return void (this.joining = false)
+    this.after(backoffDelay(this.joinFailures++, this.o.random), () => this.rejoin())
   }
 
   /**
@@ -261,8 +294,7 @@ export class QuizClient {
     if (resync === null) return
     const send = () => {
       this.emit({ type: 'status', status: 'resyncing', code: null })
-      this.lastResync = resync.lastSeq
-      this.send({ v: 1, type: 'resync', lastSeq: resync.lastSeq })
+      this.sendResync(resync.lastSeq)
     }
     if (resync.delayMs === 0) send()
     else this.after(resync.delayMs, send)
@@ -339,10 +371,17 @@ export class QuizClient {
     if (this.pendingNext !== null) this.send({ v: 1, type: 'next', questionIndex: this.pendingNext.questionIndex })
   }
 
+  /** Forgets the pending `next` and every unsettled answer, so a scheduled answer resend finds nothing to send. */
+  private dropRequests(): void {
+    this.cancelNextRetry()
+    this.pendingNext = null
+    this.unsettled.clear()
+    this.unavailable.clear()
+    this.inFlight = []
+  }
+
   private cancelNextRetry(): void {
-    if (this.nextRetry === undefined) return
-    clearTimeout(this.nextRetry)
-    this.timers.delete(this.nextRetry)
+    this.cancel(this.nextRetry)
     this.nextRetry = undefined
   }
 
@@ -353,8 +392,7 @@ export class QuizClient {
 
   /** Restarts the 50 s liveness timer: no inbound message by then closes the link. */
   private alive(socket: QuizSocket): void {
-    if (this.liveness !== undefined) this.timers.delete(this.liveness)
-    clearTimeout(this.liveness)
+    this.cancel(this.liveness)
     this.liveness = this.after(LIVENESS_TIMEOUT_MS, () => this.kill(socket))
   }
 
@@ -370,13 +408,14 @@ export class QuizClient {
     if (this.stopped) return
     const wait = this.backoff.closed(code, this.o.now())
     this.stopped = wait === null
-    this.emit({ type: 'status', status: wait === null ? 'closed' : 'reconnecting', code })
+    const status = wait !== null ? 'reconnecting' : this.backoff.exhausted ? 'failed' : 'closed'
+    this.emit({ type: 'status', status, code })
     if (wait !== null) this.after(wait, () => void this.connect())
   }
 
   /**
-   * Drops the socket and its timers: the open timeout, a pending gap resync, a resync, answer or `next` retry, ping
-   * and liveness. Unsettled answers stay, for the next `joined`; the pending `next` goes, as `joined` re-drives it.
+   * Drops the socket and its timers: the open timeout, a pending gap resync, a resync, join, answer or `next` retry,
+   * ping and liveness. Unsettled answers stay, for the next `joined`; the pending `next` goes, as `joined` re-drives it.
    */
   private disconnect(): void {
     if (this.socket !== null) this.socket.onopen = this.socket.onmessage = this.socket.onclose = null
@@ -384,12 +423,20 @@ export class QuizClient {
     this.open = false
     this.joined = false
     this.joining = false
+    this.outstandingResync = null
     this.resyncFailures = 0
+    this.joinFailures = 0
     this.inFlight = []
     this.pendingNext = null
     for (const timer of this.timers) clearTimeout(timer)
     this.timers.clear()
     clearInterval(this.ping)
+  }
+
+  private cancel(timer: Timer | undefined): void {
+    if (timer === undefined) return
+    clearTimeout(timer)
+    this.timers.delete(timer)
   }
 
   private after(ms: number, run: () => void): Timer {

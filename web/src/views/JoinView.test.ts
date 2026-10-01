@@ -220,6 +220,7 @@ describe('join', () => {
   it.each([
     ['an error reply to the join', () => emit({ v: 1, type: 'error', code: 'UNAVAILABLE', message: '', requestType: 'join' })],
     ['a final close before joined', () => emit({ type: 'status', status: 'closed', code: 1008 })],
+    ['10 connects without a joined', () => emit({ type: 'status', status: 'failed', code: 1006 })],
   ])('unlocks the form after %s and lets the player retry', async (_, fail) => {
     const { router, id, wrapper, button, submit } = await joining()
     fail()

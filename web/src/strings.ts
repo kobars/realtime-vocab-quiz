@@ -70,6 +70,8 @@ export const strings = {
   blocked: {
     replaced: { title: 'This quiz is open in another tab.', action: 'Use this tab' },
     version: { title: 'A new version is available.', action: 'Reload' },
+    policy: { title: "Can't connect to this quiz.", action: 'Reload' },
+    unreachable: { title: "Still can't connect.", action: 'Try again' },
   },
   leaderboard: {
     title: 'Leaderboard',

@@ -33,7 +33,7 @@ def test_port_reads_many_ranks_at_one_seq() -> None:
     assert not hasattr(Store, "rank_of")
     assert params(Store.ranks_of) == ["self", "quiz_id", "user_ids"]
     assert get_type_hints(Store.ranks_of)["return"] is Ranks
-    assert [f.name for f in fields(Ranks)] == ["at_seq", "player_count", "rows"]
+    assert [f.name for f in fields(Ranks)] == ["at_seq", "status", "player_count", "rows"]
 
 
 def test_errors_marker_cites_the_errors_section() -> None:

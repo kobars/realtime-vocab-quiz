@@ -85,6 +85,15 @@ async def test_new_connection_replaces_and_fences_the_old(store: Store, quiz_id:
     assert (await store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-new")).result.points > 0
 
 
+async def test_a_replaced_connection_cannot_join_back(store: Store, quiz_id: str) -> None:
+    await started(store, quiz_id, "a")
+    await store.join(quiz_id, "a", "A", "c-new")
+    assert await refused(store.join(quiz_id, "a", "A", "c-a")) == ErrorCode.SESSION_REPLACED
+    assert await refused(store.serve_next(quiz_id, "a", 0, "c-a")) == ErrorCode.SESSION_REPLACED
+    assert (await store.join(quiz_id, "a", "A", "c-new")).replaced_conn_id is None  # still held
+    assert await store.leave(quiz_id, "a", "c-new")
+
+
 async def test_correct_answer_scores_once_into_the_standings(store: Store, quiz_id: str) -> None:
     await started(store, quiz_id, "a")
     r = (await store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-a")).result
@@ -187,7 +196,7 @@ async def test_ranks_of_reads_many_users_at_one_seq(store: Store, quiz_id: str) 
     await started(store, quiz_id, "a", "b")
     points = await answer(store, quiz_id, "b", 0, 0, "s1")
     ranks = await store.ranks_of(quiz_id, ["a", "b", "nobody"])
-    assert (ranks.at_seq, ranks.player_count) == (0, 2)  # no broadcast yet
+    assert (ranks.at_seq, ranks.status, ranks.player_count) == (0, "open", 2)  # no broadcast yet
     assert ranks.rows == {"a": Row(2, "a", "A", 0), "b": Row(1, "b", "B", points), "nobody": None}
 
 
@@ -324,6 +333,7 @@ async def test_host_mark_survives_a_clock_step_back(
     assert await store.end_quiz(quiz_id, "host") == End("marked")
     await advance(-1)
     assert (await store.snapshot(quiz_id, None)).status == "ended"
+    assert (await store.ranks_of(quiz_id, [])).status == "ended"
     assert (await store.standings_page(quiz_id, 0, 10)).final
     assert await refused(store.join(quiz_id, "b", "B", "c-b")) == ErrorCode.QUIZ_ENDED
     late = store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-a")

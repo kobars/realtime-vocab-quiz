@@ -107,7 +107,7 @@ What the client does with an incoming `seq` (`L` = its `lastSeq`):
 | `snapshot` | Replace the standings; `L = atSeq`; then apply buffered broadcasts with `seq > L` in order |
 | `snapshot` after `quiz_ended` was applied | `status: open`: ignore it, and keep the final standings and `L`. It was read before the end and only reached the socket after the `quiz_ended` (one writer orders frames by enqueue time, not by Redis read time); an announced end is never undone, even by a store restart (`docs/spec/redis.md` §3.1). `status: ended`: apply it as above |
 
-Between sending `resync` and receiving `snapshot`, the client buffers broadcasts instead of applying them. `quiz_ended` is always applied, whatever its `seq`, and sets `L`; from then on the standings are final, and only a `snapshot` with `status: ended` or a second `quiz_ended` (after a store restart) replaces them.
+Between sending `resync` and receiving `snapshot`, the client buffers broadcasts instead of applying them, at most the newest 64 (the snapshot drops older ones; a gap left after it starts another resync). The client sends the same `resync` again 1 s after a `RATE_LIMITED` that names no request (the token bucket may have dropped it), and whenever no `snapshot` arrives within 5 s of sending it (a silent drop). `quiz_ended` is always applied, whatever its `seq`, and sets `L`; from then on the standings are final, and only a `snapshot` with `status: ended` or a second `quiz_ended` (after a store restart) replaces them.
 
 ## 4. Standings policy
 
@@ -147,7 +147,7 @@ The server sends `error` before every application close of an open socket. A ref
 | `INVALID_STATE` | `next` with an index other than `cursor` or `cursor + 1` (or `N`), or a `join` for another quiz after a successful `join` | Rejoin to read `cursor`, then continue |
 | `QUIZ_ENDED` | Any write after the quiz ended. A `join` after the end first gets a `snapshot` of the final standings; the connection may then send `get_leaderboard` and `resync`, and a retry of an answer the server already stored still gets its `answer_result` | Show the final results |
 | `RATE_LIMITED` | More than 20 msg/s (burst 40), or more than 1 `resync` per second; the message is dropped. Also the server-side reason for HTTP 429 at the upgrade (more than 50 connections from one IP), which is never a frame; the client sees close 1006 | Wait 1 s, then retry the message. At the upgrade: a failed open (below) |
-| `SESSION_REPLACED` | The same user joined the same quiz on another socket; this older socket closes with 4001 | Show "opened elsewhere"; do not reconnect |
+| `SESSION_REPLACED` | The same user joined the same quiz on another socket; this older socket closes with 4001. A `join` that the older socket sent before the newer one took over gets the same reply, so it never takes the session back | Show "opened elsewhere"; do not reconnect |
 | `UNAVAILABLE` | Redis is unreachable (the request was not done), or the send buffer passed the hard limit (close 1013). Also the server-side reason for HTTP 503 at the upgrade (the node is full), which is never a frame; the client sees close 1006 | Retry the request after backoff (`next` and `answer` are safe to repeat); after 1013, wait 5 s plus the backoff. At the upgrade: a failed open (below) |
 | `INTERNAL` | An unexpected server fault; the server closes with 1011 | Reconnect with backoff |
 
@@ -164,7 +164,7 @@ A browser cannot read the HTTP status of a refused upgrade (401, 403, 429 or 503
 | 1013 | server | Overload or slow client | Yes, after 5 s plus the backoff |
 | 4001 | server | Session replaced by another tab | No; show "opened elsewhere" |
 
-Backoff is full jitter: `floor(random() × min(10,000, 250 × 2^attempt))` ms, reset after 10 s joined, with a 5 s open timeout. There is no graceful drain: when a node stops, its sockets drop and each client reconnects through nginx (to the other node) and resyncs.
+Backoff is full jitter: `floor(random() × min(10,000, 250 × 2^attempt))` ms, reset after 10 s joined, with a 5 s open timeout. A session or ticket request (§8) that gets no reply within 5 s fails and counts as a failed open. After 10 connects in a row without a `joined` the client stops and shows "Still can't connect" (UI §3.7). There is no graceful drain: when a node stops, its sockets drop and each client reconnects through nginx (to the other node) and resyncs.
 
 ## 8. Authentication
 

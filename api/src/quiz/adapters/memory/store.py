@@ -29,6 +29,7 @@ class _Quiz:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     names: dict[str, str] = field(default_factory=dict)
     present: dict[str, str] = field(default_factory=dict)  # user id -> connection id
+    replaced: set[str] = field(default_factory=set)  # connection ids a newer join took over
     tick_until_ms: int = 0  # the tick token, limits.tick_ms long
     end_seq: int | None = None  # the seq of quiz_ended, once announced
     scored: set[str] = field(default_factory=set)  # who scored since the last broadcast
@@ -63,6 +64,9 @@ class MemoryStore:
         if (quiz := self._quizzes.get(quiz_id)) is None:
             raise DomainError(ErrorCode.QUIZ_NOT_FOUND, f"no quiz {quiz_id}")
         return quiz
+
+    def _status(self, quiz: _Quiz) -> Literal["open", "ended"]:
+        return "open" if quiz.state.is_open(self._clock()) else "ended"
 
     def _shown(self, rows: list[Row]) -> list[Row]:
         """A frame's entries: every row up to ``full_list_max`` players, else the top N."""
@@ -101,9 +105,14 @@ class MemoryStore:
         async with quiz.lock:
             now = self._clock()
             step = s.transition(quiz.state, s.Join(user_id), now)
+            if conn_id in quiz.replaced:
+                raise DomainError(ErrorCode.SESSION_REPLACED, f"{conn_id} was replaced")
             player = step.state.players[user_id]
             name = quiz.names.setdefault(user_id, display_name)
-            replaced = quiz.present.get(user_id)
+            if (replaced := quiz.present.get(user_id)) == conn_id:
+                replaced = None  # a repeat join on the same connection replaces nothing
+            if replaced is not None:
+                quiz.replaced.add(replaced)
             quiz.present[user_id] = conn_id
             quiz.state = state = replace(step.state, dirty=True)  # onlineCount may change
             return Joined(
@@ -116,7 +125,7 @@ class MemoryStore:
                 state.time_limit_ms,
                 max(0, state.deadline_ms - now),
                 name,
-                replaced if replaced != conn_id else None,
+                replaced,
             )
 
     async def leave(self, quiz_id: str, user_id: str, conn_id: str) -> bool:
@@ -184,7 +193,7 @@ class MemoryStore:
         async with quiz.lock:
             rows = {row.user_id: row for row in quiz.rows()}
             asked = {user_id: rows.get(user_id) for user_id in user_ids}
-            return port.Ranks(quiz.state.seq, len(rows), asked)
+            return port.Ranks(quiz.state.seq, self._status(quiz), len(rows), asked)
 
     async def standings_page(self, quiz_id: str, offset: int, limit: int) -> port.Page:
         if offset < 0 or not 1 <= limit <= FULL_LIST_MAX:
@@ -200,9 +209,7 @@ class MemoryStore:
         async with quiz.lock:
             rows = quiz.rows()
             you = next((row for row in rows if row.user_id == user_id), None)
-            status: Literal["open", "ended"] = (
-                "open" if quiz.state.is_open(self._clock()) else "ended"
-            )
+            status = self._status(quiz)
             shown = self._shown(rows)
             online = len(quiz.present)
             return port.Snapshot(quiz.state.seq, status, len(rows), online, tuple(shown), you)

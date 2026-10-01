@@ -1,6 +1,6 @@
 // AI-ASSISTED: tests for the seq rules of the protocol client.
 import { describe, expect, it } from 'vitest'
-import { PONG_CHECK_MS, SeqTracker } from './seq'
+import { BUFFER_MAX, PONG_CHECK_MS, SeqTracker } from './seq'
 import type { Leaderboard, QuizEnded } from './types.generated'
 
 const board = (seq: number, rebase = false): Leaderboard => ({
@@ -39,6 +39,16 @@ describe('SeqTracker', () => {
     expect(tracker.joined().resync).toEqual({ lastSeq: 4, delayMs: 0 })
     tracker.snapshot(9)
     expect(tracker.lastSeq).toBe(9)
+  })
+
+  it('holds only the newest BUFFER_MAX broadcasts while a resync waits, so a late snapshot resyncs again', () => {
+    const tracker = new SeqTracker(() => 0)
+    tracker.joined()
+    for (let seq = 1; seq <= 1_000; seq++) tracker.broadcast(board(seq))
+    const oldest = 1_000 - BUFFER_MAX + 1
+    // The frames between the snapshot and the oldest one held are gone: a gap, so one more resync.
+    expect(tracker.snapshot(0)).toEqual({ apply: [], resync: { lastSeq: 0, delayMs: 0 }, check: null })
+    expect(seqs(tracker.snapshot(oldest - 1).apply)).toEqual(Array.from({ length: BUFFER_MAX }, (_, i) => oldest + i))
   })
 
   it('asks for no second resync after a reconnect until the snapshot', () => {

@@ -1,0 +1,21 @@
+# AI-ASSISTED: weekly online check of the links in the tracked Markdown files; make check runs it offline.
+name: links
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # The token raises lychee's GitHub rate limit.
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/check_links.sh
