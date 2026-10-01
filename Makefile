@@ -6,6 +6,8 @@ SHELL := /bin/bash
 step = @printf '==> %s\n' '$(1)'; $(2) || { printf 'make: step "%s" failed\n' '$(1)' >&2; exit 1; }
 PYTEST = cd api && uv run --locked pytest
 VITEST = pnpm -C web exec vitest run
+# The image tag; both images build from the repository root, so the root .dockerignore applies.
+IMAGE_TAG ?= dev
 
 .PHONY: help build up down demo demo-stop test test-integration check acceptance load contracts new-quiz ai-log
 
@@ -13,7 +15,9 @@ help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
 
 build: ## Build the API and web images
-	@echo "not yet"
+	$(call step,api image,docker build -f api/Dockerfile -t elsaquiz-api:$(IMAGE_TAG) .)
+	$(call step,web image,docker build -f web/Dockerfile -t elsaquiz-web:$(IMAGE_TAG) .)
+	@docker image ls --format '{{.Repository}}:{{.Tag}}  {{.Size}}' --filter reference='elsaquiz-*:$(IMAGE_TAG)'
 up: ## Start the development Redis
 	docker compose up -d --wait redis
 down: ## Stop the development Redis
