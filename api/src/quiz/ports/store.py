@@ -10,8 +10,18 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
 from quiz.domain.events import AnswerScored
 from quiz.domain.session import Question
+
+
+@dataclass(frozen=True, slots=True)
+class Limits:
+    """The standings policy a store applies; the composition root fills it from the settings."""
+
+    tick_ms: int = 200  # the tick token's life: at most one leaderboard per quiz per tick
+    top_n: int = TOP_N  # the entries of a frame above full_list_max players
+    full_list_max: int = FULL_LIST_MAX  # up to this many players, a frame carries everyone
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +95,7 @@ class Snapshot:
     status: Literal["open", "ended"]
     player_count: int
     online_count: int
-    rows: tuple[Row, ...]  # every player up to 200, else the top 50
+    rows: tuple[Row, ...]  # every player up to full_list_max, else the top_n
     you: Row | None
 
 
