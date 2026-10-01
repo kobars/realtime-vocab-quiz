@@ -30,14 +30,24 @@ async def keys(redis_store: RedisStore, redis_prefix: str, quiz_id: str) -> Quiz
 
 @pytest.fixture
 async def channels(redis_client: Redis, keys: QuizKeys) -> AsyncIterator[PubSub]:
-    pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
+    """Both channels, subscribed: SUBSCRIBE only sends, so wait for Redis to confirm each one."""
+    pubsub = redis_client.pubsub()
     await pubsub.subscribe(keys.events, keys.control)
+    confirmed: set[str] = set()
+    async with asyncio.timeout(5):
+        while len(confirmed) < 2:
+            message = await pubsub.get_message(timeout=1)
+            if message and message["type"] == "subscribe":
+                confirmed.add(message["channel"])
+    numsub = await redis_client.pubsub_numsub(keys.events, keys.control)
+    assert numsub == [(keys.events, 1), (keys.control, 1)]
+    pubsub.ignore_subscribe_messages = True
     yield pubsub
     await pubsub.aclose()  # type: ignore[no-untyped-call]
 
 
 async def messages(pubsub: PubSub) -> list[tuple[str, str]]:
-    """Everything published in the next 300 ms (a subscribe confirmation reads as None)."""
+    """Everything published in the next 300 ms."""
     out, loop = [], asyncio.get_running_loop()
     deadline = loop.time() + 0.3
     while (left := deadline - loop.time()) > 0:
