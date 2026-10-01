@@ -1,0 +1,7 @@
+# AI-ASSISTED: secret-scan configuration: the default gitleaks rules plus the known test fixtures.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "The sample Sec-WebSocket-Key nonce from RFC 6455, section 1.3, used by the handshake tests"
+regexes = ['''dGhlIHNhbXBsZSBub25jZQ''']
