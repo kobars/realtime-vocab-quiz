@@ -1,60 +1,61 @@
-<!-- AI-ASSISTED: one short, plain message per error the player can hit; SESSION_REPLACED stays, with "Use this tab" (UI spec §3.7, §4.3). -->
+<!-- AI-ASSISTED: a short message for the errors the player should see, and the blocking card for the store's blocked state: "Use this tab" or "Reload" (UI spec §3.7, §4.3). -->
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import type { ErrorCode } from '@/protocol/types.generated'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 
 /** How long a message the client recovers from by itself stays visible. */
 const HIDE_AFTER_MS = 6_000
 
+type Notice = keyof typeof strings.errors
+const isNotice = (code: string): code is Notice => Object.hasOwn(strings.errors, code)
+
 const store = useQuizStore()
-const code = ref<ErrorCode | null>(null)
+const notice = ref<Notice | null>(null)
 const button = useTemplateRef<{ $el: HTMLElement }>('button')
 let timer: ReturnType<typeof setTimeout> | undefined
 
-const text = (c: ErrorCode): string => (c in strings.errors ? strings.errors[c as keyof typeof strings.errors] : strings.errors.other)
-
 watch(() => store.lastError, (error) => {
   clearTimeout(timer)
-  code.value = error?.code ?? null
-  if (code.value === 'SESSION_REPLACED') void nextTick(() => button.value?.$el.focus())
-  else if (code.value !== null) timer = setTimeout(() => (code.value = null), HIDE_AFTER_MS)
+  notice.value = error !== null && isNotice(error.code) ? error.code : null
+  if (notice.value !== null) timer = setTimeout(() => (notice.value = null), HIDE_AFTER_MS)
 })
+// The card reads the store, so a screen mounted after the error shows it too.
+watch(() => store.blocked, (blocked) => blocked !== null && void nextTick(() => button.value?.$el.focus()), { immediate: true })
 onBeforeUnmount(() => clearTimeout(timer))
 
-/** A new ticket and `join` from this tab; the other tab then gets this message. */
-function useThisTab(): void {
+/** "Use this tab": a new ticket and `join` from this tab, and the other tab gets the card. "Reload": the new version. */
+function act(): void {
   const quiz = store.quiz
-  code.value = null
-  if (quiz) store.join(quiz.quizId, quiz.displayName)
+  if (store.blocked === 'version') window.location.reload()
+  else if (quiz) store.join(quiz.quizId, quiz.displayName)
 }
 </script>
 
 <template>
   <div
-    v-if="code === 'SESSION_REPLACED'"
+    v-if="store.blocked"
     role="alert"
     data-test="error"
     class="flex flex-col items-start gap-3 rounded-lg bg-card p-4 shadow-card"
   >
     <p class="font-semibold">
-      {{ text(code) }}
+      {{ strings.blocked[store.blocked].title }}
     </p>
     <Button
       ref="button"
-      @click="useThisTab"
+      @click="act"
     >
-      {{ strings.errors.useThisTab }}
+      {{ strings.blocked[store.blocked].action }}
     </Button>
   </div>
   <p
     v-else
     role="status"
     data-test="error"
-    :class="code ? 'text-sm text-destructive' : 'sr-only'"
+    :class="notice ? 'text-sm text-destructive' : 'sr-only'"
   >
-    {{ code ? text(code) : '' }}
+    {{ notice ? strings.errors[notice] : '' }}
   </p>
 </template>
