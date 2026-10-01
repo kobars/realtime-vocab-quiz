@@ -72,7 +72,7 @@ GATE_FAILS = "- if: contains(needs.*.result, 'failure') || contains(needs.*.resu
 @pytest.mark.parametrize(
     ("workflow", "gate", "needs"),
     [
-        ("ci.yml", "ci-required", "[check, integration]"),
+        ("ci.yml", "ci-required", "[check, integration, guards, review-budget]"),
         ("security.yml", "security-required", "[secrets, dependency-review]"),
         ("containers.yml", "containers-required", "[config, images]"),
     ],
@@ -88,12 +88,29 @@ def test_each_workflow_has_one_gate_job_over_its_required_jobs(
     assert not any(line.startswith("name:") for line in job)
 
 
-@pytest.mark.parametrize("workflow", ["ci.yml", "containers.yml"])
-def test_workflow_runs_on_every_pull_request_update_and_on_main(workflow: str) -> None:
+@pytest.mark.parametrize(
+    ("workflow", "types"),
+    [
+        # ci.yml runs again on a label change, for the guards; never on a PR text edit.
+        ("ci.yml", ["types: [opened, synchronize, reopened, labeled, unlabeled]"]),
+        ("containers.yml", []),
+    ],
+)
+def test_workflow_runs_on_every_pull_request_update_and_on_main(
+    workflow: str, types: list[str]
+) -> None:
     on = _section(WORKFLOWS / workflow, "on", 0)
     assert "pull_request:" in on
-    assert not any(line.startswith("types:") for line in on)
+    assert [line for line in on if line.startswith("types:")] == types
     assert on[on.index("push:") + 1] == "branches: [main]"
+
+
+@pytest.mark.parametrize("job", ["guards", "review-budget"])
+def test_pull_request_checks_read_the_whole_history_of_the_pr_head(job: str) -> None:
+    lines = _section(WORKFLOWS / "ci.yml", job, 2)
+    assert "if: github.event_name == 'pull_request'" in lines
+    assert "ref: ${{ github.event.pull_request.head.sha }}" in lines
+    assert "fetch-depth: 0" in lines
 
 
 @pytest.mark.parametrize("workflow", ["ci.yml", "security.yml", "containers.yml", "codeql.yml"])
