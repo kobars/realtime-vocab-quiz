@@ -1,0 +1,236 @@
+<!-- AI-ASSISTED: wire protocol v1 of the self-paced quiz, drafted with Claude Code and checked by hand against the domain spec. -->
+# Protocol spec: the WebSocket message catalog v1
+
+This document is the wire contract between the server, the Vue client, the load bots and the tests. The quiz rules behind each reply are in `docs/spec/domain.md` (where the two disagree, the domain spec wins). The contracts package turns this catalog into Pydantic models in `api/src/quiz/contracts/`, and the client imports TypeScript types generated from them. The transport choice is ADR-003 and the protocol, standings policy and tick are ADR-004 (`docs/DECISIONS.md`).
+
+## 1. Envelope and connection
+
+- One WebSocket per browser tab: `GET /ws?ticket=<ticket>` with the subprotocol `quiz.v1`. Text frames only, one JSON object per frame, UTF-8. `permessage-deflate` is off.
+- Every message, in both directions, is `{"v": 1, "type": "<type>", ...}`. The server rejects unknown fields, unknown types, missing fields and wrong JSON types. All fields of a message are always present; a field that has no value is `null`, never omitted.
+- A connection serves one quiz: the quiz of its first `join`. Each socket has one writer, so a client receives a node's messages in the order the node produced them.
+
+### Field types
+
+| Field | Type and range |
+|---|---|
+| `v` | integer, always `1` |
+| `quizId` | string, `^[A-Z0-9-]{3,16}$`, for example `VOCAB-42` |
+| `userId` | string, `^[A-Za-z0-9_-]{1,64}$`; set by the server from the ticket, never sent by the client |
+| `questionId` | string, `^[A-Za-z0-9_-]{1,64}$` |
+| `submissionId` | string, a UUID (RFC 9562, lowercase hex with hyphens) that the client makes per answer |
+| `displayName` | string, at most 128 characters on input; 1–32 after trim and Unicode NFC normalization |
+| `questionIndex` | integer, `0 … N−1` (`next` also accepts `N`) |
+| `choiceIndex` | integer, `0 … 3` |
+| `seq`, `atSeq`, `lastSeq` | integer ≥ 0 (see §3) |
+| `score` | integer ≥ 0, the player's total; `pointsAwarded` is `0 … 150` |
+| `rank` | integer ≥ 1; ranks are unique `1 … playerCount` |
+| `remainingMs`, `timeLimitMs`, `quizRemainingMs` | integer ≥ 0, milliseconds |
+| `entries` | array of `{rank, userId, displayName, score}`, ordered by rank |
+
+## 2. Message catalog
+
+### 2.1 Client → server
+
+| `type` | Fields | Reply | Notes |
+|---|---|---|---|
+| `join` | `quizId`, `displayName` | `joined`, or `error` | The identity comes from the ticket. A repeat on the same connection returns `joined` again. A `join` for another quiz on the same connection gets `INVALID_STATE` |
+| `next` | `questionIndex` | `question`, `finished`, or `error` | Asks for question `i`; `i = N` finishes. A repeat of the same `i` gets the same reply (domain §5.1) |
+| `answer` | `questionIndex`, `choiceIndex`, `submissionId` | `answer_result`, or `error` | A repeat with the same `submissionId` gets an identical `answer_result` (domain §5.2) |
+| `ping` | — | `pong` | App-level liveness, every 25 s |
+| `resync` | `lastSeq` | `snapshot`, or `error` | `lastSeq` = the last broadcast `seq` the client applied, `0` if none. At most 1 per second |
+| `get_leaderboard` | `offset` (≥ 0), `limit` (1–200) | `leaderboard_page`, or `error` | Works while the quiz is open and after it ended |
+
+### 2.2 Broadcasts (carry `seq`)
+
+A broadcast goes to every connection of the quiz on every node. Self-paced mode adds no broadcast: question and answer traffic is unicast.
+
+| `type` | Fields | When |
+|---|---|---|
+| `leaderboard` | `seq`, `rebase` (bool), `playerCount`, `onlineCount`, `entries` | At most once per 200 ms tick, only when the standings changed (`dirty`). `entries` holds every player while `playerCount ≤ 200`, else the top 50 |
+| `quiz_ended` | `seq`, `playerCount`, `entries` (top 50), `you` (`{rank, score}` or `null`) | Exactly once, when the quiz ends; the last broadcast of a quiz. `you` is filled per socket by the node that delivers it; `null` for a connection with no player |
+
+Joins and leaves are never broadcast one by one. A join, a leave (after the 10 s grace) and a scoring answer only set `dirty`; the next tick sends one `leaderboard` frame with the new `playerCount` and `onlineCount` (and, up to 200 players, every player). 5,000 players joining within one tick therefore cost one frame per connection, not the roughly 12.5 million sends (5,000 × 5,000 / 2) that one broadcast per join would need. `playerCount` counts everyone in the standings (a player who left keeps their score); `onlineCount` counts the players connected now.
+
+### 2.3 Unicasts (carry `atSeq`)
+
+`atSeq` is the latest broadcast `seq` of the quiz when the reply was built. The client compares it with its own `lastSeq` (§3).
+
+| `type` | Fields | Sent |
+|---|---|---|
+| `joined` | `atSeq`, `quizId`, `userId`, `displayName`, `questionCount`, `timeLimitMs`, `quizRemainingMs`, `cursor` (−1 … N−1), `cursorOpen` (bool), `finished` (bool), `score` | Reply to `join`. On a reconnect it holds the stored progress: if `cursorOpen`, the client sends `next {questionIndex: cursor}` to get the open question back with its stored serve time |
+| `question` | `atSeq`, `questionIndex`, `questionId`, `prompt`, `choices` (4 strings), `timeLimitMs`, `remainingMs` | Reply to `next {i}`, `i < N`. **Never contains the correct choice** |
+| `answer_result` | `atSeq`, `questionIndex`, `submissionId`, `choiceIndex`, `correctChoiceIndex`, `correct` (bool), `late` (bool), `pointsAwarded`, `score` | Reply to `answer`. The only message with the correct choice. A replay is byte-identical to the first reply, `atSeq` included |
+| `rank_update` | `atSeq`, `rank`, `score`, `playerCount` | Only to players outside a frame's `entries` (above 200 players): §4 |
+| `leaderboard_page` | `atSeq`, `offset`, `playerCount`, `final` (bool), `entries` (up to `limit` rows from rank `offset + 1`) | Reply to `get_leaderboard`. `final` is true once the quiz ended |
+| `snapshot` | `atSeq`, `status` (`open` or `ended`), `playerCount`, `onlineCount`, `entries` (same policy as `leaderboard`), `you` (`{rank, score}` or `null`) | Reply to every `resync`, and after a pub/sub resubscribe. `atSeq` is the `seq` of the standings it holds |
+| `finished` | `atSeq`, `score`, `rank`, `playerCount` | Reply to `next {questionIndex: N}`; a repeat returns the current values. The rank stays provisional until `quiz_ended` |
+
+### 2.4 Neither `seq` nor `atSeq`
+
+| `type` | Fields | Notes |
+|---|---|---|
+| `pong` | `seq` (the latest broadcast `seq`, or `null` before `join`) | Reply to `ping`. Lets a client find a lost last frame |
+| `error` | `code`, `message` (English, for logs), `requestType` (the `type` that caused it, or `null`) | Carries no `seq` and no `atSeq`. Sent before every application close |
+
+## 3. Sequence numbers
+
+Rules:
+
+1. `seq` is per quiz. The counter starts at 0 when the quiz is created; the first broadcast has `seq = 1`, and each later broadcast is exactly the previous one + 1, with no gaps (contract C2).
+2. Only a Redis script that also publishes a broadcast runs `INCR seq`. The scoring, join and serve scripts never do.
+3. Unicasts that describe quiz state carry `atSeq` (the current counter, not incremented). `pong` carries `seq`. `error` carries neither.
+
+| Who | Does what with `seq` |
+|---|---|
+| Tick script (Redis) | While `dirty` is set and it holds the 200 ms tick token: clears `dirty`, `INCR seq`, publishes `leaderboard` |
+| End script (Redis) | Once per quiz: `INCR seq`, publishes `quiz_ended`. After it, no script increments `seq` again |
+| Join, serve, scoring and snapshot reads (Redis) | Read the counter for `atSeq`; never change it |
+| Gateway (each API node) | Remembers the latest `seq` it relayed per quiz, for `pong`; conflates `leaderboard` frames per slow socket (§5) |
+| Client and load bots | Apply broadcasts in `seq` order with the rules below; the bots also count gaps and resyncs and time answer → leaderboard |
+| Tests | Check that the published `seq` values have no gaps (`api/tests/integration/test_seq.py`) |
+
+What the client does with an incoming `seq` (`L` = its `lastSeq`):
+
+| Incoming | Client action |
+|---|---|
+| `seq = L + 1` | Apply; `L = seq` |
+| `seq = L` | Ignore: a duplicate (a frame relayed just after the snapshot that already holds it) |
+| `seq < L` | The store restarted (the counter went back): resync, and accept the snapshot's lower `atSeq` as the new `L` |
+| `seq > L + 1` and `rebase: true` | Apply as a full replacement; `L = seq`. No resync |
+| `seq > L + 1` otherwise | A gap: wait 0–250 ms (random), then `resync {lastSeq: L}` |
+| `pong.seq > L` | The last frame was lost: resync |
+| `pong.seq < L` | The store restarted: resync, as above |
+| `snapshot` | Replace the standings; `L = atSeq`; then apply buffered broadcasts with `seq > L` in order |
+
+Between sending `resync` and receiving `snapshot`, the client buffers broadcasts instead of applying them. `quiz_ended` is always applied, whatever its `seq`, and sets `L`.
+
+## 4. Standings policy
+
+- **Order:** score descending, then the time the player reached it, then `userId` (domain §6). Ranks are unique.
+- **Up to 200 players:** each `leaderboard` frame carries every player. Nobody gets `rank_update`.
+- **Above 200 players:** frames carry the top 50. Each player outside the top 50 gets `rank_update` with their own rank and score: a player who scored gets it after the next tick, together with that tick's frame (same `atSeq`); a player whose rank only shifted gets at most one per second, with the newest value.
+- **The full list** comes from `get_leaderboard` pages of 1–200 rows, while the quiz runs and after it ended. `quiz_ended` carries the top 50 and the player's own final rank (`you`).
+
+## 5. Flow control and conflation
+
+- Each socket has a send buffer. Above the **soft limit (64 KiB)** the node stops queueing `leaderboard` frames for that socket and keeps only the newest one. When the socket drains, it sends that newest frame with `rebase: true`; the client applies it as a full replacement without a resync (§3). Unicasts are never dropped.
+- `quiz_ended` is never dropped or conflated; it is queued even above the soft limit.
+- The newest held frame keeps its place in the socket's queue: a `pong` is never sent ahead of a frame that the socket will still get, so `pong.seq > lastSeq` always means a lost frame.
+- Above the **hard limit (256 KiB)** the node sends `error UNAVAILABLE` and closes with 1013.
+- A `snapshot` or `rebase: true` frame always carries the full standings under the policy of §4, so it never depends on an earlier frame.
+
+## 6. Countdown
+
+`question` carries `remainingMs = max(0, min(serveMs + T, deadlineMs) − now)` on the server clock (domain §2), on the first serve and on every re-serve (a repeat of `next {i}` or a reconnect). The client starts its countdown from the moment it receives the message, using a monotonic clock (`performance.now()`), and never reads its wall clock. The countdown is display only: the server decides lateness when the answer arrives.
+
+## 7. Errors and close codes
+
+The server sends `error` before every application close. Error codes, with the client's action:
+
+| Code | When | Client action |
+|---|---|---|
+| `INVALID_MESSAGE` | Bad JSON, unknown or missing field, wrong type or range, JSON depth above 8, or a `submissionId` reused for another question | Drop the request; it is a client bug. The socket stays open |
+| `UNSUPPORTED_TYPE` | Unknown `type` | Same as above |
+| `UNSUPPORTED_VERSION` | `v` is not 1 | Show "please reload"; close 1000 |
+| `MESSAGE_TOO_LARGE` | An inbound frame above 16 KiB; the server closes with 1009 | Reconnect with backoff; never resend that frame |
+| `UNAUTHORIZED` | Missing, used or expired ticket (HTTP 401 at the upgrade) | Get a new ticket; reconnect with backoff |
+| `FORBIDDEN` | Wrong `Origin` (HTTP 403 at the upgrade) | Show an error; do not reconnect |
+| `QUIZ_NOT_FOUND` | `join` with an unknown `quizId` | Show "quiz not found"; the user may send another `join` |
+| `NOT_JOINED` | Any request except `join` and `ping` before a `join` | Send `join`, then repeat the request |
+| `QUESTION_NOT_OPEN` | `answer` for a question never served to this player | Send `next` for the current question |
+| `ALREADY_ANSWERED` | `answer` with a new `submissionId` for a closed question | Keep the first result; the score did not change |
+| `INVALID_STATE` | `next` with an index other than `cursor` or `cursor + 1` (or `N`), or a `join` for a second quiz | Rejoin to read `cursor`, then continue |
+| `QUIZ_ENDED` | Any write after the quiz ended. A `join` after the end first gets a `snapshot` of the final standings; the connection may then send `get_leaderboard` and `resync` | Show the final results |
+| `RATE_LIMITED` | More than 20 msg/s (burst 40), or more than 1 `resync` per second; the message is dropped. At the upgrade: more than 50 connections from one IP (HTTP 429) | Wait 1 s, then retry |
+| `SESSION_REPLACED` | The same user joined the same quiz on another socket; this older socket closes with 4001 | Show "opened elsewhere"; do not reconnect |
+| `UNAVAILABLE` | Redis is unreachable (the request was not done), the node is full (HTTP 503 at the upgrade), or the send buffer passed the hard limit (close 1013) | Retry the request after backoff (`next` and `answer` are safe to repeat); after 1013, wait 5 s plus the backoff |
+| `INTERNAL` | An unexpected server fault; the server closes with 1011 | Reconnect with backoff |
+
+A browser cannot read the HTTP status of a refused upgrade: it sees a close with 1006. So the client treats every failed open like a 1006: a new ticket, then a reconnect with backoff.
+
+| Close code | Sent by | Used for | Client reconnects? |
+|---|---|---|---|
+| 1000 | client | The user left (also after the quiz ended; the server keeps the socket open so pages still work) | No |
+| 1006 | (never sent) | The connection died | Yes, with backoff |
+| 1008 | server | Policy violation (the token bucket is empty for 10 s in a row) | No; show an error |
+| 1009 | server | Inbound frame above 16 KiB | Yes, with backoff; never resend that frame |
+| 1011 | server | Internal error | Yes, with backoff |
+| 1012 | (not sent) | Service restart; this build has no drain step | Yes, with backoff |
+| 1013 | server | Overload or slow client | Yes, after 5 s plus the backoff |
+| 4001 | server | Session replaced by another tab | No; show "opened elsewhere" |
+
+Backoff is full jitter: `floor(random() × min(10,000, 250 × 2^attempt))` ms, reset after 10 s joined, with a 5 s open timeout. There is no graceful drain: when a node stops, its sockets drop and each client reconnects through nginx (to the other node) and resyncs.
+
+## 8. Authentication
+
+1. `POST /sessions` (once per tab) returns a mock `userId` and a session token, kept in the tab.
+2. Before every connect, `POST /tickets` with the session token returns a ticket: 32 random bytes in base64url, single use, valid 30 s.
+3. `GET /ws?ticket=…` with the subprotocol `quiz.v1`. Before the upgrade the server checks the `Origin` (403), the ticket (401) and the connection caps (503 at 10,000 per process, 429 at 50 per IP). The identity comes from the ticket only.
+4. Logs record the path only, never the query string, so tickets never reach a log.
+
+## 9. Limits
+
+Inbound frames at most 16 KiB and JSON depth at most 8, both checked before parsing; a token bucket of 20 msg/s with a burst of 40 per connection, checked before parsing; `resync` at most 1 per second; the server pings every 25 s and closes a socket with no pong by the next sweep; the client pings every 25 s and reconnects after 50 s with no inbound message; a player counts as gone 10 s after a disconnect.
+
+## 10. Sequence diagrams
+
+### Join
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant N as API node
+    participant R as Redis
+    C->>N: POST /tickets (session token)
+    N-->>C: ticket (single use, 30 s)
+    C->>N: GET /ws?ticket=… (quiz.v1)
+    N->>N: check Origin, ticket, caps
+    N-->>C: 101 Switching Protocols
+    C->>N: join {quizId, displayName}
+    N->>R: join script (register, set dirty)
+    R-->>N: progress, atSeq
+    N-->>C: joined {atSeq, cursor, cursorOpen, score}
+    C->>N: resync {lastSeq: 0}
+    N-->>C: snapshot {atSeq, entries, you}
+    Note over N,R: next tick: leaderboard {seq, playerCount} to everyone
+```
+
+### Answer → leaderboard
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant N as API node
+    participant R as Redis
+    participant O as Other clients
+    C->>N: next {questionIndex: i}
+    N->>R: serve script (serveMs = TIME)
+    N-->>C: question {i, choices, remainingMs}
+    C->>N: answer {i, choiceIndex, submissionId}
+    N->>R: scoring script (score, total, standings, set dirty)
+    N-->>C: answer_result {pointsAwarded, score, correctChoiceIndex}
+    Note over N,R: tick (≤ 200 ms): token, INCR seq, PUBLISH
+    R-->>N: leaderboard {seq}
+    N-->>C: leaderboard {seq, entries}
+    N-->>O: leaderboard {seq, entries} (on every node)
+```
+
+### Reconnect → resync → snapshot
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant N2 as Other API node
+    participant R as Redis
+    Note over C: socket drops (1006); lastSeq = L
+    C->>C: wait full-jitter backoff
+    C->>N2: POST /tickets, then GET /ws?ticket=…
+    C->>N2: join {quizId, displayName}
+    N2->>R: join script (existing player: no write)
+    N2-->>C: joined {atSeq, cursor, cursorOpen}
+    C->>N2: resync {lastSeq: L}
+    N2->>R: read standings at seq S
+    N2-->>C: snapshot {atSeq: S, entries, you}
+    C->>N2: next {questionIndex: cursor} (if cursorOpen)
+    N2-->>C: question {remainingMs from the stored serveMs}
+```
