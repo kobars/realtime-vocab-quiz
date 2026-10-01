@@ -14,10 +14,11 @@ if [[ -z "$confs" ]]; then
 fi
 
 # The test runs outside the compose network: an upstream named by a compose service must resolve.
+services="$(docker compose --profile '*' config --services)" # stops here when compose fails
 hosts=()
 while IFS= read -r service; do
   hosts+=("--add-host=$service:127.0.0.1")
-done < <(docker compose --profile '*' config --services)
+done <<<"$services"
 
 while IFS= read -r conf; do
   echo "nginx -t: $conf"

@@ -1,19 +1,110 @@
-# AI-ASSISTED: the development Redis; the full stack profile adds the API, web and nginx services.
+# AI-ASSISTED: the development Redis (profile dev) and the full stack (profile full): two API nodes
+# on one Redis behind nginx, the only service that publishes a port.
 name: elsaquiz
+
+x-hardened: &hardened
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  ulimits:
+    nofile: 65536
+  networks: [stack]
+  profiles: [full]
+
+x-redis-health: &redis-health
+  test: ["CMD", "redis-cli", "ping"]
+  interval: 2s
+  timeout: 2s
+  retries: 15
+
+x-api: &api
+  <<: *hardened
+  image: elsaquiz-api:${IMAGE_TAG:-dev}
+  depends_on:
+    stack-redis:
+      condition: service_healthy
+
+# The password goes into a URL: use URL-safe characters (openssl rand -hex 24).
+x-api-env: &api-env
+  STORE: redis
+  REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@stack-redis:6379/0
+  ADMIN_MOCK: "1"
+  ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env}
+  QUIZ_PORT: ${QUIZ_PORT:-8080}
+  PER_IP_CONN_CAP: # from .env when set: every client of the 127.0.0.1 port shares one address
+  # nginx is the nodes' only proxy, but a host process can reach a node from the bridge gateway's
+  # address in this subnet and set X-Forwarded-For: accepted, as the stack serves the local host.
+  TRUSTED_PROXIES: ${QUIZ_SUBNET:-10.89.78.0/24}
 
 services:
   redis:
+    profiles: [dev]
     image: redis:8-alpine
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     ports:
       - "127.0.0.1:6381:6379" # local only: the development Redis has no password
     volumes:
       - redis-data:/data # named, so `make down` (no -v) keeps the AOF data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 2s
-      timeout: 2s
-      retries: 15
+    healthcheck: *redis-health
+
+  stack-redis:
+    <<: *hardened
+    image: redis:8-alpine
+    user: redis # the entrypoint then runs the server as is, with no capability to drop to it
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env} # for the healthcheck
+    volumes:
+      - stack-redis-data:/data
+    healthcheck: *redis-health
+
+  # The API and web images bring their own healthchecks.
+  api-1:
+    <<: *api
+    environment:
+      <<: *api-env
+      NODE_ID: api-1
+
+  api-2:
+    <<: *api
+    environment:
+      <<: *api-env
+      NODE_ID: api-2
+
+  web:
+    <<: *hardened
+    image: elsaquiz-web:${IMAGE_TAG:-dev}
+
+  # The web image's nginx build, with its security-headers snippet, runs the edge config.
+  nginx:
+    <<: *hardened
+    image: elsaquiz-web:${IMAGE_TAG:-dev}
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "127.0.0.1:${QUIZ_PORT:-8080}:8080"
+    depends_on:
+      api-1:
+        condition: service_healthy
+      api-2:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+
+networks:
+  stack:
+    ipam:
+      config:
+        - subnet: ${QUIZ_SUBNET:-10.89.78.0/24}
 
 volumes:
   redis-data:
+  stack-redis-data:

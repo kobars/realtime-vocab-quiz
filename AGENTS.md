@@ -25,9 +25,11 @@ These rules apply to every change, whether a person or a coding agent makes it.
 - `make help` lists the targets. `make check` runs every check a change must pass; run it from
   the repository root. `make test-integration` runs the tests that need Redis.
 
-## Secrets
+## Secrets and private data
 
 - Never commit secrets, tokens or real credentials. Local settings go in `.env`, which git ignores.
+- No personal data: no home paths and no personal email addresses in files, commits or PRs.
+- Commit messages and PR text describe the code change only.
 
 ## AI-assisted work
 
@@ -39,10 +41,3 @@ These rules apply to every change, whether a person or a coding agent makes it.
 - Every PR has an AI-LOG entry `docs/ai-log/PR-<n>.md`, where `<n>` is the GitHub PR number.
   Write it by hand from `docs/ai-log/TEMPLATE.md` right after `gh pr create`, commit it and push
   again. Record real mistakes only, and name a test file that exists under **Verification**.
-
-## Nothing internal
-
-Nothing internal enters the repository, its commits or its PRs: no planning discussion or chat
-quotes, no task-tracker or task IDs, nothing about people, no home paths and no personal email
-addresses. Commit messages and PR text describe the code change only; AI evidence is written as
-engineering facts about this repository's code, tests and PRs.

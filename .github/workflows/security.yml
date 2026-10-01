@@ -1,4 +1,4 @@
-# AI-ASSISTED: security gate: a secret scan of the whole history, dependency review and the dependency audits.
+# AI-ASSISTED: security gate: a secret scan of the history of HEAD, dependency review and the dependency audits.
 name: security
 
 on:
@@ -12,8 +12,9 @@ on:
 permissions: {}
 
 concurrency:
-  group: security-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  # A new push to a PR replaces its older run; runs on main always finish.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   secrets:
@@ -77,3 +78,14 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: make audit-web
+
+  # The ruleset requires this job only; a job joins the gate by being listed in needs.
+  security-required:
+    if: always()
+    needs: [secrets, dependency-review]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # A skipped job passes, so a job that runs only on some events never blocks a merge.
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

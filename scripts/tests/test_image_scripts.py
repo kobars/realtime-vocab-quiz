@@ -12,14 +12,15 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# Answers `id -u` with a non-root uid and lists three compose services. `docker inspect` fails,
-# unless $RESPONSE names a file: then every container is healthy, has one hashed asset and
-# answers each request with that file.
+# Answers `id -u` with a non-root uid and lists three compose services, unless $COMPOSE_FAILS is
+# set. `docker inspect` fails, unless $RESPONSE names a file: then every container is healthy, has
+# one hashed asset and answers each request with that file.
 FAKE_DOCKER = """#!/usr/bin/env bash
 echo "$*" >> "$DOCKER_LOG"
 case "$*" in
   *" id -u") echo 10001 ;;
-  "compose "*"config --services") printf 'redis\\napi-1\\napi-2\\n' ;;
+  "compose "*"config --services") [[ -z "${COMPOSE_FAILS:-}" ]] || exit 1
+    printf 'redis\\napi-1\\napi-2\\n' ;;
   "inspect "*) [[ -n "${RESPONSE:-}" ]] && echo "running healthy" || exit 1 ;;
   "exec "*" find "*) echo /usr/share/nginx/html/assets/index-abc.js ;;
   "exec "*" curl "*) cat "$RESPONSE" ;;
@@ -56,14 +57,19 @@ def test_smoke_removes_its_container_when_the_script_aborts(tmp_path: Path) -> N
     assert calls[-1] == f"rm --force {started[-1]}"
 
 
-def test_infra_nginx_config_is_tested_with_the_compose_service_names_resolvable(
-    tmp_path: Path,
-) -> None:
+def _repo_with_infra_nginx_conf(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     (repo / "infra" / "nginx").mkdir(parents=True)
     (repo / "infra" / "nginx" / "nginx.conf").write_text("events {}\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)  # noqa: S607
     subprocess.run(["git", "add", "infra"], cwd=repo, check=True)  # noqa: S607
+    return repo
+
+
+def test_infra_nginx_config_is_tested_with_the_compose_service_names_resolvable(
+    tmp_path: Path,
+) -> None:
+    repo = _repo_with_infra_nginx_conf(tmp_path)
     code, calls, _ = _run("check_nginx.sh", repo, tmp_path)
     assert code == 0
     (infra,) = [c for c in calls if "/etc/nginx/nginx.conf:ro" in c]
@@ -71,6 +77,14 @@ def test_infra_nginx_config_is_tested_with_the_compose_service_names_resolvable(
         assert f"--add-host={service}:127.0.0.1" in infra
     mount = f"{repo}/infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
     assert infra.endswith(f"-v {mount} elsaquiz-web:ci nginx -t")
+
+
+def test_the_nginx_check_stops_when_compose_cannot_list_the_services(tmp_path: Path) -> None:
+    """Compose refuses to read the file while the full stack's secrets are unset."""
+    repo = _repo_with_infra_nginx_conf(tmp_path)
+    code, calls, _ = _run("check_nginx.sh", repo, tmp_path, COMPOSE_FAILS="1")
+    assert code != 0
+    assert not [c for c in calls if "/etc/nginx/nginx.conf:ro" in c]
 
 
 def _response(tmp_path: Path, missing: str = "") -> Path:
