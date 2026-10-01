@@ -66,6 +66,12 @@ known-first-party = ["quiz", "check_internal", "bots", "latency", "player"]
 "../load/*.py" = ["T201"]
 "../load/tests/**" = ["S101", "PLR2004"]
 
+# make check runs deptry on src, and on ../scripts and ../load with the Makefile's extra flags.
+[tool.deptry]
+known_first_party = ["quiz"]
+# pydantic pins pydantic-core to one exact version, so importing it directly is safe.
+per_rule_ignores = { DEP003 = ["pydantic_core"] }
+
 [tool.mypy]
 strict = true
 python_version = "3.14"

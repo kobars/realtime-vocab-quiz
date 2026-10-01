@@ -1,10 +1,13 @@
-# AI-ASSISTED: checks on the pre-commit hooks, make check and the CI workflow triggers.
+# AI-ASSISTED: checks on the pre-commit hooks, make check, deptry and the CI workflow triggers.
 """Tests for the repository's hook and workflow configuration.
 
 The workflows and the Makefile are read as text; the hook test uses pre-commit's own
 config loader and file filter.
 """
 
+import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -107,3 +110,42 @@ def test_make_check_runs_every_pre_commit_hook_on_every_file() -> None:
         ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
     )
     assert any("pre-commit run --all-files" in line for line in recipe)
+
+
+def test_make_check_runs_the_dependency_check_on_every_python_root() -> None:
+    recipe = _block(
+        ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
+    )
+    assert any("uv run --locked deptry src" in line for line in recipe)
+    assert any("$(DEPTRY_TOOLS)" in line for line in recipe)
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "uv run --locked deptry ../scripts ../load" in makefile
+
+
+def test_dependency_check_fails_when_a_direct_import_is_undeclared(tmp_path: Path) -> None:
+    # src imports starlette directly; without its own entry it only arrives through fastapi.
+    config, removed = re.subn(
+        r'^\s*"starlette[^"]*",\n',
+        "",
+        (ROOT / "api" / "pyproject.toml").read_text(encoding="utf-8"),
+        flags=re.MULTILINE,
+    )
+    assert removed == 1
+    (tmp_path / "pyproject.toml").write_text(config, encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "deptry",
+            "src",
+            "--no-ansi",
+            "--config",
+            str(tmp_path / "pyproject.toml"),
+        ],
+        cwd=ROOT / "api",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "DEP003 'starlette' imported but it is a transitive dependency" in result.stderr
