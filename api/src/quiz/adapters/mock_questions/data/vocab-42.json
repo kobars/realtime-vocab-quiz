@@ -1,0 +1,16 @@
+{
+  "quiz_id": "VOCAB-42",
+  "title": "Everyday English",
+  "questions": [
+    {"id": "vocab42-01", "word": "abundant", "choices": ["more than enough", "very rare", "slightly damp", "hard to reach"], "answer": 0},
+    {"id": "vocab42-02", "word": "reluctant", "choices": ["eager to start", "unwilling and hesitant", "very loud", "easily broken"], "answer": 1},
+    {"id": "vocab42-03", "word": "fragile", "choices": ["heavy and solid", "brightly colored", "easily broken", "quick to anger"], "answer": 2},
+    {"id": "vocab42-04", "word": "generous", "choices": ["careful with money", "always late", "hard to please", "happy to give"], "answer": 3},
+    {"id": "vocab42-05", "word": "vivid", "choices": ["bright and clear", "dull and grey", "hidden from view", "barely awake"], "answer": 0},
+    {"id": "vocab42-06", "word": "cautious", "choices": ["careless", "careful to avoid risk", "very tired", "deeply sad"], "answer": 1},
+    {"id": "vocab42-07", "word": "humble", "choices": ["proud and boastful", "very tall", "modest about oneself", "extremely rich"], "answer": 2},
+    {"id": "vocab42-08", "word": "ancient", "choices": ["brand new", "badly made", "far away", "very old"], "answer": 3},
+    {"id": "vocab42-09", "word": "curious", "choices": ["eager to know", "afraid of change", "unable to move", "quietly angry"], "answer": 0},
+    {"id": "vocab42-10", "word": "swift", "choices": ["slow and steady", "fast", "sweet-smelling", "twisted"], "answer": 1}
+  ]
+}
