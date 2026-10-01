@@ -37,6 +37,11 @@ REDIS_READY = frozenset(
         "test_invalid_quiz_shape_is_rejected",
         "test_create_twice_is_invalid_state",
         "test_read_seq_is_the_counter_or_none",
+        "test_new_connection_replaces_and_fences_the_old",
+        "test_wrong_and_late_score_zero",
+        "test_submission_reused_for_other_question",
+        "test_serve_retry_order_and_finish",
+        "test_finished_player_gets_only_the_retry_rows",
     }
 )
 
