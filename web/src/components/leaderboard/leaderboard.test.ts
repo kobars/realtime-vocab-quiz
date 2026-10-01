@@ -158,11 +158,11 @@ it('a pager button that disables itself hands the focus to the panel, so Escape 
   await receive(board(4, top(50), 150))
   const panel = w.find('section section').element
   for (const name of ['Next', 'Previous']) {
-    const pager = button(w, name)!
-    ;(pager.element as HTMLElement).focus()
-    await pager.trigger('click')
+    const pager = button(w, name)
+    ;(pager?.element as HTMLElement).focus()
+    await pager?.trigger('click')
     await nextTick()
-    expect([pager.attributes('disabled'), document.activeElement]).toEqual(['', panel])
+    expect([pager?.attributes('disabled'), document.activeElement]).toEqual(['', panel])
   }
   panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   await nextTick()
