@@ -25,7 +25,7 @@ and the document skeletons exist; the service itself is being built.
 uv sync --project api        # install the server dependencies
 pnpm -C web install          # install the client dependencies
 make help                    # list every make target
-make check                   # verify the lock file and that the package imports
+make check                   # verify both lock files and that the package imports
 ```
 
 The other targets (`build`, `up`, `down`, `demo`, `demo-stop`, `test`,
