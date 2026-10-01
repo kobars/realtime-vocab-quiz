@@ -5,7 +5,8 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
+from starlette.testclient import TestClient
 
 from quiz.config import Settings
 from quiz.main import create_app, services_of
@@ -13,6 +14,7 @@ from quiz.obs import logs
 
 TOKEN = {"X-Admin-Token": "admin-test-token"}
 NOT_FOUND = {"error": "QUIZ_NOT_FOUND", "message": "no such quiz"}
+NO_ROUTE = {"error": "NOT_FOUND", "message": "Not Found"}
 
 
 def app_with(now: list[int], **settings: object) -> FastAPI:
@@ -60,11 +62,35 @@ async def test_a_ticket_belongs_to_the_session_user(app: FastAPI, http: httpx.As
 async def test_a_ticket_needs_a_known_session(http: httpx.AsyncClient, auth: str | None) -> None:
     resp = await http.post("/tickets", headers={} if auth is None else {"Authorization": auth})
     assert (resp.status_code, resp.headers["WWW-Authenticate"]) == (401, "Bearer")
+    assert resp.json() == {"error": "UNAUTHORIZED", "message": "unknown session"}
 
 
-async def test_a_session_needs_a_display_name(http: httpx.AsyncClient) -> None:
-    for name in ("   ", "x" * 33, "x" * 129):
-        assert (await http.post("/sessions", json={"displayName": name})).status_code == 422
+@pytest.mark.parametrize("scheme", ["Bearer ", "bearer ", "BEARER ", "Bearer  "])
+async def test_the_bearer_scheme_ignores_case_and_extra_spaces(
+    http: httpx.AsyncClient, scheme: str
+) -> None:
+    token = (await http.post("/sessions", json={"displayName": "Ana"})).json()["sessionToken"]
+    auth = {"Authorization": scheme + token}
+    assert (await http.post("/tickets", headers=auth)).status_code == 201
+    swapped = {"Authorization": scheme + token.swapcase()}  # the token itself keeps its case
+    assert (await http.post("/tickets", headers=swapped)).status_code == 401
+
+
+async def test_every_error_has_one_body_shape(http: httpx.AsyncClient) -> None:
+    bodies = [{"displayName": "   "}, {"displayName": "x" * 33}, {"displayName": "x" * 129}, {}]
+    for body in bodies:
+        resp = await http.post("/sessions", json=body)
+        assert (resp.status_code, resp.json()["error"]) == (422, "INVALID_MESSAGE"), body
+        assert resp.json().keys() == {"error", "message"}, body
+        assert "INVALID_MESSAGE" not in resp.json()["message"], body
+    bad_json = await http.post("/sessions", content=b"{bad")
+    assert (bad_json.status_code, bad_json.json()["error"]) == (422, "INVALID_MESSAGE")
+    for path in ("/nope", "/quizzes"):
+        resp = await http.get(path)
+        assert (resp.status_code, resp.json()) == (404, NO_ROUTE), path
+    wrong_method = await http.get("/sessions")
+    assert (wrong_method.status_code, wrong_method.headers["Allow"]) == (405, "POST")
+    assert wrong_method.json() == {"error": "METHOD_NOT_ALLOWED", "message": "Method Not Allowed"}
 
 
 async def test_quiz_info_and_unknown_ids_look_alike(http: httpx.AsyncClient) -> None:
@@ -106,6 +132,23 @@ async def test_admin_needs_the_token(http: httpx.AsyncClient, headers: dict[str,
     assert (await http.post("/admin/quizzes", json=body, headers=headers)).status_code == 404
     assert (await http.post("/admin/quizzes/VOCAB-42/end", headers=headers)).status_code == 404
     assert (await http.get("/quizzes/VOCAB-42")).json()["status"] == "open"
+
+
+@pytest.mark.parametrize("headers", [{}, {"X-Admin-Token": "wrong"}])
+async def test_admin_paths_look_like_unknown_paths_without_the_token(
+    http: httpx.AsyncClient, headers: dict[str, str]
+) -> None:
+    calls = [
+        ("GET", "/admin/quizzes", None),  # a known path with the wrong method
+        ("POST", "/admin/quizzes", b"{bad"),  # a body that does not parse
+        ("POST", "/admin/nope", None),
+        ("DELETE", "/admin/quizzes/VOCAB-42/end", None),
+        ("GET", "/admin", None),
+    ]
+    for method, path, body in calls:
+        resp = await http.request(method, path, content=body, headers=headers)
+        assert (resp.status_code, resp.json()) == (404, NO_ROUTE), (method, path)
+        assert "Allow" not in resp.headers, (method, path)
 
 
 async def test_admin_routes_exist_only_with_admin_mock(now: list[int]) -> None:
@@ -156,14 +199,32 @@ async def test_openapi_shows_every_endpoint_with_an_example(http: httpx.AsyncCli
     schemas = spec["components"]["schemas"]
     expected = {
         ("post", "/sessions"), ("post", "/tickets"), ("get", "/quizzes/{quiz_id}"),
-        ("post", "/admin/quizzes"), ("post", "/admin/quizzes/{quiz_id}/end"),
         ("get", "/healthz"), ("get", "/readyz"), ("get", "/metrics"),
     }  # fmt: skip
     found = {(verb, path) for path, ops in spec["paths"].items() for verb in ops}
     assert expected <= found
+    assert not any(path.startswith("/admin") for path in spec["paths"])  # the mock stays hidden
+    assert "CreateQuiz" not in schemas
     for verb, path in expected:
         ok = next(r for code, r in spec["paths"][path][verb]["responses"].items() if code < "300")
         [content] = ok["content"].values()
         ref = content.get("schema", {}).get("$ref", "")
         examples = schemas[ref.rsplit("/", 1)[-1]].get("examples") if ref else None
         assert "example" in content or examples, (verb, path)
+
+
+def test_an_outage_in_a_websocket_route_reaches_the_websocket_layer(now: list[int]) -> None:
+    app = app_with(now)
+
+    async def broken(websocket: WebSocket) -> None:
+        await websocket.accept()
+        msg = "store unreachable"
+        raise ConnectionError(msg)  # one of the outages that the HTTP handler maps
+
+    app.add_api_websocket_route("/broken", broken)
+    with (
+        TestClient(app) as client,
+        pytest.raises(ConnectionError, match="store unreachable"),
+        client.websocket_connect("/broken") as ws,
+    ):
+        ws.receive_text()

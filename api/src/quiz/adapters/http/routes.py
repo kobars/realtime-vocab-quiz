@@ -2,22 +2,27 @@
 """HTTP routes of docs/spec/protocol.md §8 plus the operator endpoints.
 
 MOCK: ``POST /sessions`` and ``POST /tickets`` stand in for an identity provider, and the
-``/admin`` routes for a quiz admin service; they exist only with ``ADMIN_MOCK=1`` and answer 404
-to a request without the right ``X-Admin-Token``, the same as a route that does not exist.
-Every request logs one JSON line with its ``request_id`` and, when it names one, its ``quiz_id``.
+``/admin`` routes for a quiz admin service; they exist only with ``ADMIN_MOCK=1``, stay out of the
+OpenAPI page, and answer any request under ``/admin`` without the right ``X-Admin-Token`` before
+routing, with the 404 of a path that does not exist (no 405, no 422 that would give them away).
+Every error body is ``{error, message}``. Every request logs one JSON line with its
+``request_id`` and, when it names one, its ``quiz_id``.
 """
 
 import hmac
 import re
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import APIRouter, FastAPI, Header, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import RequestResponseEndpoint
 
 from quiz.adapters.http import models as h
@@ -83,7 +88,9 @@ def _public(deps: HttpDeps) -> APIRouter:
     ) -> h.TicketOut:
         """MOCK: a single-use ticket for ``GET /ws?ticket=…``, valid 30 s."""
         scheme, _, token = authorization.partition(" ")
-        ticket = await deps.tickets.issue_ticket(token) if scheme == "Bearer" and token else None
+        token = token.lstrip(" ")  # the scheme is case-insensitive (RFC 7235); the token is not
+        bearer = scheme.lower() == "bearer" and token
+        ticket = await deps.tickets.issue_ticket(token) if bearer else None
         if ticket is None:
             raise HTTPException(401, "unknown session", headers={"WWW-Authenticate": "Bearer"})
         return h.TicketOut(ticket=ticket, expiresInMs=deps.ticket_ttl_ms)
@@ -116,12 +123,33 @@ def _public(deps: HttpDeps) -> APIRouter:
     return api
 
 
-def _admin(deps: HttpDeps, token: str) -> APIRouter:
-    async def guard(x_admin_token: Annotated[str, Header()] = "") -> None:
-        if not hmac.compare_digest(x_admin_token.encode(), token.encode()):
-            raise HTTPException(404, "Not Found")
+def _problem(
+    status: int, error: str, message: str, headers: Mapping[str, str] | None = None
+) -> Response:
+    return JSONResponse({"error": error, "message": message}, status, headers)
 
-    api = APIRouter(prefix="/admin", tags=["MOCK admin"], dependencies=[Depends(guard)])
+
+# The reply to a path that does not exist.
+NO_ROUTE = (404, HTTPStatus.NOT_FOUND.name, HTTPStatus.NOT_FOUND.phrase)
+
+
+def _admin_guard(token: str) -> Callable[[Request, RequestResponseEndpoint], Awaitable[Response]]:
+    """Answer ``/admin`` requests without the right token before routing: method matching and body
+    parsing run after it, so their 405 and 422 never show that a path exists."""
+
+    async def guard(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        path = request.scope["path"]
+        if path == "/admin" or path.startswith("/admin/"):
+            given = request.headers.get("x-admin-token", "")
+            if not hmac.compare_digest(given.encode(), token.encode()):
+                return _problem(*NO_ROUTE)
+        return await call_next(request)
+
+    return guard
+
+
+def _admin(deps: HttpDeps) -> APIRouter:
+    api = APIRouter(prefix="/admin", tags=["MOCK admin"], include_in_schema=False)
 
     @api.post("/quizzes", status_code=201, responses={409: {"model": h.Problem}})
     async def create_quiz(request: Request, body: h.CreateQuiz) -> h.QuizInfo:
@@ -169,21 +197,37 @@ async def _log_request(request: Request, call_next: RequestResponseEndpoint) -> 
     return response
 
 
+def _invalid(error: RequestValidationError) -> str:
+    """``displayName: String should have at most 128 characters``; the ``body`` prefix dropped."""
+
+    def where(loc: tuple[str | int, ...]) -> str:
+        return ".".join(str(part) for part in loc[1:]) or "body"
+
+    return "; ".join(f"{where(e['loc'])}: {e['msg']}" for e in error.errors())
+
+
 def install(app: FastAPI, deps: HttpDeps) -> None:
     """Add the routes, the request log and the error mapping to ``app``."""
 
-    async def mapped(request: Request, error: Exception) -> JSONResponse:
+    async def mapped(request: Request, error: Exception) -> Response:
         if request.scope["type"] != "http":  # the WebSocket gateway handles its own errors
             raise error
+        if isinstance(error, StarletteHTTPException):
+            status = HTTPStatus(error.status_code)
+            return _problem(status, status.name, str(error.detail), error.headers)
+        if isinstance(error, RequestValidationError):
+            return _problem(422, ErrorCode.INVALID_MESSAGE, _invalid(error))
         if not isinstance(error, DomainError):
-            return JSONResponse({"error": "UNAVAILABLE", "message": "store unreachable"}, 503)
+            return _problem(503, "UNAVAILABLE", "store unreachable")
         message = NOT_FOUND if error.code is ErrorCode.QUIZ_NOT_FOUND else str(error)
-        return JSONResponse({"error": error.code, "message": message}, STATUS.get(error.code, 422))
+        message = message.removeprefix(f"{error.code}: ")  # DomainError's text repeats its code
+        return _problem(STATUS.get(error.code, 422), error.code, message)
 
     app.include_router(_public(deps))
     if deps.admin_token is not None:
-        app.include_router(_admin(deps, deps.admin_token))
-    kinds: tuple[type[Exception], ...] = (DomainError, *deps.outages)
+        app.include_router(_admin(deps))
+        app.middleware("http")(_admin_guard(deps.admin_token))  # inside the request log
+    kinds = (StarletteHTTPException, RequestValidationError, DomainError, *deps.outages)
     for kind in kinds:
         app.add_exception_handler(kind, mapped)
     app.middleware("http")(_log_request)
