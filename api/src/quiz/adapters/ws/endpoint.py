@@ -11,7 +11,7 @@ import uuid
 import structlog
 from fastapi import Response, WebSocket, WebSocketDisconnect
 
-from quiz.adapters.ws.limits import ConnectionCaps, RateLimiter, client_ip
+from quiz.adapters.ws.limits import ConnectionCaps, RateLimiter, connection_ip
 from quiz.adapters.ws.registry import Registry
 from quiz.adapters.ws.sender import Sender
 from quiz.adapters.ws.session import Deps, serve
@@ -67,8 +67,7 @@ class Gateway:
             return await _refuse(ws, 503, "ticket store unreachable")
         if identity is None:
             return await _refuse(ws, 401, "missing, used or expired ticket")
-        peer = ws.client.host if ws.client else None
-        ip = client_ip(peer, ws.headers.getlist("x-forwarded-for"), settings.trusted_proxies)
+        ip = connection_ip(ws, settings.trusted_proxies)
         if (status := self.caps.acquire(ip)) is not None:
             return await _refuse(ws, status, "connection cap reached")
         code = 1006  # the socket dropped without a close frame

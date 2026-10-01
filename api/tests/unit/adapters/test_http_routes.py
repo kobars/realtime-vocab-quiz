@@ -1,4 +1,4 @@
-# AI-ASSISTED: the HTTP edge's failure paths: an end that was not announced, an unhandled error.
+# AI-ASSISTED: the HTTP edge: an end that was not announced, an unhandled error, the identity limit.
 import io
 import json
 from collections.abc import AsyncIterator
@@ -64,3 +64,18 @@ async def test_an_unhandled_error_answers_500_with_the_request_id(
     assert "RuntimeError: boom" in error["exception"]
     [served] = [line for line in lines if line["event"] == "http_request"]
     assert (served["status"], served["request_id"]) == (500, "req-9")
+
+
+async def test_sessions_and_tickets_share_one_limit_per_client_address() -> None:
+    app = create_app(Settings(per_ip_conn_cap=1))  # a burst of 2: a session and a ticket
+    transport = httpx.ASGITransport(app=app)  # the peer is 127.0.0.1, a trusted proxy
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+        token = (await http.post("/sessions", json={"displayName": "Ana"})).json()["sessionToken"]
+        auth = {"Authorization": f"Bearer {token}"}
+        assert (await http.post("/tickets", headers=auth)).status_code == 201
+        refused = await http.post("/tickets", headers=auth)
+        assert (refused.status_code, refused.json()["error"]) == (429, "TOO_MANY_REQUESTS")
+        assert (await http.post("/sessions", json={"displayName": "Ana"})).status_code == 429
+        other = {"X-Forwarded-For": "203.0.113.7"}  # another client behind that proxy
+        resp = await http.post("/sessions", json={"displayName": "Bo"}, headers=other)
+        assert resp.status_code == 201
