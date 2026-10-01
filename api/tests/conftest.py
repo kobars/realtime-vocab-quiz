@@ -37,7 +37,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
                 item.add_marker(folder)
 
 
-WS_RECEIVE_DEADLINE_S = 10.0  # well inside the per-test timeout, so only the waiting test fails
+WS_RECEIVE_DEADLINE_S = 10.0  # well inside the per-test timeout
 
 
 def receive_within(deadline_s: float) -> Callable[[WebSocketTestSession], Message]:
@@ -55,8 +55,8 @@ def receive_within(deadline_s: float) -> Callable[[WebSocketTestSession], Messag
 def ws_receive() -> Iterator[Callable[[float], Callable[[WebSocketTestSession], Message]]]:
     """Give TestClient's WebSocket receive a deadline; yield the factory for a shorter one.
 
-    Starlette's receive waits forever, so a server that never answers would stall the whole run
-    until the per-test timeout kills it; with the deadline only the waiting test fails.
+    Starlette's receive waits forever, so a server that never answers holds the test until the
+    per-test timeout; with the deadline the receive itself raises TimeoutError much sooner.
     """
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(WebSocketTestSession, "receive", receive_within(WS_RECEIVE_DEADLINE_S))

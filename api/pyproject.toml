@@ -87,11 +87,9 @@ addopts = ["--strict-markers", "--strict-config", "-ra", "--import-mode=importli
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 xfail_strict = true
-# A hung test fails in a minute and names itself: faulthandler dumps every thread's stack first,
-# then pytest-timeout ends the run; its thread method also stops a hang in TestClient's portal.
+# A hung test fails in a minute with every thread's stack; the default signal method fails only
+# that test, so the rest of the run, its fixture teardown and its summary still happen.
 timeout = 60
-timeout_method = "thread"
-faulthandler_timeout = 50
 filterwarnings = ["error"]
 markers = [
     "unit: fast tests of pure code (set by folder)",
