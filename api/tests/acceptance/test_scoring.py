@@ -1,5 +1,4 @@
 # AI-ASSISTED: acceptance tests for answers and scores (AC-3, AC-4), the deadline and retries.
-import asyncio
 import uuid
 from typing import TYPE_CHECKING
 
@@ -16,9 +15,7 @@ async def test_ac3_answer_result_and_resync(quiz_server: QuizServer) -> None:
     result = await bob.answer(0, key)
     snapshot = await alice.request("resync", lastSeq=0)  # alice missed the broadcasts
     assert (result["type"], result["correct"], result["late"]) == ("answer_result", True, False)
-    assert 100 <= result["pointsAwarded"] <= 150
-    assert result["score"] == result["pointsAwarded"]
-    assert snapshot["type"] == "snapshot"
+    assert 100 <= result["pointsAwarded"] == result["score"] <= 150
     scores = {entry["userId"]: entry["score"] for entry in snapshot["entries"]}
     assert scores[bob.user_id] == result["score"]
     assert snapshot["you"]["score"] == 0
@@ -47,8 +44,7 @@ async def test_ac4_late_answer_scores_zero(quiz_server: QuizServer) -> None:
     question = await bob.request("next", questionIndex=0)
     await quiz_server.advance(question["timeLimitMs"] + quiz_server.margin_ms)
     result = await bob.answer(0, key)
-    assert (result["type"], result["late"], result["pointsAwarded"]) == ("answer_result", True, 0)
-    assert result["score"] == 0
+    assert (result["late"], result["pointsAwarded"], result["score"]) == (True, 0, 0)
 
 
 async def test_ac4_retry_replays_and_new_submission_is_refused(quiz_server: QuizServer) -> None:
@@ -74,9 +70,8 @@ async def test_ac4_concurrent_duplicates_count_once(quiz_server: QuizServer) -> 
     await bob.request("next", questionIndex=0)
     repeated = str(uuid.uuid4())  # sent 4 times, between 4 new submission ids
     submissions = [s for _ in range(4) for s in (repeated, str(uuid.uuid4()))]
-    await asyncio.gather(
-        *(bob.send("answer", questionIndex=0, choiceIndex=key, submissionId=s) for s in submissions)
-    )
+    for s in submissions:  # all sent before any reply is read
+        await bob.send("answer", questionIndex=0, choiceIndex=key, submissionId=s)
     replies = [await bob.reply() for _ in submissions]
     snapshot = await bob.request("resync", lastSeq=0)
     results = [r for r in replies if r["type"] == "answer_result"]
@@ -102,7 +97,6 @@ async def test_repeated_next_skips_nothing(quiz_server: QuizServer) -> None:
     again = await bob.request("next", questionIndex=0)
     jump = await bob.request("next", questionIndex=2)
     following = await bob.request("next", questionIndex=1)
-    assert first["type"] == again["type"] == "question"
     assert (again["questionIndex"], again["questionId"]) == (0, first["questionId"])
     assert (jump["type"], jump["code"]) == ("error", "INVALID_STATE")
     assert (following["type"], following["questionIndex"]) == ("question", 1)

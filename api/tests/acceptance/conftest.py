@@ -39,8 +39,6 @@ STORE = os.environ.get("ACCEPTANCE_STORE", "memory")
 
 
 class Player:
-    """One WebSocket connection; messages that a wait skips stay in ``inbox``."""
-
     def __init__(self, ws: ClientConnection, user_id: str, session_token: str) -> None:
         self.ws, self.user_id, self.session_token = ws, user_id, session_token
         self.inbox: list[Msg] = []
@@ -96,7 +94,7 @@ class QuizServer:
         assert resp.status_code in {201, 409}, resp.text
 
     async def connect(self, name: str, session: tuple[str, str] | None = None) -> Player:
-        """Open a socket with a fresh ticket; ``session`` is ``(userId, sessionToken)``."""
+        """``session`` is ``(userId, sessionToken)`` for a reconnect; else a new session."""
         if session is None:
             resp = await self.http.post("/sessions", json={"displayName": name})
             resp.raise_for_status()
@@ -117,9 +115,8 @@ class QuizServer:
 
     async def join_many(self, count: int) -> list[Player]:
         players = await asyncio.gather(*(self.connect(f"p{i}") for i in range(count)))
-        await asyncio.gather(
-            *(p.send("join", quizId="VOCAB-42", displayName=f"p{i}") for i, p in enumerate(players))
-        )
+        for i, player in enumerate(players):  # every join is sent before any reply is read
+            await player.send("join", quizId="VOCAB-42", displayName=f"p{i}")
         for player in players:
             player.joined = await player.reply()
             assert player.joined["type"] == "joined", player.joined
