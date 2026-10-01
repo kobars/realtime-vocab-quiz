@@ -1,4 +1,4 @@
-// AI-ASSISTED: the join form rules: the quiz ID pattern, the display name length after trim, and the name remembered in the tab.
+// AI-ASSISTED: the join form rules: the quiz ID pattern, the display name length after trim and NFC, and the name remembered in the tab.
 import { strings } from '@/strings'
 
 export const QUIZ_ID_PATTERN = /^[A-Z0-9-]{3,16}$/
@@ -11,25 +11,28 @@ export const normalizeQuizId = (raw: string): string => raw.toUpperCase()
 
 export const quizIdError = (quizId: string): string | null => (QUIZ_ID_PATTERN.test(quizId) ? null : strings.join.quizIdInvalid)
 
-/** 1–32 characters after trim, counted as code points like the server does. */
+/** 1–32 characters after trim and NFC normalization, counted as code points like the server does. */
 export function displayNameError(name: string): string | null {
-  const length = [...name.trim()].length
+  const length = [...name.trim().normalize('NFC')].length
   if (length === 0) return strings.join.nameRequired
   return length > NAME_MAX ? strings.join.nameTooLong : null
 }
 
-/** Storage may be blocked (private mode, a sandboxed frame): the name is a convenience, so failures are ignored. */
-export function readName(storage: Storage = sessionStorage): string {
+/**
+ * Storage may be blocked (private mode, a sandboxed frame), and then even reading `sessionStorage` throws: the name is
+ * a convenience, so failures are ignored.
+ */
+export function readName(storage?: Storage): string {
   try {
-    return storage.getItem(NAME_KEY) ?? ''
+    return (storage ?? sessionStorage).getItem(NAME_KEY) ?? ''
   } catch {
     return ''
   }
 }
 
-export function saveName(name: string, storage: Storage = sessionStorage): void {
+export function saveName(name: string, storage?: Storage): void {
   try {
-    storage.setItem(NAME_KEY, name)
+    ;(storage ?? sessionStorage).setItem(NAME_KEY, name)
   } catch {
     // Not remembered; the join still works.
   }
