@@ -1,7 +1,7 @@
 <!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link, the quiz preview and the join (UI spec §3.1). -->
 <script setup lang="ts">
 import { LoaderCircle } from '@lucide/vue'
-import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import JoinField from '@/components/join/JoinField.vue'
 import QuizPreviewCard from '@/components/join/QuizPreviewCard.vue'
@@ -22,6 +22,10 @@ const nameError = ref<string | null>(null)
 const joining = ref(false)
 /** The last join failed for a reason other than the quiz ID: the form is open again, to retry. */
 const joinFailed = ref(false)
+let mounted = true
+onBeforeUnmount(() => {
+  mounted = false
+})
 
 const idField = useTemplateRef<{ focus: () => void }>('idField')
 const nameField = useTemplateRef<{ focus: () => void }>('nameField')
@@ -49,10 +53,18 @@ function onIdInput(value: string): void {
   if (idError.value !== null) idError.value = quizIdError(quizId.value)
 }
 
-function onIdBlur(): void {
+/** Trims and checks the quiz ID; true when it is well formed. */
+function checkId(): boolean {
   quizId.value = quizId.value.trim()
   idError.value = quizIdError(quizId.value)
-  if (idError.value === null) void loadPreview(quizId.value)
+  return idError.value === null
+}
+
+function onIdBlur(): void {
+  if (!checkId()) return
+  void loadPreview(quizId.value)
+  // Leaving the field again without an edit keeps the answer of the lookup already made.
+  if (shown.value?.result?.kind === 'not-found') idError.value = strings.join.notFound
 }
 
 function onNameInput(value: string): void {
@@ -67,14 +79,20 @@ function onNameBlur(): void {
 async function submit(): Promise<void> {
   if (joining.value) return
   joinFailed.value = false
-  onIdBlur()
+  checkId()
   onNameBlur()
   if (idError.value !== null) return focus(idField)
   if (nameError.value !== null) return focus(nameField)
   joining.value = true
+  const id = quizId.value
   // A miss or a failed lookup is asked again: the quiz may exist by now.
-  const known = lookup.value?.quizId === quizId.value ? lookup.value.result : null
-  const result = await loadPreview(quizId.value, known !== null && known.kind !== 'found')
+  const known = lookup.value?.quizId === id ? lookup.value.result : null
+  const result = await loadPreview(id, known !== null && known.kind !== 'found')
+  // The answer is stale once the screen has closed or the quiz ID has changed.
+  if (!mounted || quizId.value !== id) {
+    joining.value = false
+    return
+  }
   if (result.kind === 'not-found') {
     joining.value = false
     idError.value = strings.join.notFound
@@ -82,7 +100,7 @@ async function submit(): Promise<void> {
   }
   saveName(name.value)
   try {
-    store.join(quizId.value, name.value)
+    store.join(id, name.value)
   } catch {
     // The client could not start, for example when storage is blocked.
     failJoin()
@@ -104,7 +122,7 @@ const outcome = computed(() => {
   return store.lastError?.requestType === 'join' || store.connection === 'closed' ? 'failed' : null
 })
 
-// The fields are read-only while joining, so `quizId` is still the ID that was sent.
+// The fields are read-only and links are ignored while joining, so `quizId` is still the ID that was sent.
 watch(outcome, (result) => {
   if (!joining.value) return
   if (result === 'ready') void router.push({ name: 'quiz', params: { quizId: quizId.value } })
@@ -119,6 +137,7 @@ watch(outcome, (result) => {
 watch(
   () => route.query.quiz,
   (linked) => {
+    if (joining.value) return
     if (typeof linked !== 'string' || linked.trim() === '') return focus(idField)
     quizId.value = normalizeQuizId(linked.trim())
     idError.value = quizIdError(quizId.value)
