@@ -168,12 +168,14 @@ Backoff is full jitter: `floor(random() × min(10,000, 250 × 2^attempt))` ms, r
 
 ## 8. Authentication
 
-1. `POST /sessions` (once per tab) returns a mock `userId` and a session token, kept in the tab.
+1. `POST /sessions` (once per tab) returns a mock `userId` and a session token, kept in the tab. The session lasts 2 h, twice the longest quiz window; after that `POST /tickets` answers 401 and the client creates a new session.
 2. Before every connect, `POST /tickets` with the session token returns a ticket: 32 random bytes in base64url, single use, valid 30 s.
-3. `GET /ws?ticket=…` with the subprotocol `quiz.v1`. Before the upgrade the server checks, in order, the `Origin` (403), that the client offers `quiz.v1` (400), the ticket (401) and the connection caps (503 at 10,000 per process, 429 at 50 per IP). Each refusal is a plain HTTP response with no `error` frame, which the browser sees as close 1006 (§7). The identity comes from the ticket only.
+3. `GET /ws?ticket=…` with the subprotocol `quiz.v1`. Before the upgrade the server checks, in order, the `Origin` (403), that the client offers `quiz.v1` (400), the ticket (401) and the connection caps (503 at 10,000 per process, 429 at 50 per IP). The IP is the peer's, or the client's from `X-Forwarded-For` when the peer is a trusted proxy (`TRUSTED_PROXIES`: by default the local host only; behind nginx elsewhere, set it to nginx's address or its network's subnet). Each refusal is a plain HTTP response with no `error` frame, which the browser sees as close 1006 (§7). The identity comes from the ticket only.
 4. Logs record the path only, never the query string, so tickets never reach a log.
 
 The HTTP endpoints (`/docs` serves the OpenAPI page, without the admin routes). Every error body is `{error, message}`: request validation answers 422 `INVALID_MESSAGE`, a store outage 503 `UNAVAILABLE`, and a path that does not exist 404 `NOT_FOUND`.
+
+`POST /sessions` and `POST /tickets` share one token bucket per client IP (found as above): a burst of 2 × `PER_IP_CONN_CAP` (a session and a ticket for each socket one IP may hold), refilled over 60 s. Above it they answer 429 `TOO_MANY_REQUESTS`.
 
 | Endpoint | Reply |
 |---|---|

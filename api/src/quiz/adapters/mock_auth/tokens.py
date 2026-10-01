@@ -11,8 +11,10 @@ import secrets
 import unicodedata
 
 from quiz.domain.errors import DomainError, ErrorCode
+from quiz.domain.session import MAX_WINDOW_MS
 
-SESSION_TTL_S = 24 * 60 * 60
+# Twice the longest quiz window: a session made to join a quiz outlives it, and unused ones go soon.
+SESSION_TTL_S = 2 * MAX_WINDOW_MS // 1000
 TICKET_TTL_S = 30
 TOKEN_BYTES = 32
 RAW_NAME_MAX, NAME_MAX = 128, 32
