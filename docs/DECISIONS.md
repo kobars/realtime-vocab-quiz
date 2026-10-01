@@ -30,6 +30,8 @@ Each decision uses the format below. ADRs are never renumbered; a later ADR supe
 
 ## ADR-001 — Build the real-time quiz service, with a Python and FastAPI server; mock identity, questions and admin
 
+<!-- AI-ASSISTED-BEGIN: ADR-001 drafted with Claude Code from the challenge requirements and api/pyproject.toml, checked by hand against the ports in api/src/quiz/ports/ and the mock adapters. -->
+
 - **Status:** accepted
 - **Date:** 2026-10-01
 
@@ -55,6 +57,8 @@ The challenge asks for one core real-time component built for real, with the res
 - The mocks sit behind ports, so a real identity provider or content service replaces one adapter without touching the domain or the use cases; import-linter enforces the layers in `make check`.
 - A Python process runs one event loop on one core: JSON encoding and send work per frame cost CPU, so a node holds fewer sockets than a Go server would. The design scales by adding processes behind nginx, and the coalescing tick bounds sends per connection (ADR-004); the load runs measure the limit (DESIGN §9).
 - One source of truth for the protocol: a contract change regenerates the schema and the client types, and `make check` fails on drift.
+
+<!-- AI-ASSISTED-END -->
 
 ## ADR-002 — Self-paced quiz model and the integer scoring rule
 
@@ -246,6 +250,8 @@ One schema in one Redis: every key of a quiz is `quiz:{<quizId>}:<name>`, with t
 
 ## ADR-009 — Repository layout and the Vue client: `api/`, `web/`, generated `contracts/`
 
+<!-- AI-ASSISTED-BEGIN: ADR-009 drafted with Claude Code from the repository layout, api/pyproject.toml and web/package.json, checked by hand against the code. -->
+
 - **Status:** accepted
 - **Date:** 2026-10-01
 
@@ -270,3 +276,5 @@ The service has a Python server and a browser client that must agree on every me
 - A protocol change is one PR: edit the Pydantic model, run `make contracts`, and the client sees the new types at compile time (`vue-tsc` in `make check`).
 - Two toolchains to install (uv and pnpm), each with a committed lock file; CI installs both from the locks.
 - shadcn-vue components live in `web/src/components/ui/` as our own code, so we maintain them instead of upgrading a package.
+
+<!-- AI-ASSISTED-END -->
