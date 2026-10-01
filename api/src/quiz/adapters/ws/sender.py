@@ -23,6 +23,9 @@ FLUSH_S = 5.0
 # Our encoder writes compact JSON, and a quote inside a string value is escaped: this key with
 # its value occurs once per frame.
 _NOT_REBASED, _REBASED = b'"rebase":false', b'"rebase":true'
+_SLOW = encode(
+    m.ProtocolError(code=m.ErrorCode.UNAVAILABLE, message="slow client", requestType=None)
+)
 
 
 @dataclass(slots=True)
@@ -57,17 +60,19 @@ class Sender:
             data = data.replace(_NOT_REBASED, _REBASED, 1)
             if self._queue and self._queue[-1].leaderboard:
                 self._queued -= len(self._queue.pop().data)
-        self._queue.append(_Frame(data, leaderboard))
-        self._queued += len(data)
+        self._append(data, leaderboard=leaderboard)
         if self.buffered > self._hard:
             self._queue.clear()
             self._queued = 0
-            slow = m.ProtocolError(
-                code=m.ErrorCode.UNAVAILABLE, message="slow client", requestType=None
-            )
-            self.send(slow)
+            # The frame in flight still counts, so the error may pass the limit too: it skips
+            # the check, and the close always follows.
+            self._append(_SLOW, leaderboard=False)
             self.close(CLOSE_OVERLOAD)
         self._ready.set()
+
+    def _append(self, data: bytes, *, leaderboard: bool) -> None:
+        self._queue.append(_Frame(data, leaderboard))
+        self._queued += len(data)
 
     def close(self, code: int) -> None:
         """Close the socket with ``code`` once the queued frames are out."""
@@ -75,18 +80,20 @@ class Sender:
             return
         self.close_code = code
         self._close_by = asyncio.get_running_loop().time() + self._flush_s
-        if self._deadline is not None:
+        if self._deadline is not None:  # only while the writer is inside it
             self._deadline.reschedule(self._close_by)
         self._ready.set()
 
     async def _run(self) -> None:
         try:
-            async with asyncio.timeout(self._close_by) as self._deadline:
+            async with asyncio.timeout_at(self._close_by) as self._deadline:  # a loop time
                 await self._write()
         except TimeoutError:
             pass  # the queue did not drain within flush_s of the close: close it anyway
         except Exception:  # noqa: BLE001 - the socket is gone; the receive loop sees the drop
             return
+        finally:
+            self._deadline = None  # a finished timeout cannot be rescheduled by a later close()
         with suppress(Exception):  # it may have dropped meanwhile
             await self._ws.close(self.close_code or 1000)
 
