@@ -197,7 +197,8 @@ class QuizService:
         head, shared = await self._head(quiz_id), self._shared.get(quiz_id)
         if shared is None or (shared.at_seq, shared.status) != head:
             shared = self._shared[quiz_id] = await self._store.snapshot(quiz_id, None)
-        you = None if user_id is None else await self._store.rank_of(quiz_id, user_id)
+        users = () if user_id is None else (user_id,)
+        you = next(iter((await self._store.ranks_of(quiz_id, users)).rows.values()), None)
         return m.Snapshot(
             atSeq=shared.at_seq,
             status=shared.status,
