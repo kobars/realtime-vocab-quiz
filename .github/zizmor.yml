@@ -1,0 +1,6 @@
+# AI-ASSISTED: zizmor settings: every action, GitHub's own included, is pinned to a commit SHA.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": hash-pin

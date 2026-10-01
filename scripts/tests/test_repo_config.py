@@ -8,6 +8,7 @@ config loader.
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -74,7 +75,11 @@ GATE_FAILS = "- if: contains(needs.*.result, 'failure') || contains(needs.*.resu
     ("workflow", "gate", "needs"),
     [
         ("ci.yml", "ci-required", "[check, integration, coverage, guards, review-budget]"),
-        ("security.yml", "security-required", "[secrets, dependency-review]"),
+        (
+            "security.yml",
+            "security-required",
+            "[secrets, dependency-review, lockfiles, python-audit, web-audit]",
+        ),
         ("containers.yml", "containers-required", "[config, images]"),
     ],
 )
@@ -216,6 +221,47 @@ def test_make_check_runs_every_pre_commit_hook_on_every_file() -> None:
         ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
     )
     assert any("pre-commit run --all-files" in line for line in recipe)
+
+
+def test_make_check_lints_the_workflows() -> None:
+    recipe = _block(
+        ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
+    )
+    assert any("uv run --project api --locked actionlint" in line for line in recipe)
+    assert any("$(ZIZMOR)" in line for line in recipe)
+
+
+@pytest.mark.parametrize(
+    ("uses", "fails"),
+    [
+        ("actions/checkout@v7", True),
+        ("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1", False),
+    ],
+)
+def test_workflow_lint_fails_on_an_action_that_is_not_pinned_to_a_commit(
+    tmp_path: Path, uses: str, *, fails: bool
+) -> None:
+    """The Makefile's zizmor command with the repository's settings, on a one-step workflow."""
+    line = next(
+        line
+        for line in (ROOT / "Makefile").read_text(encoding="utf-8").splitlines()
+        if line.startswith("ZIZMOR = ")
+    )
+    args = shlex.split(line.split(" zizmor ", 1)[1])
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    shutil.copy(ROOT / ".github" / "zizmor.yml", tmp_path / ".github")
+    (workflows / "probe.yml").write_text(
+        "on: push\npermissions: {}\njobs:\n  probe:\n    runs-on: ubuntu-latest\n"
+        f"    steps:\n      - uses: {uses}\n        with:\n          persist-credentials: false\n",
+        encoding="utf-8",
+    )
+    zizmor = Path(sys.executable).with_name("zizmor")
+    result = subprocess.run(
+        [zizmor, *args], cwd=tmp_path, capture_output=True, text=True, check=False
+    )
+    assert (result.returncode != 0) is fails, result.stdout + result.stderr
+    assert ("unpinned-uses" in result.stdout) is fails
 
 
 def _deptry_tools() -> tuple[list[str], list[str]]:

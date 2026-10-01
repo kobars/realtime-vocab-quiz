@@ -14,8 +14,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # The token raises lychee's GitHub rate limit.
       - env:
           GITHUB_TOKEN: ${{ github.token }}
         run: scripts/check_links.sh
+
+  scheduled-failure:
+    if: failure() && github.event_name == 'schedule'
+    needs: [links]
+    permissions:
+      issues: write
+    uses: ./.github/workflows/scheduled-failure.yml

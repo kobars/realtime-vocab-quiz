@@ -1,6 +1,6 @@
 # AI-ASSISTED: CI: make check, the Redis integration tests, the acceptance tests on both stores
-# and the combined coverage gate, on pull requests and on main; the PR guards and the review
-# budget on pull requests.
+# and the combined coverage gate, on pull requests, on main and weekly; the PR guards and the
+# review budget on pull requests.
 name: ci
 
 on:
@@ -9,6 +9,9 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
+  # Upstream drift (the runner, Node, the Redis image) fails here without a code change.
+  schedule:
+    - cron: "29 4 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -20,26 +23,29 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  HYPOTHESIS_PROFILE: ci
+  # The weekly run tries ten times as many examples per property (api/tests/conftest.py).
+  HYPOTHESIS_PROFILE: ${{ github.event_name == 'schedule' && 'scheduled' || 'ci' }}
   # The Makefile writes each test step's JUnit report here; upload-test-results uploads them.
   REPORTS: reports
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'schedule' && 30 || 10 }}
     env:
       COVERAGE_FILE: ${{ github.workspace }}/reports/.coverage.unit
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
           cache-dependency-glob: api/uv.lock
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -53,7 +59,7 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'schedule' && 30 || 10 }}
     services:
       redis:
         image: redis:8.10-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
@@ -71,8 +77,10 @@ jobs:
       # appends to the integration run's data.
       PYTEST_ADDOPTS: --cov --cov-report= --cov-fail-under=0 --cov-append
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
           cache-dependency-glob: api/uv.lock
@@ -132,11 +140,12 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
           cache-dependency-glob: api/uv.lock
@@ -154,15 +163,16 @@ jobs:
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       TIKTOKEN_CACHE_DIR: /tmp/tiktoken
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
           cache-dependency-glob: api/uv.lock
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.TIKTOKEN_CACHE_DIR }}
           key: tiktoken-o200k_base
@@ -178,3 +188,10 @@ jobs:
       # A skipped job passes, so a job that runs only on some events never blocks a merge.
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: exit 1
+
+  scheduled-failure:
+    if: failure() && github.event_name == 'schedule'
+    needs: [check, integration]
+    permissions:
+      issues: write
+    uses: ./.github/workflows/scheduled-failure.yml

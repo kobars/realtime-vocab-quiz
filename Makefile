@@ -35,6 +35,9 @@ UNIT_COVERAGE_FLOOR = 84
 # deptry's default, which skips every folder named tests. pydantic pins pydantic-core to one
 # exact version, so scripts/gen_contracts.py may import it directly.
 DEPTRY_TOOLS = cd api && uv run --locked deptry tests ../scripts ../load --exclude '\.venv' --ignore DEP002,DEP004 --per-rule-ignores DEP003=pydantic_core
+# Workflow security lint; .github/zizmor.yml requires every action to be pinned to a commit SHA.
+# Offline: the audits that call the GitHub API need a token.
+ZIZMOR = uv run --project api --locked zizmor --offline --min-severity medium .github
 # The image tag; both images build from the repository root, so the root .dockerignore applies.
 IMAGE_TAG ?= dev
 # The API node that the Vite dev server proxies to (web/vite.config.ts) and that server's origins.
@@ -76,6 +79,8 @@ check: export ACCEPTANCE_STORE = memory
 check: ## Run every check a change must pass
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,pre-commit hooks,uv run --project api --locked pre-commit run --all-files)
+	$(call step,actionlint,uv run --project api --locked actionlint)
+	$(call step,zizmor,$(ZIZMOR))
 	$(call step,mypy,cd api && uv run --locked mypy)
 	$(call step,import layers,cd api && uv run --locked lint-imports)
 	$(call step,dependencies,cd api && uv run --locked deptry src)

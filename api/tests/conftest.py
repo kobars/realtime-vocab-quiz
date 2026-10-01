@@ -23,6 +23,7 @@ from quiz.obs import metrics
 
 settings.register_profile("dev", max_examples=50)
 settings.register_profile("ci", max_examples=500, deadline=None, print_blob=True)
+settings.register_profile("scheduled", max_examples=5000, deadline=None, print_blob=True)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
 
 _TESTS = Path(__file__).parent
