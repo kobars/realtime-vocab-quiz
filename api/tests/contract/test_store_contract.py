@@ -137,6 +137,42 @@ async def test_serve_retry_order_and_finish(store: Store, quiz_id: str) -> None:
     assert finished == Finished(finished.at_seq, total=0, rank=1, player_count=1)
 
 
+async def test_finished_player_gets_only_the_retry_rows(store: Store, quiz_id: str) -> None:
+    await started(store, quiz_id, "a", "b")
+    for i in (1, 2):
+        await store.serve_next(quiz_id, "a", i, "c-a")
+    total = await answer(store, quiz_id, "a", 2, 2, "s1")  # answering the last question finishes
+    retry = await store.serve_next(quiz_id, "a", 2, "c-a")  # a retry re-serves, writes nothing
+    assert isinstance(retry, Served)
+    assert (retry.question_index, retry.question_id) == (2, "q2")
+    closed = store.apply_answer(quiz_id, "a", 2, 2, "s2", "c-a")
+    assert await refused(closed) == ErrorCode.ALREADY_ANSWERED
+    await store.serve_next(quiz_id, "b", len(QUESTIONS), "c-b")  # finishes with question 0 open
+    assert isinstance(await store.serve_next(quiz_id, "b", 0, "c-b"), Served)
+    assert await refused(store.serve_next(quiz_id, "b", 1, "c-b")) == ErrorCode.INVALID_STATE
+    finished = await store.serve_next(quiz_id, "a", len(QUESTIONS), "c-a")
+    assert isinstance(finished, Finished)
+    assert (finished.total, finished.rank) == (total, 1)
+
+
+async def test_refusals_after_the_deadline(store: Store, advance: Advance, quiz_id: str) -> None:
+    await started(store, quiz_id, "a")
+    first = await store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-a")
+    await store.serve_next(quiz_id, "a", 1, "c-a")
+    await advance(WINDOW_MS)
+    for user in ("a", "nobody"):  # the deadline check comes before the player check
+        conn = f"c-{user}"
+        assert await refused(store.join(quiz_id, user, "X", conn)) == ErrorCode.QUIZ_ENDED
+        assert await refused(store.serve_next(quiz_id, user, 2, conn)) == ErrorCode.QUIZ_ENDED
+        late = store.apply_answer(quiz_id, user, 1, 1, "s2", conn)
+        assert await refused(late) == ErrorCode.QUIZ_ENDED
+    again = await store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-a")  # a replay still answers
+    assert again.result == first.result
+    assert not await store.leave(quiz_id, "a", "c-other")  # leave still compares the connection
+    assert await store.leave(quiz_id, "a", "c-a")
+    assert not await store.leave(quiz_id, "a", "c-a")
+
+
 async def test_ranks_of_reads_many_users_at_one_seq(store: Store, quiz_id: str) -> None:
     await started(store, quiz_id, "a", "b")
     points = await answer(store, quiz_id, "b", 0, 0, "s1")

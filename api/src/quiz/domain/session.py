@@ -143,8 +143,8 @@ def _served(state: QuizState, player: Player, now: int) -> ev.QuestionServed:
 
 
 def _serve_next(state: QuizState, command: ServeNext, now: int) -> Step:
+    _require_open(state, now)  # the deadline check comes before the player check
     player = _player(state, command.user_id)
-    _require_open(state, now)
     i, n, user_id = command.question_index, len(state.questions), command.user_id
     if player.finished and i == n:  # a repeat of the finishing request
         return Step(state, (), ev.PlayerFinished(user_id, player.standing.total))
@@ -167,13 +167,14 @@ def _serve_next(state: QuizState, command: ServeNext, now: int) -> Step:
 
 
 def _answer(state: QuizState, command: Answer, now: int) -> Step:
-    player = _player(state, command.user_id)
     i, user_id, sid = command.question_index, command.user_id, command.submission_id
-    if (stored := player.results.get(sid)) is not None:  # idempotency layer 1
+    known = state.players.get(user_id)
+    if known is not None and (stored := known.results.get(sid)) is not None:  # idempotency 1
         if stored.question_index == i:
             return Step(state, (), stored)
         raise DomainError(ErrorCode.INVALID_MESSAGE, "submissionId reused for another question")
-    _require_open(state, now)
+    _require_open(state, now)  # the deadline check comes before the player check
+    player = _player(state, user_id)
     if not 0 <= i <= player.cursor:
         raise DomainError(ErrorCode.QUESTION_NOT_OPEN, f"question {i} was not served")
     if i < player.cursor or not player.cursor_open:  # idempotency layer 2
