@@ -80,7 +80,9 @@ async def test_publishing_continues_after_1000_writes(
     assert (await redis_store.publish_if_dirty(quiz_id, "n1")).status == "published"
     for n in range(1000):  # each write script refreshes the data TTL
         await redis_store.join(quiz_id, "a", "A", f"c{n}")
-    assert 0 < await redis_client.pttl(keys.tick) <= 200 or not await redis_client.exists(keys.tick)
+    pttl = await redis_client.pttl(keys.tick)
+    # -2: expired; 0: its last millisecond, still there; -1 (no expiry) or > 200: stretched.
+    assert pttl == -2 or 0 <= pttl <= 200
     await asyncio.sleep(0.25)
     assert await redis_store.publish_if_dirty(quiz_id, "n1") == Publish("published", 2)
 
