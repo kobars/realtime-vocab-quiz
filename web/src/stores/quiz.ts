@@ -149,6 +149,8 @@ export const useQuizStore = defineStore('quiz', () => {
         standings(message.seq, message.entries, message.playerCount, s.onlineCount, message.you)
         return end()
       case 'leaderboard_page':
+        // A page read before the end never shows after it: only the final standings do.
+        if (s.ended && !message.final) return
         s.page = { offset: message.offset, atSeq: message.atSeq, final: message.final, rows: message.entries }
         s.playerCount = message.playerCount
         return
@@ -200,9 +202,12 @@ export const useQuizStore = defineStore('quiz', () => {
   }
 
   const setCursor = (cursor: number, open: boolean): void => void (s.quiz && Object.assign(s.quiz, { cursor, cursorOpen: open }))
-  /** The end drops the pending answer and the resync pill: a snapshot read before it never arrives (UI spec §4.3). */
+  /**
+   * The end drops the pending answer and the resync pill: a snapshot read before it never arrives (UI spec §4.3).
+   * It also drops a live "Show all players" page, so the results list waits for a final one.
+   */
   function end(): void {
-    Object.assign(s, { ended: true, pending: null, phase: 'results' })
+    Object.assign(s, { ended: true, pending: null, phase: 'results', page: s.page?.final ? s.page : null })
     if (s.connection === 'resyncing') s.connection = 'joined'
   }
 

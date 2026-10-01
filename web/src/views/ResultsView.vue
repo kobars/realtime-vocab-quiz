@@ -1,10 +1,11 @@
-<!-- AI-ASSISTED: the finished and results screens: a provisional rank and the live board until the end, then the podium, my final rank and the top 50 (UI spec §3.6). -->
+<!-- AI-ASSISTED: the finished and results screens: a provisional rank and the live board until the end, with my score and rank in live regions, then the podium, my final rank and the top 50 (UI spec §3.6, §6.3). -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import AllPlayers from '@/components/leaderboard/AllPlayers.vue'
 import LeaderboardPanel from '@/components/leaderboard/LeaderboardPanel.vue'
 import LeaderboardRows from '@/components/leaderboard/LeaderboardRows.vue'
 import ResultsPodium from '@/components/leaderboard/ResultsPodium.vue'
+import { TOP_N } from '@/components/leaderboard/limits'
 import { Badge } from '@/components/ui/badge'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
@@ -12,7 +13,8 @@ import { strings } from '@/strings'
 const store = useQuizStore()
 const heading = useTemplateRef<HTMLElement>('heading')
 const podium = computed(() => store.entries.filter((row) => row.rank <= 3))
-const rest = computed(() => store.entries.filter((row) => row.rank > 3))
+// An ended snapshot carries every player up to 200; the list stops at the top 50.
+const rest = computed(() => store.entries.filter((row) => row.rank > 3 && row.rank <= TOP_N))
 const focusHeading = () => void nextTick(() => heading.value?.focus())
 onMounted(focusHeading)
 watch(() => store.ended, focusHeading)
@@ -21,6 +23,22 @@ watch(() => store.ended, focusHeading)
 const msLeft = ref(store.quizMsLeft())
 const timer = setInterval(() => (msLeft.value = store.quizMsLeft()), 1_000)
 onBeforeUnmount(() => clearInterval(timer))
+
+// The rank announced in the live region: on a change, at most once every 5 s, then the latest (UI spec §6.3).
+const RANK_ANNOUNCE_MS = 5_000
+const rankText = () => (store.myRank === null ? '' : strings.results.rankLive(store.myRank, store.playerCount))
+const rankAnnounced = ref(rankText())
+let cooldown: ReturnType<typeof setTimeout> | null = null
+function announceRank(): void {
+  if (cooldown !== null || rankText() === rankAnnounced.value) return
+  rankAnnounced.value = rankText()
+  cooldown = setTimeout(() => {
+    cooldown = null
+    announceRank()
+  }, RANK_ANNOUNCE_MS)
+}
+watch(rankText, announceRank)
+onBeforeUnmount(() => cooldown !== null && clearTimeout(cooldown))
 const timeLeft = computed(() => {
   const seconds = Math.ceil(msLeft.value / 1_000)
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
@@ -73,8 +91,19 @@ const timeLeft = computed(() => {
       >
         {{ strings.results.finished }}
       </h2>
-      <p class="tabular-nums">
+      <p
+        class="tabular-nums"
+        aria-live="polite"
+        aria-atomic="true"
+      >
         {{ strings.results.points(store.myScore) }}
+      </p>
+      <p
+        class="sr-only"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {{ rankAnnounced }}
       </p>
       <p
         v-if="store.myRank !== null"
