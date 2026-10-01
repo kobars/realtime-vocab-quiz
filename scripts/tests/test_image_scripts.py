@@ -4,8 +4,11 @@
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -24,9 +27,11 @@ esac
 """
 
 
-def _run(script: str, cwd: Path, tmp_path: Path, **env_extra: str) -> tuple[int, list[str], str]:
-    """Run ``script`` in ``cwd`` with the docker stub; return its exit code, the docker calls
-    and its stderr."""
+def _run(
+    script: str, cwd: Path, tmp_path: Path, root: Path = ROOT, **env_extra: str
+) -> tuple[int, list[str], str]:
+    """Run ``script`` of the checkout ``root`` in ``cwd`` with the docker stub; return its exit
+    code, the docker calls and its stderr."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     docker = bin_dir / "docker"
@@ -37,7 +42,7 @@ def _run(script: str, cwd: Path, tmp_path: Path, **env_extra: str) -> tuple[int,
     path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
     env = {**os.environ, "PATH": path, "DOCKER_LOG": str(log), **env_extra}
     result = subprocess.run(
-        [str(ROOT / "scripts" / script), "ci"], cwd=cwd, env=env, capture_output=True, check=False
+        [str(root / "scripts" / script), "ci"], cwd=cwd, env=env, capture_output=True, check=False
     )
     calls = log.read_text(encoding="utf-8").splitlines()
     return result.returncode, calls, result.stderr.decode()
@@ -98,3 +103,31 @@ def test_smoke_fails_when_a_response_lacks_a_security_header(tmp_path: Path) -> 
     assert "/ lacks Content-Security-Policy: default-src 'self';" in stderr
     started = [c.split("--name ")[1].split()[0] for c in calls if c.startswith("run --detach")]
     assert calls[-1] == f"rm --force {started[-1]}"
+
+
+@pytest.mark.parametrize(
+    ("snippet", "error"),
+    [
+        (None, "cannot read"),
+        ('    add_header X-Content-Type-Options "nosniff" always;\n', "0 of 1 add_header lines"),
+        (
+            'add_header Referrer-Policy "no-referrer" always;\n'
+            "add_header X-Content-Type-Options nosniff always;\n",
+            "1 of 2 add_header lines",
+        ),
+    ],
+)
+def test_smoke_fails_when_the_snippet_yields_fewer_headers_than_it_adds(
+    tmp_path: Path, snippet: str | None, error: str
+) -> None:
+    """A header the smoke test cannot parse would otherwise go unchecked."""
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    shutil.copy2(ROOT / "scripts" / "smoke_images.sh", repo / "scripts")
+    if snippet is not None:
+        (repo / "web").mkdir()
+        (repo / "web" / "security-headers.conf").write_text(snippet, encoding="utf-8")
+    response = _response(tmp_path)
+    code, _, stderr = _run("smoke_images.sh", ROOT, tmp_path, root=repo, RESPONSE=str(response))
+    assert code != 0
+    assert error in stderr
