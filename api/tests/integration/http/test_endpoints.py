@@ -1,4 +1,6 @@
-# AI-ASSISTED: the HTTP edge in process: sessions, tickets, quiz info, mock admin and probes.
+# AI-ASSISTED: the HTTP edge in process: sessions, tickets, quiz info, mock admin, probes, logs.
+import io
+import json
 from collections.abc import AsyncIterator
 
 import httpx
@@ -7,6 +9,7 @@ from fastapi import FastAPI
 
 from quiz.config import Settings
 from quiz.main import create_app, services_of
+from quiz.obs import logs
 
 TOKEN = {"X-Admin-Token": "admin-test-token"}
 NOT_FOUND = {"error": "QUIZ_NOT_FOUND", "message": "no such quiz"}
@@ -85,10 +88,24 @@ async def test_quiz_reports_ended_after_the_deadline_with_nobody_connected(
     assert (await http.get("/quizzes/VOCAB-42")).json()["status"] == "ended"
 
 
-async def test_admin_needs_the_token(http: httpx.AsyncClient) -> None:
-    for headers in ({}, {"X-Admin-Token": "wrong"}):
-        made = await http.post("/admin/quizzes", json={"quizId": "VOCAB-42"}, headers=headers)
-        assert made.status_code == 404
+async def test_host_end_marks_then_announces_once(http: httpx.AsyncClient) -> None:
+    await create(http)
+    for _ in range(2):
+        resp = await http.post("/admin/quizzes/VOCAB-42/end", headers=TOKEN)
+        assert resp.json() == {"quizId": "VOCAB-42", "status": "ended", "endSeq": 1}
+    assert (await http.get("/quizzes/VOCAB-42")).json()["status"] == "ended"
+    for unknown in ("NOPE-1", "vocab-42"):
+        resp = await http.post(f"/admin/quizzes/{unknown}/end", headers=TOKEN)
+        assert (resp.status_code, resp.json()) == (404, NOT_FOUND), unknown
+
+
+@pytest.mark.parametrize("headers", [{}, {"X-Admin-Token": "wrong"}])
+async def test_admin_needs_the_token(http: httpx.AsyncClient, headers: dict[str, str]) -> None:
+    await create(http)
+    body = {"quizId": "VOCAB-42"}
+    assert (await http.post("/admin/quizzes", json=body, headers=headers)).status_code == 404
+    assert (await http.post("/admin/quizzes/VOCAB-42/end", headers=headers)).status_code == 404
+    assert (await http.get("/quizzes/VOCAB-42")).json()["status"] == "open"
 
 
 async def test_admin_routes_exist_only_with_admin_mock(now: list[int]) -> None:
@@ -113,3 +130,40 @@ async def test_ready_and_tickets_on_redis(redis_url: str, now: list[int]) -> Non
         session = (await http.post("/sessions", json={"displayName": "Ana"})).json()
         auth = {"Authorization": f"Bearer {session['sessionToken']}"}
         assert (await http.post("/tickets", headers=auth)).status_code == 201
+
+
+async def test_log_lines_are_json_with_quiz_and_request_ids(http: httpx.AsyncClient) -> None:
+    out = io.StringIO()
+    logs.configure_logging(out)
+    await create(http)
+    resp = await http.get("/quizzes/VOCAB-42", headers={"X-Request-ID": "req-1"})
+    await http.get("/healthz")
+    assert resp.headers["X-Request-ID"] == "req-1"
+    lines = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert all({"quiz_id", "request_id", "event", "level"} <= line.keys() for line in lines)
+    get = [line for line in lines if line.get("path") == "/quizzes/VOCAB-42"]
+    assert [(g["quiz_id"], g["request_id"], g["status"]) for g in get] == [
+        ("VOCAB-42", "req-1", 200)
+    ]
+    made = next(line for line in lines if line.get("path") == "/admin/quizzes")
+    assert made["quiz_id"] == "VOCAB-42"
+    served = [line["request_id"] for line in lines if line["logger"] == "quiz.http"]
+    assert len(set(served)) == len(served) == 3  # one line and one fresh id per request
+
+
+async def test_openapi_shows_every_endpoint_with_an_example(http: httpx.AsyncClient) -> None:
+    spec = (await http.get("/openapi.json")).json()
+    schemas = spec["components"]["schemas"]
+    expected = {
+        ("post", "/sessions"), ("post", "/tickets"), ("get", "/quizzes/{quiz_id}"),
+        ("post", "/admin/quizzes"), ("post", "/admin/quizzes/{quiz_id}/end"),
+        ("get", "/healthz"), ("get", "/readyz"), ("get", "/metrics"),
+    }  # fmt: skip
+    found = {(verb, path) for path, ops in spec["paths"].items() for verb in ops}
+    assert expected <= found
+    for verb, path in expected:
+        ok = next(r for code, r in spec["paths"][path][verb]["responses"].items() if code < "300")
+        [content] = ok["content"].values()
+        ref = content.get("schema", {}).get("$ref", "")
+        examples = schemas[ref.rsplit("/", 1)[-1]].get("examples") if ref else None
+        assert "example" in content or examples, (verb, path)
