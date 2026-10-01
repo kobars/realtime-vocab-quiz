@@ -35,7 +35,8 @@ class Registry:
     def __init__(self, store: Store, grace_ms: int) -> None:
         self._store, self._grace_s = store, grace_ms / 1000
         self._senders: dict[str, Sender] = {}  # conn_id → its sender, joined or not
-        self._quizzes: dict[str, dict[str, Sender]] = {}  # quiz_id → conn_id → sender
+        # quiz_id → conn_id → (user_id, sender)
+        self._quizzes: dict[str, dict[str, tuple[str, Sender]]] = {}
         self._leaving: set[asyncio.Task[None]] = set()  # grace timers, held until done
         self._players: dict[str, dict[str, Sender]] = {}  # quiz_id → user_id → newest sender
         self.watcher: Watcher | None = None
@@ -50,13 +51,20 @@ class Registry:
             return
         first = quiz_id not in self._quizzes
         self._senders[conn.conn_id] = sender
-        self._quizzes.setdefault(quiz_id, {})[conn.conn_id] = sender
+        self._quizzes.setdefault(quiz_id, {})[conn.conn_id] = (conn.user_id, sender)
         self._players.setdefault(quiz_id, {})[conn.user_id] = sender
         if first and self.watcher is not None:
             self.watcher.open(quiz_id)
 
     def senders(self, quiz_id: str) -> list[Sender]:
-        return list(self._quizzes.get(quiz_id, {}).values())
+        return [sender for _, sender in self._quizzes.get(quiz_id, {}).values()]
+
+    def presence(self) -> dict[str, list[tuple[str, str]]]:
+        """The (user id, connection id) pairs of each quiz: what this node renews."""
+        return {
+            quiz_id: [(user_id, conn_id) for conn_id, (user_id, _) in conns.items()]
+            for quiz_id, conns in self._quizzes.items()
+        }
 
     def broadcast(self, quiz_id: str, data: bytes, *, leaderboard: bool) -> None:
         for sender in self.senders(quiz_id):
@@ -100,5 +108,5 @@ class Registry:
         await asyncio.sleep(self._grace_s)
         try:
             await self._store.leave(quiz_id, user_id, conn_id)
-        except Exception:  # a timer has no caller to raise to; the presence sweep drops it later
+        except Exception:  # a timer has no caller to raise to; a later renew_presence drops it
             log.warning("the leave of a closed connection failed", exc_info=True)
