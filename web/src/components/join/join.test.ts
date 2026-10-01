@@ -22,12 +22,30 @@ describe('display name', () => {
     expect(displayNameError('🦊'.repeat(32))).toBeNull()
   })
 
+  it('counts characters after NFC normalization, like the server', () => {
+    const decomposed = 'é'.repeat(20)
+    expect([...decomposed].length).toBe(40)
+    expect(displayNameError(decomposed)).toBeNull()
+  })
+
   it('is remembered in the tab and survives broken storage', () => {
     saveName('Ana')
     expect(readName()).toBe('Ana')
     const broken = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') } } as unknown as Storage
     expect(() => saveName('Bo', broken)).not.toThrow()
     expect(readName(broken)).toBe('')
+  })
+
+  it('survives a sessionStorage property that throws on access', () => {
+    const blocked = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new DOMException('denied', 'SecurityError')
+    })
+    try {
+      expect(readName()).toBe('')
+      expect(() => saveName('Bo')).not.toThrow()
+    } finally {
+      blocked.mockRestore()
+    }
   })
 })
 
