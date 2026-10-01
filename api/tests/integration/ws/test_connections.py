@@ -16,6 +16,7 @@ from starlette.testclient import TestClient
 from websockets.sync.client import connect as ws_connect
 from websockets.typing import Origin, Subprotocol
 
+from quiz.adapters.memory import MemoryStore
 from quiz.adapters.ws.heartbeat import server_config
 from quiz.adapters.ws.limits import RateLimiter
 from quiz.adapters.ws.registry import Registry
@@ -125,6 +126,42 @@ async def test_a_failed_leave_is_logged_and_not_raised(caplog: pytest.LogCapture
     registry.drop(conn)
     await asyncio.sleep(0.05)
     assert "the leave of a closed connection failed" in caplog.text
+
+
+async def grace_registry() -> tuple[Registry, MemoryStore, list[int]]:  # a 10 ms grace
+    now = [0]
+    store = MemoryStore(lambda: now[0])
+    create = partial(store.create_quiz, window_ms=60_000, time_limit_ms=20_000)
+    await create("VOCAB-42", (Question("q0", 1),))
+    return Registry(store, 10), store, now
+
+
+async def online(store: MemoryStore) -> int:
+    return (await store.snapshot("VOCAB-42", None)).online_count
+
+
+async def test_a_replaced_socket_that_drops_last_keeps_the_newer_sockets_leave() -> None:
+    registry, store, _ = await grace_registry()
+    old, new = Connection("c-old", "u0", "VOCAB-42"), Connection("c-new", "u0", "VOCAB-42")
+    for conn in (old, new):
+        await store.join("VOCAB-42", "u0", "Ann", conn.conn_id)
+        registry.bind(conn, sender_of(Socket()))
+    registry.drop(new)
+    registry.drop(old)  # its presence was taken over: it must not cancel the newer timer
+    await asyncio.sleep(0.05)
+    assert await online(store) == 0
+
+
+async def test_a_read_only_join_keeps_the_pending_leave() -> None:
+    registry, store, now = await grace_registry()
+    first = Connection("c-a", "u0", "VOCAB-42")
+    await store.join("VOCAB-42", "u0", "Ann", first.conn_id)
+    registry.bind(first, sender_of(Socket()))
+    registry.drop(first)
+    now[0] = 60_000  # the quiz has ended: the next join is read-only and writes no presence
+    registry.bind(Connection("c-b", "u0", "VOCAB-42", read_only=True), sender_of(Socket()))
+    await asyncio.sleep(0.05)
+    assert await online(store) == 0
 
 
 def tickets(client: TestClient, count: int) -> list[str | None]:  # all for one user

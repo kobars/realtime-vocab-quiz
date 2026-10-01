@@ -3,8 +3,10 @@
 quiz, and a connection that another join replaced is closed here when it lives on this node.
 
 A joined socket that drops keeps its presence for the grace period, then ``leave`` runs. A join
-of the same player on this node cancels the timer; ``leave`` compares the connection id, so a
-timer that still fires never removes a newer connection (docs/spec/redis.md §3)."""
+of the same player on this node cancels the timer, and a socket that such a join replaced starts
+none; ``leave`` compares the connection id, so a timer that still fires never removes a newer
+connection on another node (docs/spec/redis.md §3). A read-only join (after the end) writes no
+presence, so it leaves the timer running: ``leave`` still removes presence then (§3.1)."""
 
 import asyncio
 import logging
@@ -23,14 +25,19 @@ class Registry:
         self._senders: dict[str, Sender] = {}  # conn_id → its sender
         self._quizzes: dict[str, dict[str, Sender]] = {}  # quiz_id → conn_id → sender
         self._grace: dict[tuple[str, str], asyncio.Task[None]] = {}  # (quiz_id, user_id) → timer
+        self._present: dict[tuple[str, str], str] = {}  # (quiz_id, user_id) → newest conn_id
 
     def bind(self, conn: Connection, sender: Sender) -> None:
-        """Record a joined socket; a pending leave of the same player is cancelled."""
+        """Record a joined socket; a writing join cancels the player's pending leave."""
         if conn.quiz_id is None:
             return
         self._senders[conn.conn_id] = sender
         self._quizzes.setdefault(conn.quiz_id, {})[conn.conn_id] = sender
-        if (timer := self._grace.pop((conn.quiz_id, conn.user_id), None)) is not None:
+        if conn.read_only:
+            return
+        key = (conn.quiz_id, conn.user_id)
+        self._present[key] = conn.conn_id
+        if (timer := self._grace.pop(key, None)) is not None:
             timer.cancel()
 
     def senders(self, quiz_id: str) -> list[Sender]:
@@ -57,17 +64,14 @@ class Registry:
         del quiz[conn.conn_id]
         if not quiz:
             del self._quizzes[conn.quiz_id]
-        if conn.read_only:
-            return  # joined after the end: no presence to remove
         key = (conn.quiz_id, conn.user_id)
-        if (timer := self._grace.pop(key, None)) is not None:
-            timer.cancel()
+        if conn.read_only or self._present.get(key) != conn.conn_id:
+            return  # joined after the end, or replaced: a newer socket holds the presence
         self._grace[key] = asyncio.create_task(self._leave_later(key, conn.conn_id))
 
     async def _leave_later(self, key: tuple[str, str], conn_id: str) -> None:
-        await asyncio.sleep(self._grace_s)
-        if self._grace.get(key) is asyncio.current_task():
-            del self._grace[key]
+        await asyncio.sleep(self._grace_s)  # a writing join of the player cancels it here
+        del self._grace[key], self._present[key]
         try:
             await self._store.leave(*key, conn_id)
         except Exception:  # a timer has no caller to raise to; the presence sweep drops it later
