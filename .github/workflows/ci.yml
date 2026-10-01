@@ -3,12 +3,15 @@ name: ci
 
 on:
   pull_request:
+    # edited re-runs the guard on the PR title and body; the other jobs skip it.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.head_ref || github.ref }}
+  # An edit must not cancel a running code check, so edits get their own group.
+  group: ci-${{ github.head_ref || github.ref }}-${{ github.event.action == 'edited' && 'edit' || 'code' }}
   cancel-in-progress: true
 
 env:
@@ -16,6 +19,7 @@ env:
 
 jobs:
   check:
+    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -35,6 +39,7 @@ jobs:
       - run: make check
 
   integration:
+    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
