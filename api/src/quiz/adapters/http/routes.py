@@ -130,14 +130,13 @@ def install(app: FastAPI, deps: HttpDeps) -> None:
         if request.scope["type"] != "http":  # the WebSocket gateway handles its own errors
             raise error
         if not isinstance(error, DomainError):
-            return JSONResponse(
-                {"error": "UNAVAILABLE", "message": "the store is unreachable"}, 503
-            )
+            return JSONResponse({"error": "UNAVAILABLE", "message": "store unreachable"}, 503)
         message = NOT_FOUND if error.code is ErrorCode.QUIZ_NOT_FOUND else str(error)
         return JSONResponse({"error": error.code, "message": message}, STATUS.get(error.code, 422))
 
     app.include_router(_public(deps))
     if deps.admin_token is not None:
         app.include_router(_admin(deps, deps.admin_token))
-    for kind in (DomainError, *deps.outages):
+    kinds: tuple[type[Exception], ...] = (DomainError, *deps.outages)
+    for kind in kinds:
         app.add_exception_handler(kind, mapped)

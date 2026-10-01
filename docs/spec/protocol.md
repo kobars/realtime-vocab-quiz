@@ -173,6 +173,16 @@ Backoff is full jitter: `floor(random() × min(10,000, 250 × 2^attempt))` ms, r
 3. `GET /ws?ticket=…` with the subprotocol `quiz.v1`. Before the upgrade the server checks, in order, the `Origin` (403), that the client offers `quiz.v1` (400), the ticket (401) and the connection caps (503 at 10,000 per process, 429 at 50 per IP). Each refusal is a plain HTTP response with no `error` frame, which the browser sees as close 1006 (§7). The identity comes from the ticket only.
 4. Logs record the path only, never the query string, so tickets never reach a log.
 
+The HTTP endpoints (`/docs` serves the OpenAPI page). A store outage answers 503 `{error: "UNAVAILABLE"}`.
+
+| Endpoint | Reply |
+|---|---|
+| `POST /sessions {displayName}` | MOCK: 201 `{userId, sessionToken}`; 422 for a bad name |
+| `POST /tickets`, header `Authorization: Bearer <sessionToken>` | MOCK: 201 `{ticket, expiresInMs}`; 401 for an unknown session |
+| `GET /quizzes/{quizId}` | `{quizId, title, questionCount, status, players}`; `status` is `ended` from the deadline alone. Every unknown ID gets the same 404 body |
+| `POST /admin/quizzes {quizId, timeLimitMs, windowMs}`; `POST /admin/quizzes/{quizId}/end` | MOCK admin: only with `ADMIN_MOCK=1` and the `X-Admin-Token` header, else 404. Create: 201, or 409 when it exists. End: marks, then announces the end (redis.md §3.1) |
+| `GET /healthz`; `GET /readyz` | Liveness; readiness: 503 when Redis is unreachable |
+
 ## 9. Limits
 
 Inbound frames at most 16 KiB and JSON depth at most 8, both checked before parsing; a token bucket of 20 msg/s with a burst of 40 per connection, checked before parsing; `resync` at most 1 per second; after a `pong.seq` above `lastSeq` the client waits 1 s before it resyncs; the server pings every 25 s and closes a socket with no pong by the next sweep; the client pings every 25 s and reconnects after 50 s with no inbound message; a player counts as gone 10 s after a disconnect.
