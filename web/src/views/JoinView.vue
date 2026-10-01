@@ -1,9 +1,11 @@
-<!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link and the join (UI spec §3.1). -->
+<!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link, the quiz preview and the join (UI spec §3.1). -->
 <script setup lang="ts">
 import { LoaderCircle } from '@lucide/vue'
-import { nextTick, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import JoinField from '@/components/join/JoinField.vue'
+import QuizPreviewCard from '@/components/join/QuizPreviewCard.vue'
+import { fetchQuizPreview, type PreviewResult } from '@/components/join/preview'
 import { displayNameError, NAME_MAX, normalizeQuizId, QUIZ_ID_MAX, quizIdError, readName, saveName } from '@/components/join/validation'
 import { Button } from '@/components/ui/button'
 import { useQuizStore } from '@/stores/quiz'
@@ -23,6 +25,23 @@ const idField = useTemplateRef<{ focus: () => void }>('idField')
 const nameField = useTemplateRef<{ focus: () => void }>('nameField')
 const focus = (field: typeof idField) => void nextTick(() => field.value?.focus())
 
+/** The latest lookup; `result` is null while it runs. Only the lookup of the current quiz ID is shown. */
+const lookup = ref<{ quizId: string; promise: Promise<PreviewResult>; result: PreviewResult | null } | null>(null)
+const shown = computed(() => (lookup.value?.quizId === quizId.value ? lookup.value : null))
+const ended = computed(() => shown.value?.result?.kind === 'found' && shown.value.result.quiz.status === 'ended')
+
+function loadPreview(id: string, again = false): Promise<PreviewResult> {
+  if (lookup.value?.quizId === id && !again) return lookup.value.promise
+  const promise = fetchQuizPreview(id)
+  lookup.value = { quizId: id, promise, result: null }
+  void promise.then((result) => {
+    if (lookup.value?.promise !== promise) return
+    lookup.value.result = result
+    if (result.kind === 'not-found' && quizId.value === id) idError.value = strings.join.notFound
+  })
+  return promise
+}
+
 function onIdInput(value: string): void {
   quizId.value = normalizeQuizId(value)
   if (idError.value !== null) idError.value = quizIdError(quizId.value)
@@ -31,6 +50,7 @@ function onIdInput(value: string): void {
 function onIdBlur(): void {
   quizId.value = quizId.value.trim()
   idError.value = quizIdError(quizId.value)
+  if (idError.value === null) void loadPreview(quizId.value)
 }
 
 function onNameInput(value: string): void {
@@ -42,13 +62,21 @@ function onNameBlur(): void {
   nameError.value = displayNameError(name.value)
 }
 
-function submit(): void {
+async function submit(): Promise<void> {
   if (joining.value) return
   onIdBlur()
   onNameBlur()
   if (idError.value !== null) return focus(idField)
   if (nameError.value !== null) return focus(nameField)
   joining.value = true
+  // A miss or a failed lookup is asked again: the quiz may exist by now.
+  const known = lookup.value?.quizId === quizId.value ? lookup.value.result : null
+  const result = await loadPreview(quizId.value, known !== null && known.kind !== 'found')
+  if (result.kind === 'not-found') {
+    joining.value = false
+    idError.value = strings.join.notFound
+    return focus(idField)
+  }
   saveName(name.value)
   store.join(quizId.value, name.value)
 }
@@ -72,6 +100,7 @@ watch(
     quizId.value = normalizeQuizId(linked.trim())
     idError.value = quizIdError(quizId.value)
     if (idError.value !== null) return focus(idField)
+    void loadPreview(quizId.value)
     focus(nameField)
   },
   { immediate: true },
@@ -104,6 +133,22 @@ watch(
         @blur="onIdBlur"
       />
 
+      <div
+        aria-live="polite"
+        class="empty:hidden"
+      >
+        <p
+          v-if="shown !== null && shown.result === null"
+          class="text-sm text-muted-foreground"
+        >
+          {{ strings.join.checking }}
+        </p>
+        <QuizPreviewCard
+          v-else-if="shown?.result?.kind === 'found'"
+          :quiz="shown.result.quiz"
+        />
+      </div>
+
       <JoinField
         id="display-name"
         ref="nameField"
@@ -127,7 +172,7 @@ watch(
           class="animate-spin"
           aria-hidden="true"
         />
-        {{ joining ? strings.join.joining : strings.join.submit }}
+        {{ joining ? strings.join.joining : ended ? strings.join.submitEnded : strings.join.submit }}
       </Button>
     </form>
   </section>
