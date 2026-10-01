@@ -20,7 +20,7 @@ DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
 # even to start the development Redis or to stop anything. Placeholders: never start the stack with it.
 COMPOSE_NO_SECRETS = ADMIN_TOKEN="$${ADMIN_TOKEN:-unused}" REDIS_PASSWORD="$${REDIS_PASSWORD:-unused}" docker compose
 
-.PHONY: help build up down dev-api test test-integration check acceptance contracts audit audit-python audit-web audit-secrets
+.PHONY: help build up down dev-api test test-integration check acceptance contracts audit audit-python audit-web audit-secrets review-budget
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -60,6 +60,8 @@ audit-web: ## Audit the production web dependencies (high severity and above)
 audit-secrets: ## Scan the git history of HEAD for secrets with gitleaks 8.25 or later (.gitleaks.toml)
 	$(call step,full history,[ "$$(git rev-parse --is-shallow-repository 2>/dev/null)" = false ] || { echo 'not a full git clone: the secret scan needs the whole history' >&2; false; })
 	$(call step,secret scan,gitleaks git --redact --verbose --no-banner --log-opts='--full-history HEAD' .)
+review-budget: ## Count the branch's review input in tokens, against BASE_SHA or origin/main
+	uv run --project api --locked python scripts/review_budget.py
 acceptance: ## Run the acceptance tests (ACCEPTANCE_STORE=redis: on a Redis of their own)
 	$(call step,pytest acceptance,$(PYTEST) tests/acceptance)
 contracts: ## Regenerate the JSON Schema and TypeScript types
