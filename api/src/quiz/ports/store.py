@@ -11,7 +11,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
+from quiz.contracts.messages import FULL_LIST_MAX, TOP_N, Entry
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.events import AnswerScored
 from quiz.domain.session import Question
@@ -74,6 +74,11 @@ class Row:
     user_id: str
     display_name: str
     score: int
+
+    def entry(self) -> Entry:
+        return Entry(
+            rank=self.rank, userId=self.user_id, displayName=self.display_name, score=self.score
+        )
 
 
 @dataclass(frozen=True, slots=True)
