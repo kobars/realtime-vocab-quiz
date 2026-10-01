@@ -4,6 +4,7 @@ import json
 import time
 import uuid
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from itertools import pairwise
 from typing import Any, cast
 
@@ -15,8 +16,9 @@ from quiz.adapters.ws.registry import Registry
 from quiz.adapters.ws.sender import Sender
 from quiz.app.service import Connection
 from quiz.domain.session import Question
+from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
-from quiz.ports.store import FeedStore
+from quiz.ports.store import FeedStore, Limits, Ranks, Row, Store
 
 QUESTIONS = (Question("q0", 1), Question("q1", 3))
 
@@ -48,9 +50,15 @@ def store(request: pytest.FixtureRequest) -> FeedStore:
     return redis_store
 
 
-async def quiz_with(store: FeedStore, *users: str) -> str:
+def loops() -> int:
+    return sum(
+        getattr(t.get_coro(), "__qualname__", "") == "Ticker._run" for t in asyncio.all_tasks()
+    )
+
+
+async def quiz_with(store: FeedStore, *users: str, window_ms: int = 60_000) -> str:
     quiz_id = f"T-{uuid.uuid4().hex[:12].upper()}"
-    await store.create_quiz(quiz_id, QUESTIONS, window_ms=60_000, time_limit_ms=20_000)
+    await store.create_quiz(quiz_id, QUESTIONS, window_ms=window_ms, time_limit_ms=20_000)
     for user in users:
         await store.join(quiz_id, user, user.upper(), f"c-{user}")
     return quiz_id
@@ -76,7 +84,7 @@ async def test_100_answers_in_1_s_make_at_most_6_frames_ending_on_the_standings(
     sink.frames.clear()
     start = time.monotonic()
     for n, user in enumerate(users):
-        await asyncio.sleep(max(0.0, start + n * 0.0098 - time.monotonic()))
+        await asyncio.sleep(max(0.0, start + n * 0.009 - time.monotonic()))
         await store.apply_answer(quiz_id, user, 0, n % 4, str(uuid.uuid4()), f"c-{user}")
     assert time.monotonic() - start < 1.0
     await asyncio.sleep(0.5)
@@ -89,7 +97,9 @@ async def test_100_answers_in_1_s_make_at_most_6_frames_ending_on_the_standings(
     assert [[e["rank"], e["userId"], e["displayName"], e["score"]] for e in last["entries"]] == rows
 
 
-async def test_the_tick_runs_only_while_the_quiz_has_local_sockets(store: FeedStore) -> None:
+async def test_the_tick_runs_only_while_the_quiz_has_local_sockets(
+    store: FeedStore, caplog: pytest.LogCaptureFixture
+) -> None:
     quiz_id = await quiz_with(store, "a")
     sink, registry = Sink(), Registry(store, 0)  # no grace: a dropped player leaves at once
     registry.watcher = Ticker(store, sink, "n1")
@@ -111,6 +121,7 @@ async def test_the_tick_runs_only_while_the_quiz_has_local_sockets(store: FeedSt
     await asyncio.sleep(0.3)
     assert len(sink.frames) == 2  # the last socket left: no tick, nothing relayed
     assert (await store.publish_if_dirty(quiz_id, "n2")).status == "published"
+    assert not [r for r in caplog.records if r.levelname == "ERROR"]  # a clean unsubscribe
 
 
 async def test_players_outside_the_top_50_get_rank_updates(
@@ -147,3 +158,70 @@ async def test_players_outside_the_top_50_get_rank_updates(
     assert "u000" not in sink.updates  # in the top 50: the frame shows it
     assert reads == [3] * len(reads)
     assert len(reads) <= elapsed + 1.5  # one read per second for all local players
+
+
+async def test_quiz_ended_carries_each_players_own_rank_and_ends_the_loop(store: FeedStore) -> None:
+    quiz_id = await quiz_with(store, "a", "b")
+    await score(store, quiz_id, "b", 0)
+    sink = Sink("a", "b", "c")
+    Ticker(store, sink, "n1").open(quiz_id)
+    await asyncio.sleep(0.3)
+    await store.end_by_host(quiz_id)
+    await asyncio.sleep(0.3)
+    ended = {user: got[-1][1] for user, got in sink.updates.items()}
+    assert {frame["type"] for frame in ended.values()} == {"quiz_ended"}
+    you = {user: frame["you"] and frame["you"]["rank"] for user, frame in ended.items()}
+    assert you == {"a": 2, "b": 1, "c": None}  # c's socket has no player: you is null
+    assert loops() == 0  # quiz_ended is the last broadcast: the loop unsubscribed
+
+
+async def test_a_host_mark_is_announced_at_the_deadline(redis_store: RedisStore) -> None:
+    quiz_id = await quiz_with(redis_store, "a", window_ms=600)
+    await redis_store.end_quiz(quiz_id, "mark")  # a host end whose announcement was lost
+    sink = Sink("a")
+    (ticker := Ticker(redis_store, sink, "n1")).open(quiz_id)
+    await asyncio.sleep(1.0)
+    await ticker.stop()
+    assert [update["type"] for _, update in sink.updates["a"]] == ["quiz_ended"]
+
+
+class Reads:
+    """A store whose ``ranks_of`` awaits ``during``, then returns u at rank 120 as of seq 1."""
+
+    def __init__(self) -> None:
+        self.during: Callable[[], Awaitable[object]] = lambda: asyncio.sleep(0)
+
+    async def ranks_of(self, _quiz_id: str, _user_ids: list[str]) -> Ranks:
+        await self.during()
+        return Ranks(1, 300, {"u": Row(120, "u", "U", 0)})
+
+
+def leaderboard(seq: int, *ranks: tuple[str, int, int]) -> str:
+    frame = {"v": 1, "type": "leaderboard", "seq": seq, "rebase": False, "playerCount": 300}
+    frame |= {"onlineCount": 1, "entries": []}
+    return json.dumps({"frame": frame, "ranks": ranks}, separators=(",", ":"))
+
+
+async def test_a_failed_shifted_read_is_retried_next_time() -> None:
+    reads, sink = Reads(), Sink("u")
+    relay = Relay("Q", cast("Store", reads), sink, Limits())
+    await relay.relay(leaderboard(1))
+
+    async def unreachable() -> None:
+        raise TimeoutError
+
+    reads.during = unreachable
+    with pytest.raises(TimeoutError):
+        await relay.shifted()
+    reads.during = lambda: asyncio.sleep(0)
+    await relay.shifted()
+    assert [update["rank"] for _, update in sink.updates["u"]] == [120]
+
+
+async def test_a_shifted_read_never_sends_a_rank_older_than_one_sent_meanwhile() -> None:
+    reads, sink = Reads(), Sink("u")
+    relay = Relay("Q", cast("Store", reads), sink, Limits())
+    await relay.relay(leaderboard(1))
+    reads.during = lambda: relay.relay(leaderboard(2, ("u", 90, 100)))  # u scored during the read
+    await relay.shifted()
+    assert [(update["atSeq"], update["rank"]) for _, update in sink.updates["u"]] == [(2, 90)]

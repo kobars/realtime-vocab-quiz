@@ -2,7 +2,7 @@
 """While this node holds a socket of a quiz, one loop runs for that quiz: it relays each of the
 quiz's broadcasts, calls ``publish_if_dirty`` every tick (after ``busy``, once the token expires)
 and sends the shifted ranks at most once a second. The first local socket starts the loop; the
-last one cancels it, which also unsubscribes."""
+last one cancels it, which also unsubscribes. The loop ends after it relayed ``quiz_ended``."""
 
 import asyncio
 import logging
@@ -43,14 +43,18 @@ class Ticker:
             async with self._store.subscribe(quiz_id) as messages:
                 relaying = asyncio.create_task(_relay(relay, messages))
                 try:
-                    await self._tick(quiz_id, relay)
-                    await relaying  # after the end, quiz_ended still arrives
+                    subscribed_at = await self._store.read_seq(quiz_id) or 0
+                    end_seq = await self._tick(quiz_id, relay)
+                    if end_seq is not None and end_seq > subscribed_at:
+                        await relaying  # quiz_ended was published after the subscribe
                 finally:
                     relaying.cancel()
+                    await asyncio.gather(relaying, return_exceptions=True)
         except Exception:
             log.exception("fan-out of quiz %s stopped", quiz_id)
 
-    async def _tick(self, quiz_id: str, relay: Relay) -> None:
+    async def _tick(self, quiz_id: str, relay: Relay) -> int | None:
+        """Tick until the quiz ended (its end seq) or is gone (None)."""
         clock = asyncio.get_running_loop().time
         shift_at = clock() + SHIFT_S
         while True:
@@ -58,9 +62,11 @@ class Ticker:
             try:
                 result = await self._store.publish_if_dirty(quiz_id, self._node_id)
                 if result.status == "ended":
-                    if result.seq is None:  # not announced yet (docs/spec/redis.md §3.1)
-                        await self._store.end_quiz(quiz_id, "deadline")
-                    return
+                    if result.seq is not None:
+                        return result.seq
+                    # a host mark not yet announced: retry until the deadline is due (redis.md §3.1)
+                    if (end := await self._store.end_quiz(quiz_id, "deadline")).status == "ended":
+                        return end.seq
                 if result.status == "busy":
                     wait_s = (result.retry_ms + 1) / 1000
                 if clock() >= shift_at:
@@ -68,7 +74,7 @@ class Ticker:
                     await relay.shifted()
             except DomainError as error:
                 if error.code is ErrorCode.QUIZ_NOT_FOUND:  # expired, or lost by the store
-                    return
+                    return None
                 raise
             except ConnectionError, TimeoutError:
                 log.warning("tick of quiz %s: store unreachable", quiz_id)
@@ -78,6 +84,7 @@ class Ticker:
 async def _relay(relay: Relay, messages: AsyncIterator[str]) -> None:
     async for message in messages:
         try:
-            relay.relay(message)
+            if await relay.relay(message):
+                return
         except Exception:
             log.exception("broadcast not relayed")
