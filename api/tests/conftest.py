@@ -1,9 +1,18 @@
-# AI-ASSISTED: shared pytest setup: Hypothesis profiles and markers taken from the test folder.
+# AI-ASSISTED: shared pytest setup: Hypothesis profiles, folder markers and the one Redis fixture.
 import os
+import shutil
+import subprocess
+import time
+import uuid
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 from hypothesis import settings
+from redis import Redis as SyncRedis
+from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 settings.register_profile("dev", max_examples=50)
 settings.register_profile("ci", max_examples=500, deadline=None, print_blob=True)
@@ -20,3 +29,61 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             folder = item.path.relative_to(_TESTS).parts[0]
             if folder in _FOLDER_MARKERS:
                 item.add_marker(folder)
+
+
+DEV_REDIS_PORT = 6381  # `make up`; tests never touch it
+
+
+def _docker(*args: str, check: bool = True) -> str:
+    docker = shutil.which("docker") or pytest.fail("no REDIS_URL and no docker to start a Redis")
+    run = subprocess.run([docker, *args], check=check, capture_output=True, text=True)  # noqa: S603
+    return run.stdout
+
+
+def _start_redis() -> tuple[str, str]:
+    """Run redis:8-alpine on a free host port that Docker picks; return (container, url)."""
+    run = ["run", "-d", "--rm", "-p", "127.0.0.1::6379", "redis:8-alpine"]
+    container = _docker(*run, "redis-server", "--appendonly", "yes").strip()
+    port = _docker("port", container, "6379/tcp").splitlines()[0].rsplit(":", 1)[1]
+    url = f"redis://127.0.0.1:{port}/0"
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            with SyncRedis.from_url(url) as client:
+                client.ping()
+        except RedisConnectionError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.1)
+        else:
+            return container, url
+
+
+@pytest.fixture(scope="session")
+def redis_url() -> Iterator[str]:
+    """One Redis per test session: REDIS_URL when set (CI), else a container of its own."""
+    if url := os.environ.get("REDIS_URL"):
+        if urlparse(url).port == DEV_REDIS_PORT:
+            pytest.fail(f"REDIS_URL points at the dev Redis on port {DEV_REDIS_PORT}; unset it")
+        yield url
+        return
+    container, url = _start_redis()
+    try:
+        yield url
+    finally:
+        _docker("rm", "-f", container, check=False)
+
+
+@pytest.fixture
+def redis_prefix() -> str:
+    """A key prefix of this test alone; ``redis_client`` deletes its keys afterwards."""
+    return f"test:{uuid.uuid4().hex}:"
+
+
+@pytest.fixture
+async def redis_client(redis_url: str, redis_prefix: str) -> AsyncIterator[Redis]:
+    client = Redis.from_url(redis_url, decode_responses=True)
+    yield client
+    if keys := [key async for key in client.scan_iter(match=f"{redis_prefix}*")]:
+        await client.delete(*keys)
+    await client.aclose()
