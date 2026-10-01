@@ -68,6 +68,9 @@ def test_good_quiz_parses() -> None:
         ("questions.0.choices", ["a", "b", "c", ""]),  # no empty choice
         ("questions.0.answer", 4),  # answer index 0-3
         ("questions.0.answer", -1),
+        ("questions.0.answer", "2"),  # strict: no string, bool or float as the index
+        ("questions.0.answer", True),
+        ("questions.0.answer", 1.0),
         ("questions.0.word", ""),
         ("questions.0.extra", 1),  # unknown field
         ("questions", []),
