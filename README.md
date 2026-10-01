@@ -28,9 +28,8 @@ make help                    # list every make target
 make check                   # verify both lock files and that the package imports
 ```
 
-The other targets (`build`, `up`, `down`, `demo`, `demo-stop`, `test`,
-`test-integration`, `acceptance`, `load`, `contracts`, `new-quiz`, `ai-log`)
-exist and print `not yet` until their work lands.
+`make help` lists every target; a target whose work has not landed yet prints
+`not yet`.
 
 ## Documents
 
