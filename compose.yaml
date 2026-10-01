@@ -1,0 +1,14 @@
+# AI-ASSISTED: the development Redis; the full stack profile adds the API, web and nginx services.
+name: elsaquiz
+
+services:
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "127.0.0.1:6381:6379" # local only: the development Redis has no password
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
