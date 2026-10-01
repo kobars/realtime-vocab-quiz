@@ -1,0 +1,11 @@
+// AI-ASSISTED: Vitest runs the client tests in happy-dom with the Vue plugin.
+import vue from '@vitejs/plugin-vue'
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  plugins: [vue()],
+  test: {
+    environment: 'happy-dom',
+    include: ['src/**/*.test.ts'],
+  },
+})
