@@ -16,6 +16,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictInt,
     StringConstraints,
     ValidationError,
     model_validator,
@@ -33,7 +34,7 @@ class _Question(BaseModel):
     id: str
     word: Text
     choices: tuple[Text, Text, Text, Text]
-    answer: Annotated[int, Field(ge=0, le=CHOICES - 1)]
+    answer: Annotated[StrictInt, Field(ge=0, le=CHOICES - 1)]
 
     @model_validator(mode="after")
     def _distinct(self) -> Self:
