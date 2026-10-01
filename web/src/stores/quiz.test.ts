@@ -238,3 +238,17 @@ it('a rejoin during the feedback for the last question keeps feedback, and See m
   second.receive({ type: 'finished', atSeq: 5, score: 140, rank: 1, playerCount: 2 })
   expect(store.phase).toBe('finished')
 })
+
+it('NOT_JOINED on Next question from feedback sends one join, and the joined repeats that next', async () => {
+  const { store, socket } = await playing()
+  socket.receive(question(0))
+  store.answer(1)
+  socket.receive(result(0, 's-1', 140))
+  store.next()
+  socket.receive(error('NOT_JOINED', 'next'))
+  expect(socket.sent.filter((message) => message.type === 'join')).toHaveLength(2)
+  socket.receive(joined({ cursor: 0, cursorOpen: false, score: 140 }))
+  expect(store.phase).toBe('feedback')
+  expect(socket.sent.slice(-2)).toEqual([{ v: 1, type: 'resync', lastSeq: 3 }, { v: 1, type: 'next', questionIndex: 1 }])
+  expect(socket.sent.filter((message) => message.type === 'join')).toHaveLength(2)
+})

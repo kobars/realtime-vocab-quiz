@@ -27,8 +27,11 @@ export function configureQuizStore(overrides: Partial<QuizStoreDeps>): void {
 }
 
 export const PAGE_SIZE = 100
-/** Errors after which the client rejoins to read the stored `cursor` and `score` (UI spec §4.3). */
-const REJOIN_ON: readonly ErrorCode[] = ['NOT_JOINED', 'QUESTION_NOT_OPEN', 'INVALID_STATE', 'ALREADY_ANSWERED']
+/**
+ * Errors after which the store rejoins to read the stored `cursor` and `score` (UI spec §4.3). `NOT_JOINED` is not
+ * here: the client sends that `join` itself and repeats the request.
+ */
+const REJOIN_ON: readonly ErrorCode[] = ['QUESTION_NOT_OPEN', 'INVALID_STATE', 'ALREADY_ANSWERED']
 
 /** The `joined` reply; `cursor` and `cursorOpen` follow later questions and results, `endsAt` is on the `now` clock. */
 export type QuizInfo = Joined & { endsAt: number }
