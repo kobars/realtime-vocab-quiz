@@ -1,4 +1,4 @@
-// AI-ASSISTED: QuizClient owns the socket: connect with a fresh ticket, reconnect through Backoff, SeqTracker wiring, liveness, answer retries, rejoin and leaderboard pages (protocol spec §2.1, §3, §7, §9).
+// AI-ASSISTED: QuizClient owns the socket: connect with a fresh ticket, reconnect through Backoff, SeqTracker wiring, liveness, answer and next retries, rejoin and leaderboard pages (protocol spec §2.1, §3, §7, §9).
 import { Backoff, backoffDelay, OPEN_TIMEOUT_MS } from './backoff'
 import { type AuthApi, connectTicket } from './identity'
 import { SeqTracker, type SeqStep } from './seq'
@@ -61,6 +61,13 @@ export class QuizClient {
   private readonly unsettled = new Map<string, Answer>()
   /** The `submissionId`s sent on the current socket and not answered yet, oldest first. */
   private inFlight: string[] = []
+  /**
+   * The `next` sent on the current socket with no `question`, `finished` or final error yet, and the `UNAVAILABLE`
+   * replies it got (the backoff attempt of its next retry).
+   */
+  private pendingNext: { questionIndex: number; failures: number } | null = null
+  /** The scheduled resend of `pendingNext`, if any. */
+  private nextRetry: Timer | undefined
   /** True once the current socket got `joined`, and false again after `NOT_JOINED`: answers go out only while true. */
   private joined = false
   /** `UNAVAILABLE` retries so far, by `submissionId`: the backoff attempt of the next one. */
@@ -95,7 +102,13 @@ export class QuizClient {
     void this.connect()
   }
 
+  /**
+   * Asks for question `questionIndex` (or the result, at N). The client sends the same `next` again 1 s after
+   * `RATE_LIMITED` and after the backoff after `UNAVAILABLE`, until a reply arrives; a disconnect forgets it.
+   */
   next(questionIndex: number): void {
+    this.cancelNextRetry()
+    this.pendingNext = { questionIndex, failures: 0 }
     this.send({ v: 1, type: 'next', questionIndex })
   }
 
@@ -170,6 +183,13 @@ export class QuizClient {
           for (const submissionId of this.unsettled.keys()) this.sendAnswer(submissionId)
         }
         break
+      case 'question':
+      case 'finished':
+        if (message.type === 'finished' || message.questionIndex === this.pendingNext?.questionIndex) {
+          this.cancelNextRetry()
+          this.pendingNext = null
+        }
+        break
       case 'answer_result':
         this.settle(message.submissionId)
         this.inFlight = this.inFlight.filter((id) => id !== message.submissionId)
@@ -191,6 +211,10 @@ export class QuizClient {
         if (message.requestType === 'resync') this.resyncFailed(message.code)
         if (message.code === 'RATE_LIMITED' && message.requestType === null) this.resendInFlight()
         if (message.requestType === 'answer') this.answerFailed(message.code)
+        // A bucket RATE_LIMITED comes before parsing, so its requestType is null: it may be the dropped `next`.
+        if (message.requestType === 'next' || (message.requestType === null && message.code === 'RATE_LIMITED')) {
+          this.nextFailed(message.code)
+        }
         break
     }
     this.emit(message)
@@ -272,6 +296,32 @@ export class QuizClient {
     if (resend.length > 0) this.after(RETRY_AFTER_MS, () => resend.forEach((id) => this.sendAnswer(id)))
   }
 
+  /**
+   * Resends the pending `next` 1 s after `RATE_LIMITED` or after the backoff after `UNAVAILABLE`; any other error
+   * settles it. After `NOT_JOINED` the client joins again, and that `joined` (`cursorOpen`) drives the next request.
+   */
+  private nextFailed(code: ErrorCode): void {
+    const pending = this.pendingNext
+    if (pending === null) return
+    this.cancelNextRetry()
+    let wait: number
+    if (code === 'RATE_LIMITED') wait = RETRY_AFTER_MS
+    else if (code === 'UNAVAILABLE') wait = backoffDelay(pending.failures++, this.o.random)
+    else {
+      this.pendingNext = null
+      if (code === 'NOT_JOINED') this.joinAgain()
+      return
+    }
+    this.nextRetry = this.after(wait, () => this.send({ v: 1, type: 'next', questionIndex: pending.questionIndex }))
+  }
+
+  private cancelNextRetry(): void {
+    if (this.nextRetry === undefined) return
+    clearTimeout(this.nextRetry)
+    this.timers.delete(this.nextRetry)
+    this.nextRetry = undefined
+  }
+
   /** Sends on an open socket; otherwise drops the message (a reconnect resends answers, `joined` re-drives `next`). */
   private send(message: ClientMessage): void {
     if (this.open) this.socket?.send(JSON.stringify(message))
@@ -301,8 +351,8 @@ export class QuizClient {
   }
 
   /**
-   * Drops the socket and its timers: the open timeout, a pending gap resync, a resync or answer retry, ping and
-   * liveness. Unsettled answers stay, for the next `joined`.
+   * Drops the socket and its timers: the open timeout, a pending gap resync, a resync, answer or `next` retry, ping
+   * and liveness. Unsettled answers stay, for the next `joined`; the pending `next` goes, as `joined` re-drives it.
    */
   private disconnect(): void {
     if (this.socket !== null) this.socket.onopen = this.socket.onmessage = this.socket.onclose = null
@@ -311,6 +361,7 @@ export class QuizClient {
     this.joined = false
     this.resyncFailures = 0
     this.inFlight = []
+    this.pendingNext = null
     for (const timer of this.timers) clearTimeout(timer)
     this.timers.clear()
     clearInterval(this.ping)
