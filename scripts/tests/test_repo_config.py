@@ -48,6 +48,16 @@ def _job(name: str) -> list[str]:
     return _section(ROOT / ".github" / "workflows" / "ci.yml", name, 2)
 
 
+def _hook(hook_id: str) -> dict[str, object]:
+    """Return one hook of the pre-commit config, with pre-commit's defaults filled in."""
+    config = load_config(str(ROOT / ".pre-commit-config.yaml"))
+    specs: list[dict[str, object]] = [
+        h for repo in config["repos"] for h in repo["hooks"] if h["id"] == hook_id
+    ]
+    (spec,) = specs
+    return spec
+
+
 def _run_commands(path: Path) -> list[str]:
     """Return the command of every one-line ``run:`` step of a workflow."""
     text = path.read_text(encoding="utf-8")
@@ -59,15 +69,17 @@ def test_internal_hook_scans_every_staged_file_and_symlink(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # pre-commit's own loader and file filter, so its default `types: [file]` applies.
-    config = load_config(str(ROOT / ".pre-commit-config.yaml"))
-    (spec,) = [h for repo in config["repos"] for h in repo["hooks"] if h["id"] == "check-internal"]
-    hook = Hook.create(str(ROOT), Prefix(str(ROOT)), spec)
+    hook = Hook.create(str(ROOT), Prefix(str(ROOT)), _hook("check-internal"))
     monkeypatch.chdir(tmp_path)
     Path("notes.md").write_text("text\n", encoding="utf-8")
     Path(".hidden").write_text("text\n", encoding="utf-8")
     Path("link").symlink_to("notes.md")
     names = ["notes.md", ".hidden", "link"]
     assert sorted(Classifier(names).filenames_for_hook(hook)) == sorted(names)
+
+
+def test_eslint_hook_runs_one_process_so_the_typescript_program_is_built_once() -> None:
+    assert _hook("eslint")["require_serial"] is True
 
 
 def test_ci_runs_again_when_the_pull_request_text_is_edited() -> None:
