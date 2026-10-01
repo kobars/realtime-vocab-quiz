@@ -227,6 +227,32 @@ it('close 4001 blocks the screen as session-replaced and never reconnects; a new
   expect(store.blocked).toBe(null)
 })
 
+it('close 1008 blocks the screen as a policy close and never reconnects', async () => {
+  const { store, socket } = await playing()
+  socket.onclose?.({ code: 1008 })
+  await wait(30_000)
+  expect([sockets.length, store.blocked, store.connection]).toEqual([1, 'policy', 'closed'])
+})
+
+it('10 connects in a row without a joined block the screen as unreachable; retry joins with attempts from zero', async () => {
+  const { store } = await joinQuiz()
+  for (let i = 0; i < 10; i++) {
+    expect([sockets.length, store.blocked]).toEqual([i + 1, null])
+    const socket = sockets.at(-1) as FakeSocket
+    socket.onopen?.()
+    socket.onclose?.({ code: 1006 })
+    // The longest backoff wait with random() = 0.5 is 5 s.
+    await wait(5_100)
+  }
+  expect([sockets.length, store.blocked, store.connection]).toEqual([10, 'unreachable', 'closed'])
+  await wait(60_000)
+  expect(sockets.length).toBe(10)
+  store.retry()
+  for (let i = 0; i < 3; i++) await wait(0)
+  ;(sockets.at(-1) as FakeSocket).onclose?.({ code: 1006 })
+  expect([sockets.length, store.blocked, store.connection]).toEqual([11, null, 'reconnecting'])
+})
+
 it('ALREADY_ANSWERED unlocks the choices and rejoins on the same socket', async () => {
   const { store, socket } = await playing()
   socket.receive(question(0))
