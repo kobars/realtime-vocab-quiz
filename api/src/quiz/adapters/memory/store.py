@@ -9,7 +9,7 @@ from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from quiz.contracts import messages as m
-from quiz.contracts.codec import encode
+from quiz.contracts.codec import encode_broadcast
 from quiz.contracts.messages import FULL_LIST_MAX
 from quiz.domain import events as ev
 from quiz.domain import session as s
@@ -34,8 +34,8 @@ class _Quiz:
     scored: set[str] = field(default_factory=set)  # who scored since the last broadcast
     feeds: set[asyncio.Queue[str]] = field(default_factory=set)  # one per subscriber
 
-    def publish(self, frame: m.Leaderboard | m.QuizEnded, ranks: list[list[str | int]]) -> None:
-        message = f'{{"frame":{encode(frame).decode()},"ranks":{json.dumps(ranks)}}}'
+    def publish(self, frame: m.Broadcast, ranks: list[list[str | int]]) -> None:
+        message = f'{{"frame":{encode_broadcast(frame).decode()},"ranks":{json.dumps(ranks)}}}'
         for feed in self.feeds:
             feed.put_nowait(message)
 
@@ -51,10 +51,6 @@ class _Quiz:
             Row(r.rank, r.standing.user_id, self.names[r.standing.user_id], r.standing.total)
             for r in ranked
         ]
-
-
-def _entry(row: Row) -> m.Entry:
-    return m.Entry(rank=row.rank, userId=row.user_id, displayName=row.display_name, score=row.score)
 
 
 async def _drain(feed: asyncio.Queue[str]) -> AsyncIterator[str]:
@@ -235,7 +231,7 @@ class MemoryStore:
                 rebase=False,
                 playerCount=len(rows),
                 onlineCount=len(quiz.present),
-                entries=[_entry(row) for row in (rows[:top_n] if big else rows)],
+                entries=[row.entry() for row in (rows[:top_n] if big else rows)],
             )
             quiz.publish(frame, ranks)
             return port.Publish("published", quiz.state.seq)
@@ -255,7 +251,7 @@ class MemoryStore:
             quiz.state = s.transition(quiz.state, s.End(), now).state
             quiz.end_seq = quiz.state.seq
             rows = quiz.rows()
-            top = [_entry(row) for row in rows[: self.limits.top_n]]
+            top = [row.entry() for row in rows[: self.limits.top_n]]
             ended = m.QuizEnded(seq=quiz.end_seq, playerCount=len(rows), entries=top, you=None)
             quiz.publish(ended, [])
             return port.End("ended", quiz.end_seq)
