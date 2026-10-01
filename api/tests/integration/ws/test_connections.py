@@ -86,8 +86,11 @@ async def test_a_conflated_client_gets_rebase_true_and_sends_no_resync() -> None
     slow.reading.set()
     await asyncio.sleep(0.05)
     got = [(f["type"], f.get("seq"), f.get("rebase")) for f in slow.frames]
-    held = [("leaderboard", 20, True), ("leaderboard_page", None, None), ("leaderboard", 30, True)]
-    assert got == [("leaderboard", s, False) for s in range(1, 5)] + held
+    # Each frame past the soft limit replaces every leaderboard queued since the last barrier:
+    # 18 replaced 14-17, and 19, 20 queued below the limit again.
+    queued = [("leaderboard", 18, True), ("leaderboard", 19, False), ("leaderboard", 20, False)]
+    held = [("leaderboard_page", None, None), ("leaderboard", 30, True)]
+    assert got == [("leaderboard", 1, False), *queued, *held]
     assert resyncs(slow.frames) == 0
     assert [f.get("seq") for f in fast.frames] == [*range(1, 21), None, *range(21, 31)]
 

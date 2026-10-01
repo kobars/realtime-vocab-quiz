@@ -3,10 +3,10 @@
 client gets a node's messages in the order the node produced them (docs/spec/protocol.md §1, §5).
 
 The buffer counts the bytes not yet written, the frame in flight included. Above the soft limit
-a ``leaderboard`` takes the place of a ``leaderboard`` at the tail of the queue, and goes out
-with ``rebase: true``; every other message is a barrier and is never dropped. Above the hard
-limit the queue makes way for ``error UNAVAILABLE`` and close 1013. A socket that does not take
-its queue within ``flush_s`` of a close is closed anyway."""
+a ``leaderboard`` takes the place of every ``leaderboard`` queued after the last other message,
+and goes out with ``rebase: true``; every other message is a barrier and is never dropped.
+Above the hard limit the queue makes way for ``error UNAVAILABLE`` and close 1013. A socket
+that does not take its queue within ``flush_s`` of a close is closed anyway."""
 
 import asyncio
 from collections import deque
@@ -58,7 +58,7 @@ class Sender:
             return
         if leaderboard and self.buffered > self._soft:
             data = data.replace(_NOT_REBASED, _REBASED, 1)
-            if self._queue and self._queue[-1].leaderboard:
+            while self._queue and self._queue[-1].leaderboard:
                 self._queued -= len(self._queue.pop().data)
         self._append(data, leaderboard=leaderboard)
         if self.buffered > self._hard:
