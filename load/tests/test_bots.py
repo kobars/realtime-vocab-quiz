@@ -1,4 +1,4 @@
-# AI-ASSISTED: the bots' frame shortcut, CLI, reconnect rules and a swarm run against the app.
+# AI-ASSISTED: the bots' frame shortcut, CLI, reconnect rules and swarm runs against the app.
 import asyncio
 import contextlib
 import itertools
@@ -6,6 +6,7 @@ import json
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
+from pathlib import Path
 
 import httpx
 import pytest
@@ -13,7 +14,8 @@ import uvicorn
 from pydantic import SecretStr
 
 import bots
-from bots import BOARD_HEAD, converse, parse, play, swarm
+from bots import BOARD_HEAD, converse, create_quizzes, main, parse, play, swarm
+from latency import summary
 from player import DEAD_LINK, NORMAL, OVERLOAD, Backoff, BoardWait, Player, Recorder
 from quiz.config import Settings
 from quiz.contracts.codec import encode_broadcast
@@ -28,7 +30,8 @@ TOKENS = httpx.MockTransport(
 
 @pytest.fixture
 def app_url() -> Iterator[str]:
-    app = create_app(Settings(admin_mock=True, admin_token=SecretStr("load-token")))
+    token = SecretStr("load-token")
+    app = create_app(Settings(admin_mock=True, admin_token=token, allowed_origins=(OPTS.origin,)))
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
     thread = threading.Thread(target=server.run)
     thread.start()
@@ -38,6 +41,12 @@ def app_url() -> Iterator[str]:
     yield f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}"
     server.should_exit = True
     thread.join()
+
+
+@pytest.fixture
+def exported_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A shell that exports the stack's port must not change the origins the app accepts."""
+    monkeypatch.setenv("QUIZ_PORT", "18080")
 
 
 def bot(deadline_s: float = 5) -> Player:
@@ -83,8 +92,9 @@ def test_the_cli_checks_its_options() -> None:
     opts = parse(["--url", "https://quiz.example/api/", "--quizzes", "2", "--bots", "4"])
     assert opts.quiz_ids == ("VOCAB-42", "BIZ-20")
     assert opts.ws_url == "wss://quiz.example/ws"
-    for bad in ("--quizzes 4", "--bots 0", "--accuracy 1.5", "--duration -1", "--duration 0",
-                "--ramp nan", "--duration inf", "--think-ms -3", "--timeout-ms 0"):  # fmt: skip
+    for bad in ("--quizzes 4", "--bots 0", "--procs 11", "--accuracy 1.5", "--duration -1",
+                "--duration 0", "--ramp nan", "--duration inf", "--think-ms -3", "--timeout-ms 0",
+                "--label baseline/2proc"):  # fmt: skip
         with pytest.raises(SystemExit):
             parse(bad.split())
 
@@ -191,15 +201,100 @@ async def test_converse_sends_nothing_once_the_quiz_ended() -> None:
     assert ws.sent == []
 
 
+@pytest.mark.parametrize("timer", ["answer", "retry"])
+async def test_a_timer_at_the_stop_counts_no_missing_answer(timer: str) -> None:
+    p, ws = bot(0.05), Socket()
+    stop = p.deadline + OPTS.timeout_ms / 1000  # as play() sets it
+    p.answer, p.timed = (9, "sub", 0), True
+    if timer == "answer":  # its think time ends at the stop: never sent
+        p.answer_due = stop
+    else:  # sent, and its retry timer runs out at the stop: timed out
+        p.sent, p.sent_at = True, stop - p.board.timeout_s
+    assert await converse(ws, p, Backoff(), OPTS, stop) == NORMAL  # type: ignore[arg-type]
+    p.disconnected()  # as play() does after the socket
+    counts = p.rec.counts
+    assert (ws.sent, counts["answer_missing"], counts["answer_timeout"]) == (
+        ["join"],
+        0,
+        timer == "retry",
+    )
+
+
+@pytest.mark.usefixtures("exported_port")
 async def test_a_swarm_plays_whole_quizzes_against_the_app(app_url: str) -> None:
     flags = "--quizzes 2 --bots 3 --think-ms 0 --duration 1 --ramp 0 --timeout-ms 300"
     opts = parse([*flags.split(), "--url", app_url])
     async with httpx.AsyncClient(base_url=app_url, headers={"X-Admin-Token": "load-token"}) as http:
         for quiz_id in opts.quiz_ids:
             (await http.post("/admin/quizzes", json={"quizId": quiz_id})).raise_for_status()
-    rec = await swarm(opts)
+    rec, _ = await swarm(opts)
     assert rec.counts["cohorts"] > 3  # a slot starts a new cohort after its player finishes
     assert rec.counts["answers"] >= 30  # the first cohort of each slot answers all ten
     assert len(rec.answer_ms) == rec.counts["answers"]
     for failure in ("answer_timeout", "answer_missing", "failed_opens", "reconnects"):
         assert rec.counts[failure] == 0
+
+
+async def test_a_quiz_end_before_the_deadline_ends_the_cpu_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def busy_until_the_quiz_ends(p: Player, *_: object) -> None:
+        until = time.monotonic() + 0.3
+        while time.monotonic() < until:
+            pass
+        p.ended = True
+
+    monkeypatch.setattr(bots, "play", busy_until_the_quiz_ends)
+    t0 = time.monotonic()
+    rec, proc = await swarm(parse(["--bots", "1", "--duration", "3", "--ramp", "0"]))
+    assert time.monotonic() - t0 < 1  # no idle wait for the deadline
+    assert proc["cpu_pct"] > 50  # idle time until the deadline would dilute it to about 10%
+    assert rec.counts["slots_ended_early"] == 1
+
+
+def test_the_report_is_printed_before_the_result_is_saved(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def full_disk(*_: object) -> Path:
+        raise OSError
+
+    monkeypatch.setattr(bots, "run", lambda _: summary(Recorder(), [], 1))
+    monkeypatch.setattr(bots, "save", full_disk)
+    with pytest.raises(OSError):  # noqa: PT011 - any write error
+        main([])
+    assert "INVALID: no answer samples" in capsys.readouterr().out
+
+
+async def test_quizzes_are_created_or_found_open(app_url: str) -> None:
+    opts = parse(["--quizzes", "2", "--admin-token", "load-token", "--url", app_url])
+    await create_quizzes(opts)
+    await create_quizzes(opts)  # running: 409, then still open
+    async with httpx.AsyncClient(base_url=app_url) as http:
+        headers = {"X-Admin-Token": "load-token"}
+        (await http.post("/admin/quizzes/BIZ-20/end", headers=headers)).raise_for_status()
+    with pytest.raises(RuntimeError, match="BIZ-20 has ended"):
+        await create_quizzes(opts)
+    hour = parse(
+        f"--quiz-ids ACAD-10 --duration 3600 --admin-token load-token --url {app_url}".split()
+    )
+    with pytest.raises(RuntimeError, match="HTTP 422"):
+        await create_quizzes(hour)
+
+
+def test_a_swarm_over_two_processes_writes_its_result(
+    app_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bots, "RESULTS", tmp_path)
+    flags = "--quizzes 2 --bots 3 --procs 2 --think-ms 20 --duration 1 --ramp 0 --timeout-ms 500"
+    assert main([*flags.split(), "--admin-token", "load-token", "--url", app_url]) == 0
+    [path] = tmp_path.iterdir()
+    result = json.loads(path.read_text())
+    counts = result["counts"]
+    assert counts["cohorts"] >= 3
+    assert counts["answers"] >= 30  # the first cohort of each slot answers all ten
+    assert result["answer"]["samples"] == counts["answers"]
+    for failure in ("answer_timeout", "answer_missing", "failed_opens", "reconnects"):
+        assert counts.get(failure, 0) == 0
+    assert len(result["swarm"]["procs"]) == 2
+    assert result["valid"]
+    assert bots.save(result, "run") != bots.save(result, "run")
