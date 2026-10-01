@@ -1,8 +1,4 @@
 # AI-ASSISTED: typos settings and allow-list for code and docs (make check and pre-commit).
-[files]
-# Check .github/ and the dotfiles too; git-ignored paths stay skipped.
-ignore-hidden = false
-
 [default]
 # Abbreviated commit hashes in the AI-LOG entries.
 extend-ignore-re = ["\\b[0-9a-f]{7,40}\\b"]
