@@ -37,6 +37,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: make check
+      - name: Contract drift
+        run: make contracts && git diff --exit-code
 
   integration:
     if: github.event.action != 'edited'

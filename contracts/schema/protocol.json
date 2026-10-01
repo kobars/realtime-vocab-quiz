@@ -1,0 +1,910 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Protocol",
+  "description": "Wire protocol v1 of the real-time quiz (docs/spec/protocol.md).",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ClientMessage"
+    },
+    {
+      "$ref": "#/$defs/ServerMessage"
+    }
+  ],
+  "$defs": {
+    "Answer": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "answer",
+          "default": "answer",
+          "type": "string"
+        },
+        "questionIndex": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "choiceIndex": {
+          "maximum": 3,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "submissionId": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "questionIndex",
+        "choiceIndex",
+        "submissionId"
+      ],
+      "title": "Answer",
+      "type": "object"
+    },
+    "AnswerResult": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "answer_result",
+          "default": "answer_result",
+          "type": "string"
+        },
+        "atSeq": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "questionIndex": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "submissionId": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "choiceIndex": {
+          "maximum": 3,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "correctChoiceIndex": {
+          "maximum": 3,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "correct": {
+          "type": "boolean"
+        },
+        "late": {
+          "type": "boolean"
+        },
+        "pointsAwarded": {
+          "maximum": 150,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "score": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "atSeq",
+        "questionIndex",
+        "submissionId",
+        "choiceIndex",
+        "correctChoiceIndex",
+        "correct",
+        "late",
+        "pointsAwarded",
+        "score"
+      ],
+      "title": "AnswerResult",
+      "type": "object"
+    },
+    "ClientMessage": {
+      "discriminator": {
+        "mapping": {
+          "answer": "#/$defs/Answer",
+          "get_leaderboard": "#/$defs/GetLeaderboard",
+          "join": "#/$defs/Join",
+          "next": "#/$defs/Next",
+          "ping": "#/$defs/Ping",
+          "resync": "#/$defs/Resync"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Join"
+        },
+        {
+          "$ref": "#/$defs/Next"
+        },
+        {
+          "$ref": "#/$defs/Answer"
+        },
+        {
+          "$ref": "#/$defs/Ping"
+        },
+        {
+          "$ref": "#/$defs/Resync"
+        },
+        {
+          "$ref": "#/$defs/GetLeaderboard"
+        }
+      ]
+    },
+    "Entry": {
+      "additionalProperties": false,
+      "properties": {
+        "rank": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "userId": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "type": "string"
+        },
+        "displayName": {
+          "maxLength": 32,
+          "minLength": 1,
+          "type": "string"
+        },
+        "score": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "rank",
+        "userId",
+        "displayName",
+        "score"
+      ],
+      "title": "Entry",
+      "type": "object"
+    },
+    "ErrorCode": {
+      "enum": [
+        "INVALID_MESSAGE",
+        "UNSUPPORTED_TYPE",
+        "UNSUPPORTED_VERSION",
+        "MESSAGE_TOO_LARGE",
+        "UNAUTHORIZED",
+        "FORBIDDEN",
+        "QUIZ_NOT_FOUND",
+        "NOT_JOINED",
+        "QUESTION_NOT_OPEN",
+        "ALREADY_ANSWERED",
+        "RATE_LIMITED",
+        "SESSION_REPLACED",
+        "UNAVAILABLE",
+        "INTERNAL",
+        "QUIZ_ENDED",
+        "INVALID_STATE"
+      ],
+      "title": "ErrorCode",
+      "type": "string"
+    },
+    "Finished": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "finished",
+          "default": "finished",
+          "type": "string"
+        },
+        "atSeq": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "score": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rank": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "playerCount": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "atSeq",
+        "score",
+        "rank",
+        "playerCount"
+      ],
+      "title": "Finished",
+      "type": "object"
+    },
+    "GetLeaderboard": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "get_leaderboard",
+          "default": "get_leaderboard",
+          "type": "string"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "limit": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "offset",
+        "limit"
+      ],
+      "title": "GetLeaderboard",
+      "type": "object"
+    },
+    "Join": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "join",
+          "default": "join",
+          "type": "string"
+        },
+        "quizId": {
+          "pattern": "^[A-Z0-9-]{3,16}$",
+          "type": "string"
+        },
+        "displayName": {
+          "maxLength": 128,
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "quizId",
+        "displayName"
+      ],
+      "title": "Join",
+      "type": "object"
+    },
+    "Joined": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "joined",
+          "default": "joined",
+          "type": "string"
+        },
+        "atSeq": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "quizId": {
+          "pattern": "^[A-Z0-9-]{3,16}$",
+          "type": "string"
+        },
+        "userId": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "type": "string"
+        },
+        "displayName": {
+          "maxLength": 32,
+          "minLength": 1,
+          "type": "string"
+        },
+        "questionCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeLimitMs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "quizRemainingMs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cursor": {
+          "minimum": -1,
+          "type": "integer"
+        },
+        "cursorOpen": {
+          "type": "boolean"
+        },
+        "finished": {
+          "type": "boolean"
+        },
+        "score": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "atSeq",
+        "quizId",
+        "userId",
+        "displayName",
+        "questionCount",
+        "timeLimitMs",
+        "quizRemainingMs",
+        "cursor",
+        "cursorOpen",
+        "finished",
+        "score"
+      ],
+      "title": "Joined",
+      "type": "object"
+    },
+    "Leaderboard": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "leaderboard",
+          "default": "leaderboard",
+          "type": "string"
+        },
+        "seq": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rebase": {
+          "type": "boolean"
+        },
+        "playerCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "onlineCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/Entry"
+          },
+          "maxItems": 200,
+          "type": "array"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "seq",
+        "rebase",
+        "playerCount",
+        "onlineCount",
+        "entries"
+      ],
+      "title": "Leaderboard",
+      "type": "object"
+    },
+    "LeaderboardPage": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "leaderboard_page",
+          "default": "leaderboard_page",
+          "type": "string"
+        },
+        "atSeq": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "playerCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "final": {
+          "type": "boolean"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/Entry"
+          },
+          "maxItems": 200,
+          "type": "array"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "atSeq",
+        "offset",
+        "playerCount",
+        "final",
+        "entries"
+      ],
+      "title": "LeaderboardPage",
+      "type": "object"
+    },
+    "Next": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "next",
+          "default": "next",
+          "type": "string"
+        },
+        "questionIndex": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "questionIndex"
+      ],
+      "title": "Next",
+      "type": "object"
+    },
+    "Ping": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "ping",
+          "default": "ping",
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "type"
+      ],
+      "title": "Ping",
+      "type": "object"
+    },
+    "Pong": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "pong",
+          "default": "pong",
+          "type": "string"
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "seq"
+      ],
+      "title": "Pong",
+      "type": "object"
+    },
+    "ProtocolError": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "error",
+          "default": "error",
+          "type": "string"
+        },
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "requestType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "code",
+        "message",
+        "requestType"
+      ],
+      "title": "ProtocolError",
+      "type": "object"
+    },
+    "Question": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "question",
+          "default": "question",
+          "type": "string"
+        },
+        "atSeq": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "questionIndex": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "questionId": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "choices": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "timeLimitMs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "remainingMs": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "atSeq",
+        "questionIndex",
+        "questionId",
+        "prompt",
+        "choices",
+        "timeLimitMs",
+        "remainingMs"
+      ],
+      "title": "Question",
+      "type": "object"
+    },
+    "QuizEnded": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "quiz_ended",
+          "default": "quiz_ended",
+          "type": "string"
+        },
+        "seq": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "playerCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/Entry"
+          },
+          "maxItems": 50,
+          "type": "array"
+        },
+        "you": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/You"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "seq",
+        "playerCount",
+        "entries",
+        "you"
+      ],
+      "title": "QuizEnded",
+      "type": "object"
+    },
+    "RankUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "rank_update",
+          "default": "rank_update",
+          "type": "string"
+        },
+        "atSeq": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rank": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "score": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "playerCount": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "atSeq",
+        "rank",
+        "score",
+        "playerCount"
+      ],
+      "title": "RankUpdate",
+      "type": "object"
+    },
+    "Resync": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "resync",
+          "default": "resync",
+          "type": "string"
+        },
+        "lastSeq": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "lastSeq"
+      ],
+      "title": "Resync",
+      "type": "object"
+    },
+    "ServerMessage": {
+      "discriminator": {
+        "mapping": {
+          "answer_result": "#/$defs/AnswerResult",
+          "error": "#/$defs/ProtocolError",
+          "finished": "#/$defs/Finished",
+          "joined": "#/$defs/Joined",
+          "leaderboard": "#/$defs/Leaderboard",
+          "leaderboard_page": "#/$defs/LeaderboardPage",
+          "pong": "#/$defs/Pong",
+          "question": "#/$defs/Question",
+          "quiz_ended": "#/$defs/QuizEnded",
+          "rank_update": "#/$defs/RankUpdate",
+          "snapshot": "#/$defs/Snapshot"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Leaderboard"
+        },
+        {
+          "$ref": "#/$defs/QuizEnded"
+        },
+        {
+          "$ref": "#/$defs/Joined"
+        },
+        {
+          "$ref": "#/$defs/Question"
+        },
+        {
+          "$ref": "#/$defs/AnswerResult"
+        },
+        {
+          "$ref": "#/$defs/RankUpdate"
+        },
+        {
+          "$ref": "#/$defs/LeaderboardPage"
+        },
+        {
+          "$ref": "#/$defs/Snapshot"
+        },
+        {
+          "$ref": "#/$defs/Finished"
+        },
+        {
+          "$ref": "#/$defs/Pong"
+        },
+        {
+          "$ref": "#/$defs/ProtocolError"
+        }
+      ]
+    },
+    "Snapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "snapshot",
+          "default": "snapshot",
+          "type": "string"
+        },
+        "atSeq": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "open",
+            "ended"
+          ],
+          "type": "string"
+        },
+        "playerCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "onlineCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/Entry"
+          },
+          "maxItems": 200,
+          "type": "array"
+        },
+        "you": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/You"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "atSeq",
+        "status",
+        "playerCount",
+        "onlineCount",
+        "entries",
+        "you"
+      ],
+      "title": "Snapshot",
+      "type": "object"
+    },
+    "You": {
+      "additionalProperties": false,
+      "properties": {
+        "rank": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "score": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "rank",
+        "score"
+      ],
+      "title": "You",
+      "type": "object"
+    }
+  }
+}
