@@ -133,7 +133,9 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
     configure_logging()
     app = FastAPI(title="Real-time vocabulary quiz", lifespan=lifespan)
     app.state.services = services
-    app.state.gateway = gateway = Gateway(services.settings, services.tickets, services.service)
+    app.state.gateway = gateway = Gateway(
+        services.settings, services.tickets, services.service, services.store
+    )
     app.add_api_websocket_route("/ws", gateway.endpoint)
     s, ttl_ms = services.settings, TICKET_TTL_S * 1000
     token = s.admin_token.get_secret_value() if s.admin_mock and s.admin_token else None
