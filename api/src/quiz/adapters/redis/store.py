@@ -20,7 +20,7 @@ from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.events import AnswerScored
 from quiz.domain.session import Question
 from quiz.ports import store as port
-from quiz.ports.store import Created, Joined
+from quiz.ports.store import Created, Joined, Limits
 
 
 def _ok(name: str, reply: Reply) -> Reply:
@@ -44,8 +44,9 @@ def _reachable() -> Iterator[None]:
 
 
 class RedisStore:
-    def __init__(self, client: Redis, *, prefix: str = "") -> None:
+    def __init__(self, client: Redis, *, prefix: str = "", limits: Limits | None = None) -> None:
         self._client = client
+        self.limits = limits or Limits()  # for the tick and snapshot scripts, through ARGV
         self._scripts = Scripts(client)
         self._prefix = prefix
 
