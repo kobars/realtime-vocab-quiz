@@ -46,7 +46,7 @@ Question indexes are 0-based: `0 … N−1`. The player record holds the index o
 | `expired(i)` | Derived, never stored: question `i` is open and `now > serveMs + T` | `answer` → `answered(i)` with 0 points (late); `next {i+1}` → closed with 0, then `served(i+1)` |
 | `answered(i)` | Closed by the player's first answer (points 0–150) | `next {i+1}` → `served(i+1)`; if `i = N−1` → `finished` |
 | `skipped(i)` | Closed by `next` before any answer; scores 0 | (already moved on to `served(i+1)` or `finished`) |
-| `finished` | The last question is closed | nothing; the player keeps watching the board |
+| `finished` | The last question is closed | nothing; the player keeps watching the leaderboard |
 
 Every transition happens only while the quiz is `open`. `next {questionIndex: N}` closes an open last question as skipped and marks the player `finished`; it serves nothing. Joining does not serve a question: the player's clock for question 0 starts when the client asks for it, so a slow page load costs nothing. A player whose last question is answered is `finished` at once.
 
