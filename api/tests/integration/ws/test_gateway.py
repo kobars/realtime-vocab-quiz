@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient, WebSocketDenialResponse, WebSocketTestSession
 
-from quiz.adapters.ws.endpoint import path_only
+from quiz.adapters.ws.endpoint import UVICORN_LOGGERS, path_only
 from quiz.config import Settings
 from quiz.domain.session import Question
 from quiz.main import create_app, services_of
@@ -139,14 +139,26 @@ def test_ten_seconds_of_abuse_get_rate_limited_then_close_1008() -> None:
 
 def test_logs_hold_the_path_but_never_the_ticket(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO, logger="quiz")
+    for name in UVICORN_LOGGERS:  # create_app() must attach the filter itself
+        logging.getLogger(name).removeFilter(path_only)
     with client_of() as client:
         issued = ticket(client)
         refused(client, issued, proto="chat")
         with connect(client, issued):
             pass
+    assert all(path_only in logging.getLogger(name).filters for name in UVICORN_LOGGERS)
     args = ("1.2.3.4:5", f"/ws?ticket={issued}", 403)  # a uvicorn handshake line
     line = logging.LogRecord("uvicorn.error", 20, "", 0, '%s - "WebSocket %s" %d', args, None)
-    assert path_only(line)
-    lines = [r.getMessage() for r in [*caplog.records, line]]
-    assert len(lines) == 3
+    scope = {"type": "websocket", "path": "/ws", "query_string": f"ticket={issued}".encode()}
+    started = ("1.2.3.4:5 - ASGI", 1, scope)  # uvicorn's trace line when a connection starts
+    trace = logging.LogRecord("uvicorn.asgi", 5, "", 0, "%s [%d] Started scope=%s", started, None)
+    assert all(logging.getLogger(r.name).filter(r) for r in (line, trace))
+    lines = [r.getMessage() for r in [*caplog.records, line, trace]]
+    assert len(lines) == 4
     assert all("/ws" in text and issued not in text and "?" not in text for text in lines)
+
+
+def test_an_unreachable_ticket_store_answers_503() -> None:
+    app = create_app(Settings(store="redis", redis_url="redis://127.0.0.1:1/0"))
+    client = TestClient(app)  # no lifespan, so no script load: the ticket redeem is the first call
+    assert refused(client, "some-ticket") == 503
