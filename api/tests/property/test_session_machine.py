@@ -1,6 +1,7 @@
 # AI-ASSISTED: stateful test of the session state machine: C1, C2, C3, C6, answer/skip exclusivity,
 # accepted answers and the deadline.
 from collections import Counter
+from typing import override
 
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, precondition, rule
@@ -196,6 +197,7 @@ class SessionMachine(RuleBasedStateMachine):
         totals = {user_id: p.standing.total for user_id, p in self.state.players.items()}
         assert self.state.dirty or self.state.ended_ms is not None or totals == self.last_frame
 
+    @override
     def teardown(self) -> None:
         # C6: every outcome is a function of the commands and the injected clock alone.
         state = self.initial

@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any, Literal, override
 
 import pytest
 from redis import exceptions as redis_errors
@@ -40,14 +40,17 @@ class SpyStore(MemoryStore):
         self.now, self.snapshots, self.pages, self.ends = [1_000_000], 0, 0, 0
         super().__init__(lambda: self.now[0])
 
+    @override
     async def snapshot(self, quiz_id: str, user_id: str | None) -> Snapshot:
         self.snapshots += 1
         return await super().snapshot(quiz_id, user_id)
 
+    @override
     async def standings_page(self, quiz_id: str, offset: int, limit: int) -> Page:
         self.pages += 1
         return await super().standings_page(quiz_id, offset, limit)
 
+    @override
     async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> End:
         self.ends += 1
         return await super().end_quiz(quiz_id, reason)

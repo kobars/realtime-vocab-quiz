@@ -16,7 +16,7 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 from pydantic import TypeAdapter
 from pydantic.json_schema import GenerateJsonSchema, JsonSchemaMode
@@ -37,7 +37,8 @@ BANNER = (
 class _NoFieldTitles(GenerateJsonSchema):
     """Leave out per-field titles, so the TypeScript output has no alias per field."""
 
-    def field_title_should_be_set(self, schema: CoreSchema) -> bool:  # noqa: ARG002
+    @override
+    def field_title_should_be_set(self, schema: CoreSchema) -> bool:
         return False
 
 
