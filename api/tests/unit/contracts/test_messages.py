@@ -10,6 +10,8 @@ from quiz.contracts.messages import (
     SERVER_ADAPTER,
     Broadcast,
     ClientMessage,
+    ErrorCode,
+    ProtocolError,
     ServerMessage,
     message_types,
 )
@@ -152,3 +154,21 @@ def test_unknown_field_is_rejected(kind: str) -> None:
     with pytest.raises(ValidationError, match="Extra inputs"):
         adapter(kind).validate_json(frame(kind, {**EXAMPLES[kind][0], "extra": 1}))
 
+
+@pytest.mark.parametrize("kind", sorted(EXAMPLES))
+def test_decoded_json_validates_like_raw_json(kind: str) -> None:
+    raw = frame(kind, EXAMPLES[kind][0])
+    assert adapter(kind).validate_python(json.loads(raw)) == adapter(kind).validate_json(raw)
+
+
+def test_error_code_is_parsed_into_the_enum_from_decoded_json() -> None:
+    message = SERVER_ADAPTER.validate_python(json.loads(frame("error", EXAMPLES["error"][0])))
+    assert isinstance(message, ProtocolError)
+    assert message.code is ErrorCode.NOT_JOINED
+
+
+@pytest.mark.parametrize("kind", sorted(EXAMPLES))
+def test_invalid_decoded_json_is_rejected(kind: str) -> None:
+    valid, bad = EXAMPLES[kind]
+    with pytest.raises(ValidationError):
+        adapter(kind).validate_python(json.loads(frame(kind, {**valid, **bad})))
