@@ -105,7 +105,10 @@ forbidden_modules = [
 name = "Ports and use cases depend only on the domain, the ports and the wire contracts"
 type = "forbidden"
 source_modules = ["quiz.ports", "quiz.app"]
-forbidden_modules = ["quiz.adapters", "quiz.fanout", "quiz.config", "quiz.main", "redis", "fastapi"]
+forbidden_modules = [
+    "quiz.adapters", "quiz.fanout", "quiz.config", "quiz.main", "redis", "fastapi", "starlette",
+    "uvicorn", "pydantic_settings",
+]
 
 [[tool.importlinter.contracts]]
 name = "Ports never import the use cases"
@@ -128,7 +131,10 @@ source_modules = [
     "quiz.adapters.memory", "quiz.adapters.redis", "quiz.adapters.mock_auth",
     "quiz.adapters.mock_questions",
 ]
-forbidden_modules = ["quiz.app", "quiz.fanout", "quiz.config", "quiz.main"]
+forbidden_modules = [
+    "quiz.app", "quiz.fanout", "quiz.config", "quiz.main", "fastapi", "starlette", "uvicorn",
+    "pydantic_settings",
+]
 
 [[tool.importlinter.contracts]]
 name = "Nothing imports the composition root"

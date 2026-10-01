@@ -13,8 +13,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
 
 KIB = 1024
-# Docker's default address pool for bridge networks, where the compose network's nginx lives.
-DOCKER_BRIDGE_POOL = "172.16.0.0/12"
+# Docker's default address pools for bridge networks, where the compose network's nginx lives.
+DOCKER_BRIDGE_POOLS = ("172.16.0.0/12", "192.168.0.0/16")
 
 
 def _default_node_id() -> str:
@@ -47,8 +47,8 @@ class Settings(BaseSettings):
     max_connections: PositiveInt = 10_000  # per process; above it HTTP 503 at the upgrade
     per_ip_conn_cap: PositiveInt = 50  # above it HTTP 429; raised for the demo and load runs
     # X-Forwarded-For is trusted only from these peers.
-    trusted_proxies: Annotated[tuple[IPv4Network | IPv6Network, ...], NoDecode] = (
-        ip_network(DOCKER_BRIDGE_POOL),
+    trusted_proxies: Annotated[tuple[IPv4Network | IPv6Network, ...], NoDecode] = tuple(
+        ip_network(pool) for pool in DOCKER_BRIDGE_POOLS
     )
 
     admin_mock: bool = False  # MOCK: the quiz admin endpoints exist only when set
@@ -81,7 +81,8 @@ class Settings(BaseSettings):
         if self.rate_limit_burst < self.rate_limit_per_s:
             msg = "RATE_LIMIT_BURST must be at least RATE_LIMIT_PER_S"
             raise ValueError(msg)
-        if self.admin_mock and self.admin_token is None:
-            msg = "ADMIN_MOCK needs ADMIN_TOKEN"
+        token = "" if self.admin_token is None else self.admin_token.get_secret_value()
+        if self.admin_mock and not token.strip():
+            msg = "ADMIN_MOCK needs a non-blank ADMIN_TOKEN"
             raise ValueError(msg)
         return self
