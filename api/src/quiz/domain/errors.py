@@ -11,6 +11,7 @@ class ErrorCode(StrEnum):
     QUIZ_ENDED = "QUIZ_ENDED"
     QUIZ_NOT_FOUND = "QUIZ_NOT_FOUND"
     SESSION_REPLACED = "SESSION_REPLACED"
+    UNAVAILABLE = "UNAVAILABLE"  # the store did not confirm a write; nothing was announced
 
 
 class DomainError(Exception):

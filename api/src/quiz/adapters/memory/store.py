@@ -218,6 +218,12 @@ class MemoryStore:
             quiz.end_seq = quiz.state.seq
             return port.End("ended", quiz.end_seq)
 
+    async def end_by_host(self, quiz_id: str) -> int:
+        end = await self.end_quiz(quiz_id, "host")
+        if end.status == "marked":  # memory has no fsync to wait for
+            end = await self.end_quiz(quiz_id, "host")
+        return port.announced(end)
+
     async def renew_presence(
         self, quiz_id: str, stale_ms: int, pairs: Sequence[tuple[str, str]]
     ) -> port.Renewed:

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
+from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.events import AnswerScored
 from quiz.domain.session import Question
 
@@ -118,6 +119,13 @@ class End:
     seq: int | None = None  # ended: the seq of quiz_ended
 
 
+def announced(end: End) -> int:
+    """The seq of ``quiz_ended`` after a host end; anything else is an ``UNAVAILABLE`` refusal."""
+    if end.status != "ended" or end.seq is None:  # the mark was lost: the host retries
+        raise DomainError(ErrorCode.UNAVAILABLE, "the end was not announced; retry")
+    return end.seq
+
+
 class Store(Protocol):
     async def create_quiz(
         self, quiz_id: str, questions: tuple[Question, ...], *, window_ms: int, time_limit_ms: int
@@ -161,6 +169,13 @@ class Store(Protocol):
 
     async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> End:
         """Announce the end once; a first host call only marks it (docs/spec/redis.md §3.1)."""
+        ...
+
+    async def end_by_host(self, quiz_id: str) -> int:
+        """The host's "end now": mark, wait for the mark to be durable, announce; the end seq.
+
+        Raises ``DomainError(UNAVAILABLE)`` when the mark is not durable or the end is not
+        announced; nothing is announced then, and a retry is safe (redis.md §3.1 step 3)."""
         ...
 
     async def renew_presence(

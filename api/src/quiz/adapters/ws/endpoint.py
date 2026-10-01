@@ -8,6 +8,7 @@ import logging
 import time
 import uuid
 
+import structlog
 from fastapi import Response, WebSocket, WebSocketDisconnect
 
 from quiz.adapters.ws.limits import ConnectionCaps, RateLimiter, client_ip
@@ -69,17 +70,21 @@ class Gateway:
             return await _refuse(ws, status, "connection cap reached")
         code = 1006  # the socket dropped without a close frame
         conn = Connection(uuid.uuid4().hex, identity.user_id)
-        try:
-            await ws.accept(subprotocol=SUBPROTOCOL)
-            limiter = RateLimiter(settings.rate_limit_per_s, settings.rate_limit_burst, self.clock)
-            soft, hard = settings.send_buffer_soft_bytes, settings.send_buffer_hard_bytes
-            code = await serve(ws, conn, limiter, Sender(ws, soft, hard), self._deps)
-        except WebSocketDisconnect as gone:
-            code = gone.code
-        finally:
-            self.registry.drop(conn)
-            self.caps.release(ip)
-            log.info("ws %s closed %d", path, code)
+        # the socket's lines carry its connection id as request_id; the join binds quiz_id
+        with structlog.contextvars.bound_contextvars(request_id=conn.conn_id, quiz_id=None):
+            try:
+                await ws.accept(subprotocol=SUBPROTOCOL)
+                rate, burst = settings.rate_limit_per_s, settings.rate_limit_burst
+                soft, hard = settings.send_buffer_soft_bytes, settings.send_buffer_hard_bytes
+                limiter, sender = RateLimiter(rate, burst, self.clock), Sender(ws, soft, hard)
+                code = await serve(ws, conn, limiter, sender, self._deps)
+            except WebSocketDisconnect as gone:
+                code = gone.code
+            finally:
+                self.registry.drop(conn)
+                self.caps.release(ip)
+                structlog.contextvars.bind_contextvars(quiz_id=conn.quiz_id)
+                log.info("ws %s closed %d", path, code)
         return None
 
 
