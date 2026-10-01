@@ -20,16 +20,32 @@ def _block(path: Path, start: str, next_prefix: str) -> list[str]:
     return lines[begin:end]
 
 
-def _job(name: str) -> list[str]:
-    """Return the stripped lines of one job of the CI workflow."""
-    path = ROOT / ".github" / "workflows" / "ci.yml"
+def _section(path: Path, key: str, indent: int) -> list[str]:
+    """Return the stripped lines of the YAML key ``key`` written ``indent`` spaces deep, up to
+    the next key at that depth or less."""
     raw = path.read_text(encoding="utf-8").splitlines()
-    begin = raw.index(f"  {name}:")
+    begin = raw.index(f"{' ' * indent}{key}:")
     end = next(
-        (i for i in range(begin + 1, len(raw)) if raw[i].startswith("  ") and raw[i][2] != " "),
+        (
+            i
+            for i in range(begin + 1, len(raw))
+            if raw[i].strip() and len(raw[i]) - len(raw[i].lstrip()) <= indent
+        ),
         len(raw),
     )
     return [line.strip() for line in raw[begin:end]]
+
+
+def _job(name: str) -> list[str]:
+    """Return the stripped lines of one job of the CI workflow."""
+    return _section(ROOT / ".github" / "workflows" / "ci.yml", name, 2)
+
+
+def _run_commands(path: Path) -> list[str]:
+    """Return the command of every one-line ``run:`` step of a workflow."""
+    text = path.read_text(encoding="utf-8")
+    lines = (line.strip().removeprefix("- ") for line in text.splitlines())
+    return [line.removeprefix("run:").strip() for line in lines if line.startswith("run:")]
 
 
 def test_internal_hook_scans_every_staged_file() -> None:
@@ -51,17 +67,20 @@ def test_only_the_internal_job_runs_on_an_edit() -> None:
 
 
 def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
-    workflow = (ROOT / ".github" / "workflows" / "containers.yml").read_text(encoding="utf-8")
-    for check in (
+    path = ROOT / ".github" / "workflows" / "containers.yml"
+    assert "pull_request:" in _section(path, "on", 0)
+    runs = _run_commands(path)
+    for command in (
         "hadolint/hadolint:",
-        "shellcheck",
+        "xargs -0 --no-run-if-empty shellcheck",
         "docker compose -f {} config -q",
-        "scan-type: config",
         "make build",
-        "scripts/smoke_images.sh",
-        "nginx -t",
+        'scripts/smoke_images.sh "$IMAGE_TAG"',
+        'scripts/check_nginx.sh "$IMAGE_TAG"',
     ):
-        assert check in workflow, check
+        assert any(command in run for run in runs), command
+    workflow = path.read_text(encoding="utf-8")
+    assert "scan-type: config" in workflow
     # Image scans fail on CRITICAL and HIGH findings that have a fix, for both images.
     assert workflow.count("ignore-unfixed: true") == workflow.count("image-ref:") == 2
     assert workflow.count("severity: CRITICAL,HIGH") == 2
