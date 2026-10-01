@@ -42,7 +42,7 @@ The product needs one real-time quiz service built for real; identity, questions
 ### Decision
 
 - **Built for real:** the real-time quiz service end to end: the Vue client, the WebSocket gateway, the use cases, the Redis scoring scripts, the coalescing tick and the pub/sub fan-out across two API nodes behind nginx.
-- **Mocked, behind ports:** identity and tickets (`TicketStore`: anonymous sessions and single-use tickets kept in Redis) and the question bank (`QuestionBank`: seed quizzes from JSON files). Quiz admin is a set of make targets and one host action ("end now"). Each mock module says `MOCK:` in its docstring.
+- **Mocked, behind ports:** identity and tickets (`TicketStore`: anonymous sessions and single-use tickets kept in Redis) and the question bank (`QuestionBank`: seed quizzes from JSON files). Quiz admin is a token-gated mock admin API (`POST /admin/quizzes`, only with `ADMIN_MOCK=1`) and one host action ("end now"). Each mock module says `MOCK:` in its docstring.
 - **Server stack:** Python 3.14 with FastAPI on uvicorn, Pydantic v2 for the wire models and settings, redis-py with hiredis, managed with uv. The wire messages are defined once, as Pydantic models in `api/src/quiz/contracts/`; the JSON Schema and the client's TypeScript types are generated from them (ADR-009).
 
 ### Alternatives considered
