@@ -27,4 +27,4 @@ async def test_join_after_clock_step_back_clamps_reached_time() -> None:
     await store.join("VOCAB-1", "a", "A", "c1")  # reached at 0 ms
     now[0] -= 50
     await store.join("VOCAB-1", "z", "Z", "c2")  # -50 ms is clamped to 0: a tie, so a ranks first
-    assert await store.rank_of("VOCAB-1", "z") == Row(2, "z", "Z", 0)
+    assert (await store.ranks_of("VOCAB-1", ["z"])).rows == {"z": Row(2, "z", "Z", 0)}
