@@ -5,7 +5,9 @@ quizzes from a content service or a database, edited in an authoring tool.
 Each file holds one quiz: ``quiz_id``, ``title`` and its questions (``id``, ``word``, four
 distinct ``choices`` and the ``answer`` index). Question IDs are the quiz ID lowercased without
 hyphens, then a two-digit number in serve order: ``VOCAB-42`` has ``vocab42-01`` … ``vocab42-10``.
-A file that is not JSON or breaks a rule stops the load with a ``ValueError`` that names the file.
+A file that is not JSON or breaks a rule stops the load with a ``ValueError`` that names the file;
+so does a folder with no quiz file. The ``answer`` must be a JSON integer: ``"2"``, ``true`` and
+``1.0`` are rejected, not coerced.
 """
 
 import json
@@ -16,6 +18,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictInt,
     StringConstraints,
     ValidationError,
     model_validator,
@@ -33,7 +36,7 @@ class _Question(BaseModel):
     id: str
     word: Text
     choices: tuple[Text, Text, Text, Text]
-    answer: Annotated[int, Field(ge=0, le=CHOICES - 1)]
+    answer: Annotated[StrictInt, Field(ge=0, le=CHOICES - 1)]
 
     @model_validator(mode="after")
     def _distinct(self) -> Self:
@@ -88,6 +91,9 @@ class MockQuestionBank:
                 msg = f"{path.name}: quiz {quiz_id} is defined twice"
                 raise ValueError(msg)
             quizzes[quiz_id] = questions
+        if not quizzes:
+            msg = f"no quiz file (*.json) in {folder}"
+            raise ValueError(msg)
         return cls(quizzes)
 
     @property
