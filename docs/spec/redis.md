@@ -65,7 +65,7 @@ A reconnecting `join` writes no player state (names, totals, board, serve): only
 
 ### 3.1 Ending a quiz
 
-The quiz is `ended` from the clock alone (domain §3.1): every write script refuses at `now ≥ deadlineMs` and writes nothing. Announcing the end is separate, and three paths run the idempotent `end_quiz`; whichever runs first publishes `quiz_ended`, the others get `ended, endSeq`:
+The quiz is `ended` from the clock alone (domain §3.1): every write script except `create_quiz`, `leave` and `end_quiz` refuses at `now ≥ deadlineMs` and writes nothing (`leave` still removes the caller's presence entry, and `end_quiz` records the end). Announcing the end is separate, and three paths run the idempotent `end_quiz`; whichever runs first publishes `quiz_ended`, the others get `ended, endSeq`:
 
 1. **The first write after the deadline.** `join`, `serve_question`, `score_answer` and `publish_leaderboard` return `QUIZ_ENDED` (or `ended`) with `endSeq = nil`; the node then calls `end_quiz` with reason `deadline`. The refused script itself never increments `seq`. Before the deadline (a host end that is marked but not announced yet) that call returns `not_due` and the node does nothing more.
 2. **A deadline timer** on each node that has sockets for the quiz calls `end_quiz` at `deadlineMs`. It only makes the announcement prompt; correctness never depends on it.
