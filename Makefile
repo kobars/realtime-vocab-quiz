@@ -11,6 +11,9 @@ IMAGE_TAG ?= dev
 # The API node that the Vite dev server proxies to (web/vite.config.ts) and that server's origins.
 DEV_API_PORT ?= 8001
 DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
+# compose reads the whole file in every command, so the full stack's required secrets must be set
+# even to start or stop the development Redis, which reads neither.
+COMPOSE = ADMIN_TOKEN="$${ADMIN_TOKEN:-unused}" REDIS_PASSWORD="$${REDIS_PASSWORD:-unused}" docker compose
 
 .PHONY: help build up down dev-api demo demo-stop test test-integration check acceptance load contracts new-quiz ai-log audit audit-python audit-web audit-secrets
 
@@ -22,9 +25,9 @@ build: ## Build the API and web images
 	$(call step,web image,docker build -f web/Dockerfile -t elsaquiz-web:$(IMAGE_TAG) .)
 	@docker image ls --format '{{.Repository}}:{{.Tag}}  {{.Size}}' --filter reference='elsaquiz-*:$(IMAGE_TAG)'
 up: ## Start the development Redis
-	docker compose up -d --wait redis
-down: ## Stop the development Redis
-	docker compose down
+	$(COMPOSE) up -d --wait redis
+down: ## Stop the development Redis and the full stack
+	$(COMPOSE) --profile '*' down
 dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)
 	cd api && ALLOWED_ORIGINS='$(DEV_ORIGINS)' uv run --locked python -m quiz --host 127.0.0.1 --port $(DEV_API_PORT)
 demo: ## Run the full stack with seed data and bots

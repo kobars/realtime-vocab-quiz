@@ -68,6 +68,27 @@ security header of `web/security-headers.conf` (CSP, `nosniff`, `Referrer-Policy
 `make help` lists every target; a target whose work has not landed yet prints
 `not yet`.
 
+## Running the full stack
+
+The `full` Compose profile runs two API nodes (`api-1`, `api-2`) on one Redis behind
+nginx (`infra/nginx/nginx.conf`), which sends `/` to the web app, `/api/` (prefix
+dropped) and `/ws` to the nodes, round-robin. Only nginx publishes a port:
+`127.0.0.1:${QUIZ_PORT}`, 8080 by default.
+
+```bash
+cp .env.example .env                        # then set ADMIN_TOKEN and REDIS_PASSWORD
+make build                                  # the images the stack runs
+docker compose --profile full up -d --wait  # returns once every service is healthy
+make down                                   # stops the stack and the development Redis
+```
+
+The nodes publish no port, so check `/healthz` and `/readyz` on one from inside its
+container:
+
+```bash
+docker compose exec api-1 python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8000/readyz').read().decode())"
+```
+
 ## Documents
 
 - [DESIGN.md](DESIGN.md) — the system design
