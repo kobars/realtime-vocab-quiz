@@ -201,6 +201,12 @@ it('a page request with no reply, or a refused one, is sent again at most once p
   expect([sent().length, pageRanks(w).length]).toEqual([3, 100])
 })
 
+it('a page request keeps being sent once per second while every reply is lost and nothing else changes', async () => {
+  await openAll()
+  await vi.advanceTimersByTimeAsync(3_000)
+  expect(sent()).toEqual([[0, 100], [0, 100], [0, 100], [0, 100]])
+})
+
 it('the reload throttle runs on the monotonic clock, so moving the wall clock back does not delay it', async () => {
   await openAll()
   await receive(page(3, 0, top(100)))

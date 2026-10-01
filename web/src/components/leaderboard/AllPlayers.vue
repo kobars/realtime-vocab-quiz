@@ -54,7 +54,7 @@ function schedule(): void {
     reload = null
     if (!stale()) return
     if (store.now() - loadedAt >= PAGE_RELOAD_MS) load(offset.value)
-    else schedule()
+    schedule()
   }, Math.max(0, loadedAt + PAGE_RELOAD_MS - store.now()))
 }
 

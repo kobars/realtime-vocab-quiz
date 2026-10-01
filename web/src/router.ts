@@ -21,12 +21,12 @@ export const routes: RouteRecordRaw[] = [
 
 export function createAppRouter(history: RouterHistory = createWebHistory()) {
   const router = createRouter({ history, routes })
-  // The quiz screen needs a store joined to that quiz, or the results of an ended one (a join after the end binds no
-  // quiz). A direct load, a refresh or another ID goes to the join screen with the ID filled in, like `/q/:quizId`.
+  // The quiz screen needs a store joined to that quiz, or showing the results of that quiz after an ended join (which
+  // binds no quiz). A direct load, a refresh or another ID goes to the join screen with the ID filled in, like `/q/:quizId`.
   router.beforeEach((to) => {
     if (to.name !== 'quiz') return
     const store = useQuizStore()
-    const joined = store.quiz === null ? store.ended : store.quiz.quizId === to.params.quizId
+    const joined = store.quizId === to.params.quizId && (store.quiz !== null || store.ended)
     if (!joined) return { name: 'join', query: { quiz: to.params.quizId } }
   })
   return router

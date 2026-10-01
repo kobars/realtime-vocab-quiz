@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory } from 'vue-router'
 import App from './App.vue'
 import { createAppRouter } from './router'
-import { useQuizStore } from './stores/quiz'
+import { configureQuizStore, useQuizStore } from './stores/quiz'
 import { strings } from './strings'
 
 beforeEach(() => setActivePinia(createPinia()))
@@ -38,14 +38,31 @@ describe('routes', () => {
 })
 
 describe('quiz guard', () => {
-  const joinedTo = (quizId: string) => useQuizStore().$patch({ quiz: { quizId } as never })
+  configureQuizStore({ createClient: () => ({ start: vi.fn(), next: vi.fn(), answer: vi.fn(), rejoin: vi.fn(), getLeaderboard: vi.fn(), stop: vi.fn() }) })
+  /** A join to `quizId`, then its `joined` reply. */
+  const joinedTo = (quizId: string) => {
+    useQuizStore().join(quizId, 'Ana')
+    useQuizStore().$patch({ quiz: { quizId } as never })
+  }
+  /** A join to `quizId` after its end: the results with no binding. */
+  const endedJoinTo = (quizId: string) => {
+    useQuizStore().join(quizId, 'Ana')
+    useQuizStore().$patch({ ended: true })
+  }
 
   it('lets in the quiz the store is joined to, and the results of an ended quiz with no binding', async () => {
     joinedTo('VOCAB-42')
     expect((await at('/quiz/VOCAB-42')).currentRoute.value.name).toBe('quiz')
     setActivePinia(createPinia())
-    useQuizStore().$patch({ ended: true })
+    endedJoinTo('VOCAB-42')
     expect((await at('/quiz/VOCAB-42')).currentRoute.value.name).toBe('quiz')
+  })
+
+  it('sends another quiz ID after a join to an ended quiz to the join screen, so it never shows those results', async () => {
+    endedJoinTo('VOCAB-42')
+    const router = await at('/quiz/VOCAB-42')
+    await router.push('/quiz/OTHER-QUIZ')
+    expect(router.currentRoute.value.fullPath).toBe('/?quiz=OTHER-QUIZ')
   })
 
   it('sends another quiz ID, also from inside the quiz screen, to the join screen with that ID filled in', async () => {
