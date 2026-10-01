@@ -167,7 +167,7 @@ Redis 8 (Valkey 8 also works) holds all quiz state. The standings are one sorted
 
 - C1, C3 and C6 hold by construction: every check and its write happen in one atomic script on one clock.
 - A crash of Redis can lose about 1 s of writes; DESIGN §11 states it, and clients recover through `seq` and resync.
-- Scripts block Redis while they run, so each one stays O(log N) per write, except the tick, which reads at most 200 rows.
+- Scripts block Redis while they run, so each one stays O(log N) per write, except the tick. The tick reads at most 200 rows, and above 200 players it also runs one `ZRANK` for each scorer since the last frame and one `HGET` for each of those outside the top 50, so its cost is O(S log N) for S scorers among N players and grows with a scoring burst. The load runs should measure the tick script under a synchronized scoring burst.
 - The quiz window is capped at 60 min so that `reachedRelMs` fits in 22 bits.
 
 ## ADR-006 — No owner per quiz: the `dirty` gate and a tick token
