@@ -18,7 +18,7 @@ async function receive(...messages: (Partial<ServerMessage> | ClientEvent)[]) {
   await nextTick()
   await nextTick()
 }
-const status = (value: 'reconnecting' | 'open', code: number | null = null) => ({ type: 'status', status: value, code }) as ClientEvent
+const status = (value: 'reconnecting' | 'open' | 'closed', code: number | null = null) => ({ type: 'status', status: value, code }) as ClientEvent
 const joined = (over: Partial<Joined> = {}): Joined => ({ v: 1, type: 'joined', atSeq: 3, quizId: 'VOCAB-42', userId: 'u1', displayName: 'Ana', questionCount: 10,
   timeLimitMs: 20_000, quizRemainingMs: 600_000, cursor: -1, cursorOpen: false, finished: false, score: 0, ...over })
 const snapshot = (score: number): Snapshot => ({ v: 1, type: 'snapshot', atSeq: 3, status: 'open', playerCount: 2, onlineCount: 2,
@@ -125,8 +125,6 @@ it.each([
   ['ALREADY_ANSWERED', 'That question was already answered; your first answer stands.'],
   ['QUESTION_NOT_OPEN', 'That question is closed; loading the current one.'],
   ['RATE_LIMITED', 'Too many requests; trying again in a second.'],
-  ['UNAVAILABLE', 'Server busy, retrying.'],
-  ['INTERNAL', 'Something went wrong; trying again.'],
 ])('error %s: a short plain message that goes after a few seconds', async (code, text) => {
   const w = await playing()
   await receive(error(code, 'answer'))
@@ -148,6 +146,65 @@ it('SESSION_REPLACED: the card replaces the quiz, stays, takes the focus, and Us
   await w.get('[role="alert"] button').trigger('click')
   expect(port.start.mock.calls).toEqual([['VOCAB-42', 'Ana'], ['VOCAB-42', 'Ana']])
   expect(w.find('[role="alert"]').exists()).toBe(false)
+})
+
+it.each(['NOT_JOINED', 'INVALID_STATE', 'INTERNAL', 'INVALID_MESSAGE'])('error %s: no message, the client recovers by itself', async (code) => {
+  const w = await playing()
+  await receive(error(code, 'answer'))
+  expect(w.get('[data-test="error"]').text()).toBe('')
+})
+
+it('UNAVAILABLE: the pill says Server busy, retrying until the reply to the retried answer arrives, however long the backoff', async () => {
+  const w = await playing()
+  press('3')
+  await receive(error('UNAVAILABLE', 'answer'))
+  expect(w.get('[data-test="connection"]').text()).toBe('Server busy, retrying')
+  expect(w.get('[data-test="error"]').text()).toBe('')
+  await frames(10_000)
+  expect(w.get('[data-test="connection"]').text()).toBe('Server busy, retrying')
+  await receive(result(2, 133))
+  expect(w.get('[data-test="connection"]').text()).toBe('')
+})
+
+it('a play screen mounted after SESSION_REPLACED shows the card with Use this tab, not an empty page', async () => {
+  useQuizStore().join('VOCAB-42', 'Ana')
+  await receive(joined(), snapshot(0), question(), error('SESSION_REPLACED'))
+  const w = mount(PlayView, { props: { quizId: 'VOCAB-42' }, attachTo: document.body })
+  wrappers.push(w)
+  await nextTick()
+  await nextTick()
+  expect(w.get('[role="alert"]').text()).toContain('This quiz is open in another tab.')
+  expect(document.activeElement?.textContent?.trim()).toBe('Use this tab')
+})
+
+it('SESSION_REPLACED after finishing: the card replaces the results and the leaderboard', async () => {
+  const w = await playing({ type: 'finished', rank: 1, score: 0, playerCount: 2 })
+  expect(w.text()).toContain('You finished!')
+  await receive(error('SESSION_REPLACED'))
+  expect(w.get('[role="alert"]').text()).toContain('This quiz is open in another tab.')
+  expect(w.text()).not.toContain('You finished!')
+  expect(w.find('[data-test="counts"]').exists()).toBe(false)
+})
+
+it('close 4001: the session-replaced card with Use this tab, and no Disconnected pill', async () => {
+  const w = await playing()
+  await receive(status('closed', 4001))
+  expect(w.get('[role="alert"]').text()).toContain('This quiz is open in another tab.')
+  expect(w.get('[role="alert"] button').text()).toBe('Use this tab')
+  expect(w.get('[data-test="connection"]').text()).toBe('')
+  expect(w.find('[data-choice="0"]').exists()).toBe(false)
+})
+
+it('UNSUPPORTED_VERSION: a blocking A new version is available card with Reload that stays', async () => {
+  const w = await playing()
+  await receive(error('UNSUPPORTED_VERSION'), status('closed', 1000))
+  expect(port.stop).toHaveBeenCalled()
+  expect(w.get('[role="alert"]').text()).toContain('A new version is available.')
+  expect(w.get('[role="alert"] button').text()).toBe('Reload')
+  expect(w.find('[data-choice="0"]').exists()).toBe(false)
+  await frames(10_000)
+  expect(w.find('[role="alert"]').exists()).toBe(true)
+  expect(w.get('[data-test="connection"]').text()).toBe('')
 })
 
 it('feedback: correct, the points with the speed bonus and the total count up, an announcement, and Next question has the focus', async () => {
