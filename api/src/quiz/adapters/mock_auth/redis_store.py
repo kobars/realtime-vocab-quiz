@@ -1,10 +1,15 @@
 # AI-ASSISTED: the mock identity and ticket store in Redis, shared by every API node.
 """MOCK: sessions and tickets in Redis. A real system would use its identity provider's sessions;
-the ticket mechanism (SET EX 30, then GETDEL) is what a real build would keep."""
+the ticket mechanism (SET EX 30, then GETDEL) is what a real build would keep.
+
+A redis-py connection or timeout error leaves as the built-in ``ConnectionError`` or
+``TimeoutError``, so the gateway answers an unreachable store with 503."""
 
 import json
 from collections.abc import Awaitable
 from typing import Protocol
+
+from redis import exceptions as redis_errors
 
 from quiz.adapters.mock_auth import tokens
 from quiz.ports.tickets import Identity
@@ -35,7 +40,7 @@ class RedisTicketStore:
         return identity, token
 
     async def issue_ticket(self, session_token: str) -> str | None:
-        raw = await self._redis.get(SESSION_KEY + tokens.digest(session_token))
+        raw = await _reachable(self._redis.get(SESSION_KEY + tokens.digest(session_token)))
         identity = _identity(raw, session_token)
         if identity is None:
             return None
@@ -44,12 +49,23 @@ class RedisTicketStore:
         return ticket
 
     async def redeem(self, ticket: str) -> Identity | None:
-        return _identity(await self._redis.getdel(TICKET_KEY + tokens.digest(ticket)), ticket)
+        raw = await _reachable(self._redis.getdel(TICKET_KEY + tokens.digest(ticket)))
+        return _identity(raw, ticket)
 
     async def _put(self, prefix: str, token: str, identity: Identity, ttl_s: int) -> None:
         key = tokens.digest(token)
         value = json.dumps({"digest": key, "uid": identity.user_id, "name": identity.display_name})
-        await self._redis.set(prefix + key, value, ex=ttl_s)
+        await _reachable(self._redis.set(prefix + key, value, ex=ttl_s))
+
+
+async def _reachable[T](command: Awaitable[T]) -> T:
+    """Await one command; re-raise redis-py's connection and timeout errors as the built-ins."""
+    try:
+        return await command
+    except redis_errors.TimeoutError as error:
+        raise TimeoutError(str(error)) from error
+    except redis_errors.ConnectionError as error:
+        raise ConnectionError(str(error)) from error
 
 
 def _identity(raw: bytes | str | None, token: str) -> Identity | None:
