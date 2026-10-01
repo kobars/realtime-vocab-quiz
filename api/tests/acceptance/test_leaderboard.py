@@ -18,8 +18,7 @@ async def test_ac5_standings_order_by_score_then_reach_time_then_user_id(
     quiz_server.require_manual_clock()
     await quiz_server.create_quiz()
     key = await quiz_server.answer_key()
-    dave = await quiz_server.join("dave")
-    erin = await quiz_server.join("erin")
+    tied = [await quiz_server.join(name) for name in ("dave", "erin", "fay")]
     await quiz_server.advance(1000)
     zed = await quiz_server.join("zed")
     alice = await quiz_server.join("alice")
@@ -30,14 +29,17 @@ async def test_ac5_standings_order_by_score_then_reach_time_then_user_id(
     first = await alice.answer(0, key)  # elapsed 1000 ms, reached first
     await quiz_server.advance(1000)
     second = await bob.answer(0, key)  # elapsed 1000 ms, the same score, reached later
+    await tied[0].request("next", questionIndex=0)
+    wrong = await tied[0].answer(0, (key + 1) % 4)  # 0 points keep the join time as reach time
 
     snapshot = await zed.request("resync", lastSeq=0)
 
     assert first["score"] == second["score"] == 147
+    assert wrong["pointsAwarded"] == 0
     entries = snapshot["entries"]
     assert_ranked(entries, snapshot["playerCount"])
-    assert snapshot["playerCount"] == 6  # the probe player is listed too
-    tied = sorted([dave, erin], key=lambda p: p.user_id)  # same score, same join time
+    assert snapshot["playerCount"] == 7  # the probe player is listed too
+    tied.sort(key=lambda p: p.user_id)  # same score, same reach time: by userId
     expected = [p.user_id for p in [alice, bob, *tied, zed]]
     assert [e["userId"] for e in entries if e["userId"] in expected] == expected
 
