@@ -2,13 +2,6 @@
 
 These rules apply to every change, whether a person or a coding agent makes it.
 
-## Layout
-
-- `api/` — the Python service (uv project, package `quiz`, `src/` layout; tests in `api/tests/`).
-- `web/` — the Vue 3 client (pnpm).
-- `load/` — load scenarios; `infra/` — nginx and deployment files; `scripts/` — repository tools.
-- `docs/` — specs, decisions, traceability and the AI-LOG entries. `DESIGN.md` is the system design.
-
 ## One change, one pull request
 
 - One change = one branch = one PR of at most **400 changed lines**, not counting lock files
