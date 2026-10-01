@@ -140,11 +140,15 @@ async def online(store: MemoryStore) -> int:
     return (await store.snapshot("VOCAB-42", None)).online_count
 
 
-async def test_a_replaced_socket_that_drops_last_keeps_the_newer_sockets_leave() -> None:
+@pytest.mark.parametrize("newest_bound_first", [False, True])  # a late reply binds out of order
+async def test_a_replaced_socket_that_drops_last_keeps_the_newer_sockets_leave(
+    *, newest_bound_first: bool
+) -> None:
     registry, store, _ = await grace_registry()
     old, new = Connection("c-old", "u0", "VOCAB-42"), Connection("c-new", "u0", "VOCAB-42")
     for conn in (old, new):
         await store.join("VOCAB-42", "u0", "Ann", conn.conn_id)
+    for conn in (new, old) if newest_bound_first else (old, new):
         registry.bind(conn, sender_of(Socket()))
     registry.drop(new)
     registry.drop(old)  # its presence was taken over: it must not cancel the newer timer
@@ -217,7 +221,8 @@ def test_a_drop_leaves_after_the_grace_unless_the_player_comes_back() -> None:
         time.sleep(0.1)
         assert calls == []
         time.sleep(0.3)
-    assert calls == [("VOCAB-42", user_id, True)]  # only the second socket's, which is present
+    first, second = ("VOCAB-42", user_id, False), ("VOCAB-42", user_id, True)
+    assert calls == [first, second]  # the second join took over: the first socket's leave is stale
 
 
 @contextmanager
