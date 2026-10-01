@@ -39,6 +39,7 @@ async def answer(  # noqa: PLR0913, PLR0917
 
 async def test_unknown_quiz_is_not_found(store: Store, quiz_id: str) -> None:
     assert await refused(store.join(quiz_id, "a", "A", "c-a")) == ErrorCode.QUIZ_NOT_FOUND
+    assert await refused(store.publish_if_dirty(quiz_id, "n1")) == ErrorCode.QUIZ_NOT_FOUND
 
 
 @pytest.mark.parametrize(
