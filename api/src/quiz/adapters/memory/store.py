@@ -1,10 +1,5 @@
 # AI-ASSISTED: the in-memory store: the domain state machine behind the store port.
-"""A single-process store for unit tests and local runs; the Redis store is its twin.
-
-Every command of one quiz runs under that quiz's ``asyncio.Lock``, reads the injected
-clock once and applies the pure ``transition``. Presence and the connection fence are
-kept beside the domain state, as the Redis scripts keep them.
-"""
+"""The Redis store's single-process twin: per quiz, one lock, one clock read per command."""
 
 import asyncio
 from dataclasses import dataclass, field, replace
@@ -14,22 +9,11 @@ from quiz.domain import events as ev
 from quiz.domain import session as s
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.standings import standings
+from quiz.ports import store as port
 from quiz.ports.clock import Clock
-from quiz.ports.store import (
-    Answered,
-    Created,
-    End,
-    Finished,
-    Joined,
-    Page,
-    Publish,
-    Row,
-    Served,
-    Snapshot,
-)
+from quiz.ports.store import Answered, Created, Finished, Joined, Row, Served
 
-MAX_QUESTIONS = 100
-CHOICES = 4
+MAX_QUESTIONS, CHOICES = 100, 4
 
 
 @dataclass(slots=True)
@@ -167,15 +151,14 @@ class MemoryStore:
         async with quiz.lock:
             return next((row for row in quiz.rows() if row.user_id == user_id), None)
 
-    # The reads and the broadcast side of the port follow in the next change.
-    async def standings_page(self, quiz_id: str, offset: int, limit: int) -> Page:
+    async def standings_page(self, quiz_id: str, offset: int, limit: int) -> port.Page:
         raise NotImplementedError
 
-    async def snapshot(self, quiz_id: str, user_id: str | None) -> Snapshot:
+    async def snapshot(self, quiz_id: str, user_id: str | None) -> port.Snapshot:
         raise NotImplementedError
 
-    async def publish_if_dirty(self, quiz_id: str, node_id: str) -> Publish:
+    async def publish_if_dirty(self, quiz_id: str, node_id: str) -> port.Publish:
         raise NotImplementedError
 
-    async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> End:
+    async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> port.End:
         raise NotImplementedError

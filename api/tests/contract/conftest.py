@@ -11,21 +11,13 @@ from quiz.ports.store import Store
 type Harness = tuple[Store, Callable[[int], Awaitable[None]]]
 
 
-class ManualClock:
-    def __init__(self) -> None:
-        self.now = 1_000_000
-
-    def __call__(self) -> int:
-        return self.now
-
-
 def memory_harness() -> Harness:
-    clock = ManualClock()
+    now = [1_000_000]
 
     async def advance(ms: int) -> None:
-        clock.now += ms
+        now[0] += ms
 
-    return MemoryStore(clock), advance
+    return MemoryStore(lambda: now[0]), advance
 
 
 @pytest.fixture(params=[pytest.param(memory_harness, id="memory")])
