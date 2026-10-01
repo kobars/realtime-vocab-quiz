@@ -60,3 +60,16 @@ def test_the_edge_holds_thousands_of_sockets_and_outlives_the_heartbeat() -> Non
     assert int(timeout.removesuffix("s")) * 1000 > Settings.model_fields["heartbeat_ms"].default
     assert _directive("proxy_next_upstream") == ["error timeout http_503"]
     assert _directive("proxy_set_header X-Forwarded-For") == ["$remote_addr"]
+
+
+def test_the_example_env_leaves_both_secrets_empty() -> None:
+    """compose's .env parser reads a comment after an empty value as the value."""
+    lines = (ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
+    assert "ADMIN_TOKEN=" in lines
+    assert "REDIS_PASSWORD=" in lines
+
+
+def test_make_down_stops_every_profile() -> None:
+    """``docker compose down`` without a profile leaves profiled services running."""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "\n\t$(COMPOSE) --profile '*' down\n" in makefile
