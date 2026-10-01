@@ -1,0 +1,29 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Coverage output
+.coverage
+.coverage.*
+coverage/
+htmlcov/
+coverage.xml
+
+# Local environment and work trees
+.env
+.worktrees/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
