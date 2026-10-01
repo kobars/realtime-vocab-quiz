@@ -20,15 +20,21 @@ from quiz.ports.tickets import TicketStore
 log = logging.getLogger(__name__)
 
 SUBPROTOCOL = "quiz.v1"
+UVICORN_LOGGERS = ("uvicorn.access", "uvicorn.error", "uvicorn.asgi")  # asgi: the trace level
+
+
+def _redact(arg: object) -> object:
+    if isinstance(arg, str) and arg.startswith("/"):
+        return arg.partition("?")[0]
+    if isinstance(arg, dict):  # an ASGI scope, as uvicorn's trace logger prints it
+        return {k: "<redacted>" if k == "query_string" else _redact(v) for k, v in arg.items()}
+    return arg
 
 
 def path_only(record: logging.LogRecord) -> bool:
-    """Cut the query string from the paths in uvicorn's log lines: it holds the ticket."""
+    """Cut the query string, which holds the ticket, from uvicorn's lines and logged scopes."""
     if isinstance(record.args, tuple):
-        record.args = tuple(
-            arg.partition("?")[0] if isinstance(arg, str) and arg.startswith("/") else arg
-            for arg in record.args
-        )
+        record.args = tuple(_redact(arg) for arg in record.args)
     return True
 
 
@@ -37,7 +43,7 @@ class Gateway:
         self._settings, self._tickets, self._service = settings, tickets, service
         self.caps = ConnectionCaps(settings.max_connections, settings.per_ip_conn_cap)
         self.clock: Clock = lambda: time.monotonic_ns() // 1_000_000  # paces the token buckets
-        for name in ("uvicorn.access", "uvicorn.error"):  # adding it twice is a no-op
+        for name in UVICORN_LOGGERS:  # adding it twice is a no-op
             logging.getLogger(name).addFilter(path_only)
 
     async def endpoint(self, ws: WebSocket) -> None:

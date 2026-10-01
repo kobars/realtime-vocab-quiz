@@ -2,6 +2,7 @@
 from collections.abc import Callable
 
 import pytest
+from redis import exceptions as redis_errors
 
 from quiz.adapters.mock_auth import MemoryTicketStore, RedisTicketStore
 from quiz.domain.errors import DomainError, ErrorCode
@@ -175,3 +176,31 @@ async def test_memory_variant_drops_expired_sessions_and_tickets() -> None:
     _, token = await store.create_session("Ada")
     assert await store.issue_ticket(token) is not None
     assert len(store._sessions) == len(store._tickets) == 1  # noqa: SLF001
+
+
+class DownRedis:
+    """Every command fails the way redis-py fails when the server is unreachable."""
+
+    def __init__(self, error: redis_errors.RedisError) -> None:
+        self.error = error
+
+    async def _fail(self, *_: object, **__: object) -> None:
+        raise self.error
+
+    set = get = getdel = _fail
+
+
+@pytest.mark.parametrize(
+    ("raised", "seen"),
+    [
+        (redis_errors.ConnectionError("down"), ConnectionError),
+        (redis_errors.TimeoutError("slow"), TimeoutError),
+    ],
+)
+async def test_redis_variant_raises_the_builtin_errors_when_redis_is_unreachable(
+    raised: redis_errors.RedisError, seen: type[OSError]
+) -> None:
+    store = RedisTicketStore(DownRedis(raised))
+    for call in (store.create_session("Ada"), store.issue_ticket("t"), store.redeem("t")):
+        with pytest.raises(seen):
+            await call
