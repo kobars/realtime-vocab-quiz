@@ -193,7 +193,7 @@ class Reads:
 
     async def ranks_of(self, _quiz_id: str, _user_ids: list[str]) -> Ranks:
         await self.during()
-        return Ranks(1, 300, {"u": Row(120, "u", "U", 0)})
+        return Ranks(1, "open", 300, {"u": Row(120, "u", "U", 0)})
 
 
 def leaderboard(seq: int, *ranks: tuple[str, int, int]) -> str:
