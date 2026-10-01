@@ -2,6 +2,7 @@
 """MOCK: sessions and tickets in one process. A real system would use its identity provider's
 sessions and a shared ticket store; the Redis variant is the shared store of this build."""
 
+from collections import OrderedDict
 from dataclasses import dataclass
 
 from quiz.adapters.mock_auth import tokens
@@ -19,14 +20,16 @@ class _Entry:
 class MemoryTicketStore:
     def __init__(self, clock: Clock) -> None:
         self._clock = clock
-        self._sessions: dict[str, _Entry] = {}
-        self._tickets: dict[str, _Entry] = {}
+        self._sessions: OrderedDict[str, _Entry] = OrderedDict()
+        self._tickets: OrderedDict[str, _Entry] = OrderedDict()
 
     async def create_session(self, display_name: str) -> tuple[Identity, str]:
         identity = Identity(tokens.new_user_id(), tokens.display_name(display_name))
         token = tokens.new_token()
         key = tokens.digest(token)
-        self._sessions[key] = _Entry(key, identity, self._clock() + tokens.SESSION_TTL_S * 1000)
+        now = self._clock()
+        _prune(self._sessions, now)
+        self._sessions[key] = _Entry(key, identity, now + tokens.SESSION_TTL_S * 1000)
         return identity, token
 
     async def issue_ticket(self, session_token: str) -> str | None:
@@ -34,7 +37,7 @@ class MemoryTicketStore:
         session = self._live(self._sessions, session_token, now, consume=False)
         if session is None:
             return None
-        self._tickets = {k: e for k, e in self._tickets.items() if now < e.expires_ms}
+        _prune(self._tickets, now)
         ticket = tokens.new_token()
         key = tokens.digest(ticket)
         self._tickets[key] = _Entry(key, session.identity, now + tokens.TICKET_TTL_S * 1000)
@@ -54,3 +57,13 @@ class MemoryTicketStore:
             entries.pop(key, None)
             return None
         return entry
+
+
+def _prune(entries: OrderedDict[str, _Entry], now: int) -> None:
+    """Drop expired entries from the front in O(1) each. One dict holds one fixed TTL, so
+    insertion order is expiry order and the first live entry ends the scan."""
+    while entries:
+        _, head = next(iter(entries.items()))
+        if now < head.expires_ms:
+            return
+        entries.popitem(last=False)
