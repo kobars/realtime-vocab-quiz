@@ -11,11 +11,12 @@ from typing import Any, cast
 
 import pytest
 import uvicorn
-from fastapi import WebSocket
+from fastapi import FastAPI, WebSocket
 from starlette.testclient import TestClient
 from websockets.sync.client import connect as ws_connect
 from websockets.typing import Origin, Subprotocol
 
+from quiz.adapters.memory import MemoryStore
 from quiz.adapters.ws.heartbeat import server_config
 from quiz.adapters.ws.limits import RateLimiter
 from quiz.adapters.ws.registry import Registry
@@ -127,6 +128,46 @@ async def test_a_failed_leave_is_logged_and_not_raised(caplog: pytest.LogCapture
     assert "the leave of a closed connection failed" in caplog.text
 
 
+async def grace_registry() -> tuple[Registry, MemoryStore, list[int]]:  # a 10 ms grace
+    now = [0]
+    store = MemoryStore(lambda: now[0])
+    create = partial(store.create_quiz, window_ms=60_000, time_limit_ms=20_000)
+    await create("VOCAB-42", (Question("q0", 1),))
+    return Registry(store, 10), store, now
+
+
+async def online(store: MemoryStore) -> int:
+    return (await store.snapshot("VOCAB-42", None)).online_count
+
+
+@pytest.mark.parametrize("newest_bound_first", [False, True])  # a late reply binds out of order
+async def test_a_replaced_socket_that_drops_last_keeps_the_newer_sockets_leave(
+    *, newest_bound_first: bool
+) -> None:
+    registry, store, _ = await grace_registry()
+    old, new = Connection("c-old", "u0", "VOCAB-42"), Connection("c-new", "u0", "VOCAB-42")
+    for conn in (old, new):
+        await store.join("VOCAB-42", "u0", "Ann", conn.conn_id)
+    for conn in (new, old) if newest_bound_first else (old, new):
+        registry.bind(conn, sender_of(Socket()))
+    registry.drop(new)
+    registry.drop(old)  # its presence was taken over: it must not cancel the newer timer
+    await asyncio.sleep(0.05)
+    assert await online(store) == 0
+
+
+async def test_a_read_only_join_keeps_the_pending_leave() -> None:
+    registry, store, now = await grace_registry()
+    first = Connection("c-a", "u0", "VOCAB-42")
+    await store.join("VOCAB-42", "u0", "Ann", first.conn_id)
+    registry.bind(first, sender_of(Socket()))
+    registry.drop(first)
+    now[0] = 60_000  # the quiz has ended: the next join is read-only and writes no presence
+    registry.bind(Connection("c-b", "u0", "VOCAB-42", read_only=True), sender_of(Socket()))
+    await asyncio.sleep(0.05)
+    assert await online(store) == 0
+
+
 def tickets(client: TestClient, count: int) -> list[str | None]:  # all for one user
     store = services_of(client.app).tickets  # type: ignore[arg-type]
     _, token = client.portal.call(store.create_session, "Ann")  # type: ignore[union-attr]
@@ -180,42 +221,53 @@ def test_a_drop_leaves_after_the_grace_unless_the_player_comes_back() -> None:
         time.sleep(0.1)
         assert calls == []
         time.sleep(0.3)
-    assert calls == [("VOCAB-42", user_id, True)]  # only the second socket's, which is present
+    first, second = ("VOCAB-42", user_id, False), ("VOCAB-42", user_id, True)
+    assert calls == [first, second]  # the second join took over: the first socket's leave is stale
+
+
+@contextmanager
+def served(app: FastAPI, settings: Settings) -> Iterator[int]:  # a live server's port
+    server = uvicorn.Server(server_config(app, settings, "127.0.0.1", 0))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 5
+        while not server.started:  # a failed lifespan returns from startup without setting it
+            assert thread.is_alive(), "the server stopped during startup"
+            assert time.monotonic() < deadline, "the server did not start within 5 s"
+            time.sleep(0.01)
+        yield server.servers[0].sockets[0].getsockname()[1]
+    finally:
+        server.should_exit = True
+        thread.join(5)
 
 
 def test_the_server_pings_and_drops_a_socket_that_never_pongs() -> None:
     settings = Settings(heartbeat_ms=200)
     app = create_app(settings)
-    server = uvicorn.Server(server_config(app, settings, "127.0.0.1", 0))
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    while not server.started:
-        time.sleep(0.01)
-    port = server.servers[0].sockets[0].getsockname()[1]
-    tickets_ = services_of(app).tickets
-    _, token = asyncio.run(tickets_.create_session("Ann"))
-    first, second = (asyncio.run(tickets_.issue_ticket(token)) for _ in range(2))
-    silent = socket.create_connection(("127.0.0.1", port), timeout=3)
-    silent.sendall(
-        f"GET /ws?ticket={first} HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n"
-        f"Connection: Upgrade\r\n"
-        f"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
-        f"Sec-WebSocket-Protocol: quiz.v1\r\nOrigin: {ORIGIN}\r\n\r\n".encode()
-    )
-    url = f"ws://127.0.0.1:{port}/ws?ticket={second}"
-    with ws_connect(url, subprotocols=[Subprotocol("quiz.v1")], origin=Origin(ORIGIN)) as alive:
-        start, received = time.monotonic(), b""
-        while chunk := silent.recv(4096):  # the server closes it: recv returns b""
-            received += chunk
-        silent.close()
-        assert time.monotonic() - start < 2
-        assert received.startswith(b"HTTP/1.1 101")
-        assert b"\x89" in received  # a ping frame came
-        time.sleep(0.6)  # three more heartbeats: the socket that answers pings stays open
-        alive.send(PING)
-        assert json.loads(alive.recv())["type"] == "pong"
-    server.should_exit = True
-    thread.join(5)
+    with served(app, settings) as port:
+        tickets_ = services_of(app).tickets
+        _, token = asyncio.run(tickets_.create_session("Ann"))
+        first, second = (asyncio.run(tickets_.issue_ticket(token)) for _ in range(2))
+        silent = socket.create_connection(("127.0.0.1", port), timeout=3)
+        silent.sendall(
+            f"GET /ws?ticket={first} HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n"
+            f"Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
+            f"Sec-WebSocket-Protocol: quiz.v1\r\nOrigin: {ORIGIN}\r\n\r\n".encode()
+        )
+        url = f"ws://127.0.0.1:{port}/ws?ticket={second}"
+        with ws_connect(url, subprotocols=[Subprotocol("quiz.v1")], origin=Origin(ORIGIN)) as alive:
+            start, received = time.monotonic(), b""
+            while chunk := silent.recv(4096):  # the server closes it: recv returns b""
+                received += chunk
+            silent.close()
+            assert time.monotonic() - start < 2
+            assert received.startswith(b"HTTP/1.1 101")
+            assert b"\x89" in received  # a ping frame came
+            time.sleep(0.6)  # three more heartbeats: the socket that answers pings stays open
+            alive.send(PING)
+            assert json.loads(alive.recv())["type"] == "pong"
 
 
 class BrokenSocket(Socket):  # the peer is gone: every write fails
