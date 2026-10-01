@@ -95,3 +95,20 @@ async def test_scorer_outside_top_50_gets_rank_in_same_frame(
     assert (message["frame"]["playerCount"], len(message["frame"]["entries"])) == (201, 50)
     assert message["ranks"] == [["u120", 121, 0]]  # u000 is in the top 50: no rank of its own
     assert not await redis_client.exists(keys.scored)
+
+
+async def test_tick_token_stretched_by_a_clock_step_back_is_cut_to_one_tick(
+    redis_store: RedisStore, redis_client: Redis, keys: QuizKeys, quiz_id: str
+) -> None:
+    await created(redis_store, quiz_id, "a")
+    assert (await redis_store.publish_if_dirty(quiz_id, "n1")).status == "published"
+    now_s, now_us = await redis_client.time()
+    # Expiry is wall-clock time: after a 10 s step back the token reads 10.2 s ahead.
+    await redis_client.pexpireat(keys.tick, now_s * 1000 + now_us // 1000 + 10_200)
+    await redis_store.join(quiz_id, "b", "B", "c-b")  # dirty again
+    busy = await redis_store.publish_if_dirty(quiz_id, "n2")
+    assert busy.status == "busy"
+    assert 0 < busy.retry_ms <= 200
+    assert 0 < await redis_client.pttl(keys.tick) <= 200
+    await asyncio.sleep(0.25)
+    assert await redis_store.publish_if_dirty(quiz_id, "n2") == Publish("published", 2)
