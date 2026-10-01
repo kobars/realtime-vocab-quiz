@@ -170,7 +170,7 @@ Backoff is full jitter: `floor(random() × min(10,000, 250 × 2^attempt))` ms, r
 
 1. `POST /sessions` (once per tab) returns a mock `userId` and a session token, kept in the tab.
 2. Before every connect, `POST /tickets` with the session token returns a ticket: 32 random bytes in base64url, single use, valid 30 s.
-3. `GET /ws?ticket=…` with the subprotocol `quiz.v1`. Before the upgrade the server checks the `Origin` (403), the ticket (401) and the connection caps (503 at 10,000 per process, 429 at 50 per IP). Each refusal is a plain HTTP response with no `error` frame, which the browser sees as close 1006 (§7). The identity comes from the ticket only.
+3. `GET /ws?ticket=…` with the subprotocol `quiz.v1`. Before the upgrade the server checks, in order, the `Origin` (403), that the client offers `quiz.v1` (400), the ticket (401) and the connection caps (503 at 10,000 per process, 429 at 50 per IP). Each refusal is a plain HTTP response with no `error` frame, which the browser sees as close 1006 (§7). The identity comes from the ticket only.
 4. Logs record the path only, never the query string, so tickets never reach a log.
 
 ## 9. Limits
