@@ -14,6 +14,8 @@ from redis import Redis as SyncRedis
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
+from quiz.adapters.redis import RedisStore
+
 settings.register_profile("dev", max_examples=50)
 settings.register_profile("ci", max_examples=500, deadline=None, print_blob=True)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
@@ -87,3 +89,11 @@ async def redis_client(redis_url: str, redis_prefix: str) -> AsyncIterator[Redis
     if keys := [key async for key in client.scan_iter(match=f"{redis_prefix}*")]:
         await client.delete(*keys)
     await client.aclose()
+
+
+@pytest.fixture
+async def redis_store(redis_client: Redis, redis_prefix: str) -> RedisStore:
+    """A loaded store on this test's key prefix; ``redis_client`` deletes the keys afterwards."""
+    store = RedisStore(redis_client, prefix=redis_prefix)
+    await store.start()
+    return store

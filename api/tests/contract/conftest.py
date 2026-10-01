@@ -1,4 +1,5 @@
 # AI-ASSISTED: the store fixtures of the contract suite; each store adds one harness parameter.
+import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 
@@ -20,10 +21,34 @@ def memory_harness() -> Harness:
     return MemoryStore(lambda: now[0]), advance
 
 
-@pytest.fixture(params=[pytest.param(memory_harness, id="memory")])
+async def real_advance(ms: int) -> None:
+    await asyncio.sleep(ms / 1000)
+
+
+# The tests the Redis store passes so far; the rest need scripts that later changes add.
+REDIS_READY = frozenset(
+    {
+        "test_unknown_quiz_is_not_found",
+        "test_invalid_quiz_shape_is_rejected",
+        "test_create_twice_is_invalid_state",
+    }
+)
+
+
+@pytest.fixture(
+    params=[
+        pytest.param("memory", id="memory"),
+        pytest.param("redis", id="redis", marks=pytest.mark.integration),
+    ]
+)
 def harness(request: pytest.FixtureRequest) -> Harness:
-    make: Callable[[], Harness] = request.param
-    return make()
+    if request.param == "memory":
+        return memory_harness()
+    if request.node.originalname not in REDIS_READY:
+        reason = "the Redis script for this command is not written yet"
+        request.applymarker(pytest.mark.xfail(raises=NotImplementedError, reason=reason))
+    store: Store = request.getfixturevalue("redis_store")
+    return store, real_advance
 
 
 @pytest.fixture
