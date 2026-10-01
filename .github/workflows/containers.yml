@@ -1,0 +1,59 @@
+# AI-ASSISTED: container and infrastructure checks: Dockerfile, shell and compose lint, Trivy scans, image smoke test.
+name: containers
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: containers-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: hadolint
+        # Reads .hadolint.yaml from the repository root.
+        run: git ls-files -z '*Dockerfile' | xargs -0 docker run --rm -v "$PWD:/repo:ro" -w /repo hadolint/hadolint:v2.15.1 hadolint
+      - name: shellcheck
+        run: git ls-files -z '*.sh' | xargs -0 --no-run-if-empty shellcheck
+      - name: compose config
+        run: git ls-files -z 'compose*.yaml' 'compose*.yml' | xargs -0 -I{} docker compose -f {} config -q
+      - name: trivy config
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          exit-code: "1"
+
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IMAGE_TAG: ci
+    steps:
+      - uses: actions/checkout@v7
+      - run: make build
+      - name: non-root, read-only smoke test
+        run: scripts/smoke_images.sh "$IMAGE_TAG"
+      - name: nginx -t
+        run: scripts/check_nginx.sh "$IMAGE_TAG"
+      - name: trivy image (api)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: elsaquiz-api:${{ env.IMAGE_TAG }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: trivy image (web)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: elsaquiz-web:${{ env.IMAGE_TAG }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-setup-trivy: true
