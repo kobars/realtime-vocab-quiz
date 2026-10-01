@@ -10,6 +10,7 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, PositiveInt, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from quiz.contracts.codec import MAX_FRAME_BYTES
 from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
 
 KIB = 1024
@@ -33,7 +34,8 @@ class Settings(BaseSettings):
     tick_ms: PositiveInt = 200  # the coalescing tick, only while the quiz is dirty
     top_n: Annotated[int, Field(ge=1, le=TOP_N)] = TOP_N
     full_list_max: Annotated[int, Field(ge=1, le=FULL_LIST_MAX)] = FULL_LIST_MAX
-    max_payload_bytes: PositiveInt = 16 * KIB
+    # At most the parser's limit, so every frame above it closes with 1009.
+    max_payload_bytes: Annotated[int, Field(ge=1, le=MAX_FRAME_BYTES)] = MAX_FRAME_BYTES
     heartbeat_ms: PositiveInt = 25_000
     send_buffer_soft_bytes: PositiveInt = 64 * KIB  # above it: skip and conflate leaderboards
     send_buffer_hard_bytes: PositiveInt = 256 * KIB  # above it: error, then close 1013
