@@ -7,21 +7,25 @@ from importlib.resources import files
 from redis.asyncio import Redis
 from redis.exceptions import NoScriptError
 
-from quiz.adapters.redis.keys import NO_QUIZ_TTL, QUIZ_TTL_MS, QuizKeys
+from quiz.adapters.redis.keys import NO_QUIZ_TTL, QUIZ_TTL_MS, TICK_MS, QuizKeys
+from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
 
 _LUA = files("quiz.adapters.redis") / "lua"
-SCRIPTS = ("create_quiz", "join", "serve_question", "score_answer")
+# Every .lua file beside lib/ is one script, named after its file.
+SCRIPTS = tuple(sorted(f.name.removesuffix(".lua") for f in _LUA.iterdir() if f.is_file()))
 SCORING_LIBS: dict[str, tuple[str, ...]] = {"score_answer": ("points",)}
 
 type Reply = list[str | int | None]
 
 
 def _constants() -> str:
-    """``K``, ``DATA_KEYS`` and ``QUIZ_TTL_MS`` for Lua, built from keys.py: the one source."""
+    """``K``, ``DATA_KEYS`` and the constants for Lua, from keys.py and the contracts."""
     index = {name: i for i, name in enumerate(QuizKeys._fields, 1)}
     k = ", ".join(f"{name} = {i}" for name, i in index.items())
     data = ", ".join(str(i) for name, i in index.items() if name not in NO_QUIZ_TTL)
-    return f"local K = {{{k}}}\nlocal DATA_KEYS = {{{data}}}\nlocal QUIZ_TTL_MS = {QUIZ_TTL_MS}"
+    names = "QUIZ_TTL_MS, TICK_MS, FULL_LIST_MAX, TOP_N"
+    values = f"{QUIZ_TTL_MS}, {TICK_MS}, {FULL_LIST_MAX}, {TOP_N}"
+    return f"local K = {{{k}}}\nlocal DATA_KEYS = {{{data}}}\nlocal {names} = {values}"
 
 
 def compose(body: str, libs: Iterable[str] = ()) -> str:
