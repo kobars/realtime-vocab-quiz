@@ -10,6 +10,7 @@ import json
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Sequence
 from contextlib import aclosing, asynccontextmanager, contextmanager
 from dataclasses import replace
+from itertools import chain
 from typing import Literal, cast
 
 from redis import exceptions as redis_errors
@@ -235,7 +236,10 @@ class RedisStore:
     async def renew_presence(
         self, quiz_id: str, stale_ms: int, pairs: Sequence[tuple[str, str]]
     ) -> port.Renewed:
-        raise NotImplementedError
+        reply = await self._run("renew_presence", quiz_id, stale_ms, *chain.from_iterable(pairs))
+        if reply[0] == "ended":
+            return port.Renewed("ended")
+        return port.Renewed("renewed", int(reply[1] or 0))
 
     async def mark_dirty(self, quiz_id: str) -> None:
         raise NotImplementedError
