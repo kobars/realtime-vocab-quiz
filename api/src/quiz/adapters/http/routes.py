@@ -34,7 +34,7 @@ from quiz.ports.store import Store
 from quiz.ports.tickets import TicketStore
 
 QUIZ_ID, REQUEST_ID = re.compile(r"[A-Z0-9-]{3,16}"), re.compile(r"[A-Za-z0-9_.-]{1,64}")
-STATUS = {ErrorCode.QUIZ_NOT_FOUND: 404, ErrorCode.INVALID_STATE: 409}
+STATUS = {ErrorCode.QUIZ_NOT_FOUND: 404, ErrorCode.INVALID_STATE: 409, ErrorCode.UNAVAILABLE: 503}
 NOT_FOUND = "no such quiz"  # one body for every unknown ID: no hint whether it ever existed
 log = structlog.get_logger("quiz.http")
 
@@ -162,16 +162,19 @@ def _admin(deps: HttpDeps) -> APIRouter:
         await deps.store.create_quiz(body.quizId, questions, window_ms=window, time_limit_ms=limit)
         return await _info(deps, body.quizId)
 
-    @api.post("/quizzes/{quiz_id}/end", responses={404: {"model": h.Problem}})
+    @api.post(
+        "/quizzes/{quiz_id}/end",
+        responses={404: {"model": h.Problem}, 503: {"model": h.Problem}},
+    )
     async def end_quiz(request: Request, quiz_id: str) -> h.Ended:
-        """MOCK: the host's "end now": mark the end, then announce it (docs/spec/redis.md §3.1)."""
+        """MOCK: the host's "end now": mark, wait for the fsync, announce (redis.md §3.1).
+
+        503 ``UNAVAILABLE`` when the end was not made durable and announced; retry it."""
         _quiz(request, quiz_id)
         if not QUIZ_ID.fullmatch(quiz_id):
             raise DomainError(ErrorCode.QUIZ_NOT_FOUND, NOT_FOUND)
-        end = await deps.store.end_quiz(quiz_id, "host")
-        if end.status == "marked":
-            end = await deps.store.end_quiz(quiz_id, "host")
-        return h.Ended(quizId=quiz_id, status="ended", endSeq=end.seq)
+        end_seq = await deps.store.end_by_host(quiz_id)
+        return h.Ended(quizId=quiz_id, status="ended", endSeq=end_seq)
 
     return api
 
@@ -179,20 +182,21 @@ def _admin(deps: HttpDeps) -> APIRouter:
 async def _log_request(request: Request, call_next: RequestResponseEndpoint) -> Response:
     given = request.headers.get("x-request-id", "")
     request_id = given if REQUEST_ID.fullmatch(given) else uuid.uuid4().hex
-    start, status = time.perf_counter(), 500
+    start = time.perf_counter()
     with structlog.contextvars.bound_contextvars(request_id=request_id, quiz_id=None):
         try:
             response = await call_next(request)
-            status = response.status_code
-        finally:
-            log.info(
-                "http_request",
-                method=request.method,
-                path=request.url.path,  # never the query string
-                status=status,
-                duration_ms=round((time.perf_counter() - start) * 1000, 3),
-                quiz_id=getattr(request.state, "quiz_id", None),
-            )
+        except Exception:  # logged here, inside the request's context, then a 500 with its id
+            log.exception("unhandled error", method=request.method, path=request.url.path)
+            response = JSONResponse({"error": "INTERNAL", "message": "internal error"}, 500)
+        log.info(
+            "http_request",
+            method=request.method,
+            path=request.url.path,  # never the query string
+            status=response.status_code,
+            duration_ms=round((time.perf_counter() - start) * 1000, 3),
+            quiz_id=getattr(request.state, "quiz_id", None),
+        )
     response.headers["X-Request-ID"] = request_id
     return response
 
