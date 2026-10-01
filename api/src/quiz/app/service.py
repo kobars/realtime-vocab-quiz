@@ -162,7 +162,8 @@ class QuizService:
         )
 
     async def _on_answer(self, conn: Connection, msg: m.Answer) -> m.ServerMessage:
-        quiz_id, user_id = _bound(conn, write=True), conn.user_id
+        # Even read only: a stored submissionId replays, a new one gets QUIZ_ENDED (domain §5.2).
+        quiz_id, user_id = _bound(conn), conn.user_id
         answer = (msg.questionIndex, msg.choiceIndex, msg.submissionId)
         apply = self._store.apply_answer(quiz_id, user_id, *answer, conn.conn_id)
         answered = await self._write(quiz_id, apply)

@@ -123,7 +123,7 @@ The serve payload never contains the correct choice.
 | 6 | First answer, on time | `answer_result` with the points, the new total and the correct choice | answer, total, standings |
 | 7 | First answer, late (`e > T`) | `answer_result` with `pointsAwarded: 0` and the correct choice; not an error | answer (closes the question) |
 
-Another player's `submissionId` is simply this player's own new submission: submission keys are per player. A request from a connection that has not joined gets `NOT_JOINED`; an unknown quiz gets `QUIZ_NOT_FOUND`.
+Rows 1 and 2 come before the end, so a retry whose first reply was lost gets the stored `answer_result` even after the quiz ended, also on a connection that joined after the end (protocol §1). Another player's `submissionId` is simply this player's own new submission: submission keys are per player. A request from a connection that has not joined gets `NOT_JOINED`; an unknown quiz gets `QUIZ_NOT_FOUND`.
 
 **Two idempotency layers, one script.** Layer 1 is the per-player `submissionId` map (rows 1–2): a network retry gets the stored reply. Layer 2 is the per-question "closed" flag (row 5): a second submission with a new ID cannot score again. Both are checked and written in the same Redis script as the score, so no interleaving of nodes can score a (player, question) twice.
 

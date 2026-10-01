@@ -118,8 +118,23 @@ async def test_join_after_end_is_read_only(service: QuizService, store: SpyStore
     snapshot, error = await send(service, conn, m.Join(quizId=QUIZ, displayName="A"))
     assert (snapshot.status, snapshot.you, error.code) == ("ended", None, E.QUIZ_ENDED)
     assert await refused(service, conn, m.Next(questionIndex=0)) == (E.QUIZ_ENDED, None)
+    assert await refused(service, conn, answer(0)) == (E.QUIZ_ENDED, None)
     [page] = await send(service, conn, m.GetLeaderboard(offset=0, limit=5))
     assert page.final
+
+
+async def test_lost_reply_replays_on_a_connection_opened_after_the_end(
+    service: QuizService, store: SpyStore
+) -> None:
+    conn = await joined(service)
+    await send(service, conn, m.Next(questionIndex=0))
+    [result] = await send(service, conn, answer(0))  # the reply is lost on the way
+    store.now[0] += 60_000
+    rejoined = Connection("c-a2", "a")
+    [_, error] = await send(service, rejoined, m.Join(quizId=QUIZ, displayName="A"))
+    assert error.code == E.QUIZ_ENDED
+    assert await send(service, rejoined, answer(0)) == [result]
+    assert await refused(service, rejoined, answer(1, sid=2)) == (E.QUIZ_ENDED, None)
 
 
 async def test_resync_answers_a_snapshot_at_most_once_a_second(
