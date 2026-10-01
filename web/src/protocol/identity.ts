@@ -29,9 +29,33 @@ function readIdentity(storage: Storage): Identity | null {
   }
 }
 
+/** The session creation in flight per storage, so overlapping connects of one tab share one identity. */
+const pendingSessions = new WeakMap<Storage, Promise<Identity>>()
+
+/**
+ * Creates and stores a session, or joins the one in flight. `stale` is the identity the server just
+ * refused (or null): if another call has already replaced it, that replacement is used instead.
+ */
+function newSession(api: AuthApi, displayName: string, storage: Storage, stale: Identity | null): Promise<Identity> {
+  const pending = pendingSessions.get(storage)
+  if (pending !== undefined) return pending
+  const current = readIdentity(storage)
+  if (current !== null && current.sessionToken !== stale?.sessionToken) return Promise.resolve(current)
+  const created = api
+    .createSession(displayName)
+    .then((identity) => {
+      storage.setItem(IDENTITY_KEY, JSON.stringify(identity))
+      return identity
+    })
+    .finally(() => pendingSessions.delete(storage))
+  pendingSessions.set(storage, created)
+  return created
+}
+
 /**
  * Returns a ticket for the next connect. The identity lives in `sessionStorage`, so a reload
- * keeps the player and a second tab is a second player. An unknown session is replaced once.
+ * keeps the player and a second tab is a second player. An unknown session is replaced once;
+ * overlapping calls share that one new session and each get their own ticket.
  */
 export async function connectTicket(
   api: AuthApi,
@@ -43,11 +67,10 @@ export async function connectTicket(
     const ticket = await api.createTicket(stored.sessionToken)
     if (ticket !== null) return { identity: stored, ticket }
   }
-  const identity = await api.createSession(displayName)
-  storage.setItem(IDENTITY_KEY, JSON.stringify(identity))
+  const identity = await newSession(api, displayName, storage, stored)
   const ticket = await api.createTicket(identity.sessionToken)
   if (ticket === null) {
-    storage.removeItem(IDENTITY_KEY)
+    if (readIdentity(storage)?.sessionToken === identity.sessionToken) storage.removeItem(IDENTITY_KEY)
     throw new Error('the server refused a ticket for a new session')
   }
   return { identity, ticket }
