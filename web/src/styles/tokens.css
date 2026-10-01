@@ -8,21 +8,22 @@
   --input: #64748B;
   --primary: #4338CA;
   --primary-foreground: #FFFFFF;
-  --accent: #EEF2FF;
+  --highlight: #EEF2FF;
   --ring: #4338CA;
   --success: #15803D;
   --success-soft: #F0FDF4;
   --destructive: #B91C1C;
   --destructive-soft: #FEF2F2;
   --warning: #B45309;
-  /* Names the shadcn-vue components read, mapped onto the tokens above. */
-  --card-foreground: var(--foreground);
-  --popover: var(--card);
-  --popover-foreground: var(--foreground);
-  --secondary: var(--accent);
-  --secondary-foreground: var(--foreground);
-  --muted: var(--border);
-  --accent-foreground: var(--foreground);
+  /* The rest of the names shadcn-vue components read; --accent is their hover background, not my row's tint. */
+  --card-foreground: #0F172A;
+  --popover: #FFFFFF;
+  --popover-foreground: #0F172A;
+  --secondary: #F1F5F9;
+  --secondary-foreground: #0F172A;
+  --muted: #F1F5F9;
+  --accent: #F1F5F9;
+  --accent-foreground: #0F172A;
   --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
   --radius: 0.625rem;
   --shadow-card: 0 1px 2px rgb(15 23 42 / 0.06), 0 4px 12px rgb(15 23 42 / 0.06);
