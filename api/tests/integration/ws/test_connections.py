@@ -29,7 +29,7 @@ from quiz.contracts.codec import encode
 from quiz.domain.session import Question
 from quiz.main import create_app, services_of
 from quiz.ports.questions import BankQuestion
-from quiz.ports.store import Joined, Store
+from quiz.ports.store import Joined, Served, Store
 
 ORIGIN, PING = "http://localhost:8080", '{"v":1,"type":"ping"}'
 ROWS = [
@@ -73,6 +73,10 @@ def resyncs(frames: list[dict[str, Any]]) -> int:  # the client's seq rule (prot
 
 def sender_of(sock: Socket, flush_s: float = 5.0) -> Sender:
     return Sender(cast("WebSocket", sock), 64 * KIB, 256 * KIB, flush_s)
+
+
+def limiter() -> RateLimiter:
+    return RateLimiter(20, 40, lambda: 0)
 
 
 async def test_a_conflated_client_gets_rebase_true_and_sends_no_resync() -> None:
@@ -352,8 +356,7 @@ async def test_a_closing_socket_hands_no_more_frames_to_the_use_cases() -> None:
     sender = sender_of(sock, 0.1)
     sender.close(4001)  # replaced; its writer is still flushing to a client that does not read
     deps = Deps(cast("QuizService", service), Registry(cast("Store", None), 10_000), 16 * KIB)
-    limiter = RateLimiter(20, 40, lambda: 0)
-    code = await serve(cast("WebSocket", sock), Connection("c0", "u0"), limiter, sender, deps)
+    code = await serve(cast("WebSocket", sock), Connection("c0", "u0"), limiter(), sender, deps)
     assert (code, service.handled) == (4001, [])
 
 
@@ -365,12 +368,15 @@ class Bank:  # the one question of every quiz in these tests
         return quiz_id
 
 
-class Client(Socket):  # sends ``texts``, then stays open
+class Client(Socket):  # sends ``texts``, then each ``say``; it stays open
     def __init__(self, *texts: str) -> None:
         super().__init__()
         self.inbound: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         for text in texts:
-            self.inbound.put_nowait({"type": "websocket.receive", "text": text})
+            self.say(text)
+
+    def say(self, text: str) -> None:
+        self.inbound.put_nowait({"type": "websocket.receive", "text": text})
 
     async def receive(self) -> dict[str, Any]:
         return await self.inbound.get()
@@ -395,8 +401,8 @@ async def test_a_replaced_socket_whose_join_reply_comes_last_is_closed_with_4001
     senders = {old: sender_of(old), new: sender_of(new)}
 
     def serving(sock: Client) -> asyncio.Task[int]:
-        ws, limiter = cast("WebSocket", sock), RateLimiter(20, 40, lambda: 0)
-        return asyncio.create_task(serve(ws, conns[sock], limiter, senders[sock], deps))
+        ws = cast("WebSocket", sock)
+        return asyncio.create_task(serve(ws, conns[sock], limiter(), senders[sock], deps))
 
     older = serving(old)
     await asyncio.sleep(0.01)  # the older join reaches the store first
@@ -410,3 +416,65 @@ async def test_a_replaced_socket_whose_join_reply_comes_last_is_closed_with_4001
     finally:
         older.cancel()
         newer.cancel()
+
+
+class GatedStore(MemoryStore):  # joins pass the gate one at a time, in arrival order
+    def __init__(self) -> None:
+        super().__init__(lambda: 0)
+        self.gate = asyncio.Lock()
+
+    async def join(self, quiz_id: str, user_id: str, display_name: str, conn_id: str) -> Joined:
+        async with self.gate:
+            return await super().join(quiz_id, user_id, display_name, conn_id)
+
+
+async def test_a_replaced_sockets_in_flight_join_does_not_take_the_session_back() -> None:
+    store = GatedStore()
+    create = partial(store.create_quiz, window_ms=60_000, time_limit_ms=20_000)
+    await create("VOCAB-42", (Question("q0", 1),))
+    service = QuizService(store, Bank(), lambda: 0)
+    deps = Deps(service, Registry(store, 10_000), 16 * KIB)
+    old, new = Client(), Client()
+    old_served, new_served = (
+        asyncio.create_task(
+            serve(cast("WebSocket", s), Connection(conn_id, "u1"), limiter(), sender_of(s), deps)
+        )
+        for s, conn_id in ((old, "c1"), (new, "c2"))
+    )
+    old.say(json.dumps(JOIN))
+    await asyncio.sleep(0.01)
+    old.reading.clear()  # its writer is still flushing when the newer join closes it
+    async with store.gate:  # the newer join waits first, then the old socket's re-join
+        new.say(json.dumps(JOIN))
+        await asyncio.sleep(0.01)
+        old.say(json.dumps(JOIN))
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)
+    old.reading.set()
+    assert await asyncio.wait_for(old_served, 1) == 4001
+    assert (old.closed, new.closed, new_served.done()) == (4001, 0, False)
+    assert isinstance(await store.serve_next("VOCAB-42", "u1", 0, "c2"), Served)  # c2 present
+    new.inbound.put_nowait({"type": "websocket.disconnect", "code": 1000})
+    assert await asyncio.wait_for(new_served, 1) == 1000
+
+
+async def test_a_socket_closed_during_its_committed_join_still_leaves_and_replaces() -> None:
+    registry, store, _ = await grace_registry()
+    await store.join("VOCAB-42", "u0", "Ann", "c2")
+    other = sender_of(Socket())
+    registry.bind(Connection("c2", "u0", "VOCAB-42"), other)
+    sock = Talking(json.dumps(JOIN))
+    sender, service = sender_of(sock, 0.1), QuizService(store, Bank(), lambda: 0)
+
+    class Overloaded:  # the join commits while a broadcast overloads this socket and closes it
+        async def handle(self, conn: Connection, msg: m.ClientMessage) -> Outcome:
+            outcome = await service.handle(conn, msg)
+            sender.close(1013)
+            return outcome
+
+    deps = Deps(cast("QuizService", Overloaded()), registry, 16 * KIB)
+    conn = Connection("c1", "u0")
+    code = await serve(cast("WebSocket", sock), conn, limiter(), sender, deps)
+    registry.drop(conn)  # as the endpoint does once serve returns
+    await asyncio.sleep(0.05)
+    assert (code, other.close_code, await online(store)) == (1013, 4001, 0)

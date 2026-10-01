@@ -19,6 +19,7 @@ class QuizKeys(NamedTuple):
     seq: str
     dirty: str
     scored: str
+    replaced: str
     tick: str
     events: str  # pub/sub channel, not a key: it has no TTL
     control: str  # pub/sub channel, not a key: it has no TTL

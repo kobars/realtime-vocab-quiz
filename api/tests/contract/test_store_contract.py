@@ -85,6 +85,15 @@ async def test_new_connection_replaces_and_fences_the_old(store: Store, quiz_id:
     assert (await store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-new")).result.points > 0
 
 
+async def test_a_replaced_connection_cannot_join_back(store: Store, quiz_id: str) -> None:
+    await started(store, quiz_id, "a")
+    await store.join(quiz_id, "a", "A", "c-new")
+    assert await refused(store.join(quiz_id, "a", "A", "c-a")) == ErrorCode.SESSION_REPLACED
+    assert await refused(store.serve_next(quiz_id, "a", 0, "c-a")) == ErrorCode.SESSION_REPLACED
+    assert (await store.join(quiz_id, "a", "A", "c-new")).replaced_conn_id is None  # still held
+    assert await store.leave(quiz_id, "a", "c-new")
+
+
 async def test_correct_answer_scores_once_into_the_standings(store: Store, quiz_id: str) -> None:
     await started(store, quiz_id, "a")
     r = (await store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-a")).result
