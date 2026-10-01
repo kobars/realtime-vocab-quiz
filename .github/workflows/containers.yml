@@ -7,6 +7,12 @@ on:
 permissions:
   contents: read
 
+# compose reads the whole of compose.yaml in every command, so the full stack's required secrets
+# must be set; no stack runs here.
+env:
+  ADMIN_TOKEN: unused
+  REDIS_PASSWORD: unused
+
 concurrency:
   group: containers-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
