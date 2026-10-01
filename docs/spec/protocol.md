@@ -69,7 +69,7 @@ Joins and leaves are never broadcast one by one. A join, a leave (after the 10 s
 
 | `type` | Fields | Notes |
 |---|---|---|
-| `pong` | `seq` (the latest broadcast `seq`, or `null` before `join`) | Reply to `ping`. Lets a client find a lost last frame |
+| `pong` | `seq` (the quiz's current counter, read from Redis when the node handles the `ping`; `null` before `join` or when Redis is unreachable) | Reply to `ping`. Lets a client find a lost last frame, also one that its node never received (§3) |
 | `error` | `code`, `message` (English, for logs), `requestType` (the `type` that caused it, or `null`) | Carries no `seq` and no `atSeq`. Sent before every application close |
 
 ## 3. Sequence numbers
@@ -78,14 +78,15 @@ Rules:
 
 1. `seq` is per quiz. The counter starts at 0 when the quiz is created; the first broadcast has `seq = 1`, and each later broadcast is exactly the previous one + 1, with no gaps (contract C2).
 2. Only a Redis script that also publishes a broadcast runs `INCR seq`. The scoring, join and serve scripts never do.
-3. Unicasts that describe quiz state carry `atSeq` (the current counter, not incremented). `pong` carries `seq`. `error` carries neither.
+3. Unicasts that describe quiz state carry `atSeq` (the current counter, not incremented). `pong` carries the current counter as `seq`. `error` carries neither.
 
 | Who | Does what with `seq` |
 |---|---|
 | Tick script (Redis) | While `dirty` is set and it holds the 200 ms tick token: clears `dirty`, `INCR seq`, publishes `leaderboard` |
 | End script (Redis) | Once per quiz: `INCR seq`, publishes `quiz_ended`. After it, no script increments `seq` again |
 | Join, serve, scoring and snapshot reads (Redis) | Read the counter for `atSeq`; never change it |
-| Gateway (each API node) | Remembers the latest `seq` it relayed per quiz, for `pong`; conflates `leaderboard` frames per slow socket (§5) |
+| `pong` read (Redis) | A plain `GET` of the counter for each `ping` of a joined connection; never changes it |
+| Gateway (each API node) | Relays broadcasts in the order it receives them; fills `pong.seq` from the `pong` read, never from the frames it relayed, so a node that relayed nothing yet or missed a frame on its pub/sub link still reports the quiz's counter; conflates `leaderboard` frames per slow socket (§5) |
 | Client and load bots | Apply broadcasts in `seq` order with the rules below; the bots also count gaps and resyncs and time answer → leaderboard |
 | Tests | Check that the published `seq` values have no gaps (`api/tests/integration/test_seq.py`) |
 
@@ -98,11 +99,12 @@ What the client does with an incoming `seq` (`L` = its `lastSeq`):
 | `seq < L` | The store restarted (the counter went back): resync, and accept the snapshot's lower `atSeq` as the new `L` |
 | `seq > L + 1` and `rebase: true` | Apply as a full replacement; `L = seq`. No resync |
 | `seq > L + 1` otherwise | A gap: wait 0–250 ms (random), then `resync {lastSeq: L}` |
-| `pong.seq > L` | The last frame was lost: resync |
-| `pong.seq < L` | The store restarted: resync, as above |
+| `pong.seq > L` | A broadcast is still on its way or was lost: if `L` is still below that `pong.seq` 1 s later, `resync {lastSeq: L}` |
+| `pong.seq ≤ L`, or `null` | Ignore. The counter read and the relay use different Redis connections, so a frame can reach the socket before a `pong` that read an older counter; a lower `pong.seq` is therefore not a restart signal. A store restart shows as `seq < L` on the next broadcast, and the node also sends each client a snapshot after it reconnects to Redis |
 | `snapshot` | Replace the standings; `L = atSeq`; then apply buffered broadcasts with `seq > L` in order |
+| `snapshot` after `quiz_ended` was applied | `status: open`: ignore it, and keep the final standings and `L`. It was read before the end and only reached the socket after the `quiz_ended` (one writer orders frames by enqueue time, not by Redis read time); an announced end is never undone, even by a store restart (`docs/spec/redis.md` §3.1). `status: ended`: apply it as above |
 
-Between sending `resync` and receiving `snapshot`, the client buffers broadcasts instead of applying them. `quiz_ended` is always applied, whatever its `seq`, and sets `L`.
+Between sending `resync` and receiving `snapshot`, the client buffers broadcasts instead of applying them. `quiz_ended` is always applied, whatever its `seq`, and sets `L`; from then on the standings are final, and only a `snapshot` with `status: ended` or a second `quiz_ended` (after a store restart) replaces them.
 
 ## 4. Standings policy
 
@@ -113,9 +115,9 @@ Between sending `resync` and receiving `snapshot`, the client buffers broadcasts
 
 ## 5. Flow control and conflation
 
-- Each socket has a send buffer. Above the **soft limit (64 KiB)** the node stops queueing `leaderboard` frames for that socket and keeps only the newest one. When the socket drains, it sends that newest frame with `rebase: true`; the client applies it as a full replacement without a resync (§3). Unicasts are never dropped.
+- Each socket has a send buffer. Above the **soft limit (64 KiB)** the node stops queueing `leaderboard` frames for that socket and holds only the newest one (within the barrier rule below). When the socket drains, it sends that newest frame with `rebase: true`; the client applies it as a full replacement without a resync (§3). Unicasts are never dropped.
 - `quiz_ended` is never dropped or conflated; it is queued even above the soft limit.
-- The newest held frame keeps its place in the socket's queue: a `pong` is never sent ahead of a frame that the socket will still get, so `pong.seq > lastSeq` always means a lost frame.
+- Conflation merges only consecutive `leaderboard` frames. A newer frame replaces the held one in place only while nothing has been queued after the held frame; otherwise the held frame stays where it is, and the newer frame is queued (and held) after the later message. Every other message, `pong` included, is a conflation barrier, so the socket still sends messages in the order the node produced them (§1), and conflation never moves a newer frame ahead of a queued `pong`.
 - Above the **hard limit (256 KiB)** the node sends `error UNAVAILABLE` and closes with 1013.
 - A `snapshot` or `rebase: true` frame always carries the full standings under the policy of §4, so it never depends on an earlier frame.
 
@@ -170,7 +172,7 @@ Backoff is full jitter: `floor(random() × min(10,000, 250 × 2^attempt))` ms, r
 
 ## 9. Limits
 
-Inbound frames at most 16 KiB and JSON depth at most 8, both checked before parsing; a token bucket of 20 msg/s with a burst of 40 per connection, checked before parsing; `resync` at most 1 per second; the server pings every 25 s and closes a socket with no pong by the next sweep; the client pings every 25 s and reconnects after 50 s with no inbound message; a player counts as gone 10 s after a disconnect.
+Inbound frames at most 16 KiB and JSON depth at most 8, both checked before parsing; a token bucket of 20 msg/s with a burst of 40 per connection, checked before parsing; `resync` at most 1 per second; after a `pong.seq` above `lastSeq` the client waits 1 s before it resyncs; the server pings every 25 s and closes a socket with no pong by the next sweep; the client pings every 25 s and reconnects after 50 s with no inbound message; a player counts as gone 10 s after a disconnect.
 
 ## 10. Sequence diagrams
 

@@ -108,6 +108,7 @@ With a self-paced quiz (ADR-002), questions and results are per player, but the 
 - Fan-out cost per tick is one frame per connection, whatever the number of events in that tick.
 - A score shows on other screens up to 200 ms late, by design; the load runs measure the answer → leaderboard latency against C5.
 - Clients must buffer broadcasts while a `resync` is pending and handle `rebase`; the bots and the Vue client share these rules from the protocol spec.
+- `pong.seq` is read from Redis for every `ping` (one `GET`; about 400 per second for 10,000 sockets on a node), so a node that relayed nothing yet, or missed a frame on its pub/sub link, still reports the quiz's counter.
 
 ## ADR-005 — Redis sorted set and Lua scripts for scoring; AOF `everysec`
 
