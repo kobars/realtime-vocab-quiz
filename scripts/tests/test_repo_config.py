@@ -6,6 +6,7 @@ config loader and file filter.
 """
 
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -112,14 +113,61 @@ def test_make_check_runs_every_pre_commit_hook_on_every_file() -> None:
     assert any("pre-commit run --all-files" in line for line in recipe)
 
 
+def _deptry_tools() -> tuple[list[str], list[str]]:
+    """Return the roots and the flags of the Makefile's DEPTRY_TOOLS step."""
+    line = next(
+        line
+        for line in (ROOT / "Makefile").read_text(encoding="utf-8").splitlines()
+        if line.startswith("DEPTRY_TOOLS = ")
+    )
+    args = shlex.split(line.split(" deptry ", 1)[1])
+    first_flag = next(i for i, arg in enumerate(args) if arg.startswith("-"))
+    return args[:first_flag], args[first_flag:]
+
+
+def _deptry(*args: str, cwd: Path = ROOT / "api") -> subprocess.CompletedProcess[str]:
+    """Run deptry in ``cwd``; in api/ it reads api/pyproject.toml, as make check does."""
+    return subprocess.run(
+        [sys.executable, "-m", "deptry", *args, "--no-ansi"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def test_make_check_runs_the_dependency_check_on_every_python_root() -> None:
     recipe = _block(
         ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
     )
     assert any("uv run --locked deptry src" in line for line in recipe)
     assert any("$(DEPTRY_TOOLS)" in line for line in recipe)
-    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    assert "uv run --locked deptry ../scripts ../load" in makefile
+    roots, _ = _deptry_tools()
+    assert roots == ["tests", "../scripts", "../load"]
+
+
+def test_tool_dependency_check_fails_on_missing_and_transitive_imports(tmp_path: Path) -> None:
+    # A folder named tests is skipped by deptry's default exclude; the step must still scan it.
+    probe = tmp_path / "tests" / "test_probe.py"
+    probe.parent.mkdir()
+    probe.write_text("import anyio\nimport no_such_package\nimport pydantic_core\n")
+    _, flags = _deptry_tools()
+    config = str(ROOT / "api" / "pyproject.toml")
+    result = _deptry("tests", *flags, "--config", config, cwd=tmp_path)
+    assert result.returncode == 1
+    assert "DEP001 'no_such_package' imported but missing" in result.stderr
+    assert "DEP003 'anyio' imported but it is a transitive dependency" in result.stderr
+    assert "pydantic_core" not in result.stderr
+
+
+def test_dependency_check_fails_when_src_imports_pydantic_core(tmp_path: Path) -> None:
+    # Only the tools step allows pydantic_core; the service code must not import it.
+    probe = tmp_path / "src" / "quiz" / "probe.py"
+    probe.parent.mkdir(parents=True)
+    probe.write_text("import pydantic_core\n")
+    result = _deptry(str(tmp_path / "src"))
+    assert result.returncode == 1
+    assert "DEP003 'pydantic_core' imported but it is a transitive dependency" in result.stderr
 
 
 def test_dependency_check_fails_when_a_direct_import_is_undeclared(tmp_path: Path) -> None:
@@ -132,20 +180,6 @@ def test_dependency_check_fails_when_a_direct_import_is_undeclared(tmp_path: Pat
     )
     assert removed == 1
     (tmp_path / "pyproject.toml").write_text(config, encoding="utf-8")
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "deptry",
-            "src",
-            "--no-ansi",
-            "--config",
-            str(tmp_path / "pyproject.toml"),
-        ],
-        cwd=ROOT / "api",
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = _deptry("src", "--config", str(tmp_path / "pyproject.toml"))
     assert result.returncode == 1
     assert "DEP003 'starlette' imported but it is a transitive dependency" in result.stderr

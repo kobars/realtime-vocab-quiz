@@ -47,8 +47,8 @@ The API refuses a WebSocket upgrade from an origin it does not allow (HTTP 403).
 internal-content guard `scripts/check_internal.py`, ruff lint and format, ESLint,
 typos, and lychee in Docker on the relative links and anchors of the tracked
 Markdown); mypy (strict); import-linter; deptry (every import in `api/src` is a
-declared dependency and every runtime dependency is used; `scripts/` and `load/`
-import only declared packages); pytest (without the `integration` and
+declared dependency and every runtime dependency is used; `api/tests`, `scripts/`
+and `load/` import only declared packages); pytest (without the `integration` and
 `acceptance` markers) with a branch-coverage floor (`api/pyproject.toml`);
 the contract drift check; vue-tsc; Vitest with coverage thresholds
 (`web/vitest.config.ts`); and the client build (`pnpm -C web build`). Every pull
