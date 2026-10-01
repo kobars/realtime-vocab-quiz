@@ -29,6 +29,7 @@ class Harness(NamedTuple):
     advance: Callable[[int], Awaitable[None]]  # the clock on by ms; a real clock just waits
     pass_deadline: Callable[[str], Awaitable[None]]  # the quiz's window is over from now on
     hold_tick: Callable[[str], Awaitable[None]]  # the tick token holds until a publish cuts it
+    move_start: Callable[[str, int], Awaitable[None]]  # the quiz start lies ms after the clock
 
 
 def memory_harness() -> Harness:
@@ -44,7 +45,10 @@ def memory_harness() -> Harness:
     async def hold_tick(_: str) -> None:
         """The injected clock stands still between steps: the token already holds."""
 
-    return Harness(MemoryStore(lambda: now[0]), advance, pass_deadline, hold_tick)
+    async def move_start(_: str, ms: int) -> None:
+        now[0] -= ms  # a clock step back
+
+    return Harness(MemoryStore(lambda: now[0]), advance, pass_deadline, hold_tick, move_start)
 
 
 async def real_advance(ms: int) -> None:
@@ -62,7 +66,10 @@ def redis_harness(store: Store, client: Redis, prefix: str) -> Harness:
     async def hold_tick(quiz_id: str) -> None:
         await client.set(quiz_keys(quiz_id, prefix).tick, "held", px=HOLD_TICK_MS)
 
-    return Harness(store, real_advance, pass_deadline, hold_tick)
+    async def move_start(quiz_id: str, ms: int) -> None:
+        await client.hincrby(quiz_keys(quiz_id, prefix).meta, "startMs", ms)
+
+    return Harness(store, real_advance, pass_deadline, hold_tick, move_start)
 
 
 @pytest.fixture(
@@ -97,6 +104,11 @@ def pass_deadline(harness: Harness) -> Callable[[str], Awaitable[None]]:
 @pytest.fixture
 def hold_tick(harness: Harness) -> Callable[[str], Awaitable[None]]:
     return harness.hold_tick
+
+
+@pytest.fixture
+def move_start(harness: Harness) -> Callable[[str, int], Awaitable[None]]:
+    return harness.move_start
 
 
 @pytest.fixture

@@ -7,15 +7,22 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 
+from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.session import Question
+from quiz.domain.standings import REACHED_BITS
 from quiz.ports.store import End, Finished, Publish, Row, Served, Store
 
 type Advance = Callable[[int], Awaitable[None]]
 type QuizStep = Callable[[str], Awaitable[None]]
+type MoveStart = Callable[[str, int], Awaitable[None]]
 
 QUESTIONS = tuple(Question(f"q{i}", i % 4) for i in range(3))
 WINDOW_MS, LIMIT_MS = 600_000, 20_000
+SHORT_WINDOW_MS = 100  # far below LIMIT_MS, and short enough for a real clock to wait out
+# On a real clock pass_deadline makes the deadline the server's now: about every other try,
+# the next script reads that same ms.
+DEADLINE_TRIES = 50
 
 
 async def refused(call: Awaitable[object]) -> ErrorCode:
@@ -194,6 +201,29 @@ async def test_refusals_after_the_deadline(
     assert not await store.leave(quiz_id, "a", "c-a")
 
 
+async def test_the_deadline_ms_itself_is_ended(
+    store: Store, advance: Advance, pass_deadline: QuizStep, quiz_id: str
+) -> None:
+    await store.create_quiz(quiz_id, QUESTIONS, window_ms=SHORT_WINDOW_MS, time_limit_ms=LIMIT_MS)
+    await store.join(quiz_id, "a", "A", "c-a")
+    await store.serve_next(quiz_id, "a", 0, "c-a")
+    await advance(SHORT_WINDOW_MS)  # an injected clock lands on the deadline itself
+    for n in range(DEADLINE_TRIES):
+        late = store.apply_answer(quiz_id, "a", 0, 0, f"s{n}", "c-a")
+        assert await refused(late) == ErrorCode.QUIZ_ENDED
+        await pass_deadline(quiz_id)  # a real clock: the deadline becomes the server's now
+
+
+async def test_a_question_served_near_the_deadline_gets_only_the_time_left(
+    store: Store, quiz_id: str
+) -> None:
+    await store.create_quiz(quiz_id, QUESTIONS, window_ms=SHORT_WINDOW_MS, time_limit_ms=LIMIT_MS)
+    await store.join(quiz_id, "a", "A", "c-a")
+    served = await store.serve_next(quiz_id, "a", 0, "c-a")
+    assert isinstance(served, Served)
+    assert 0 < served.remaining_ms <= SHORT_WINDOW_MS
+
+
 async def test_ranks_of_reads_many_users_at_one_seq(store: Store, quiz_id: str) -> None:
     await started(store, quiz_id, "a", "b")
     points = await answer(store, quiz_id, "b", 0, 0, "s1")
@@ -229,6 +259,19 @@ async def test_standings_order_by_total_then_reached_time(
     assert [row.rank for row in page.rows] == [1, 2, 3]
 
 
+async def test_a_start_ahead_of_the_clock_counts_as_reached_at_zero(
+    store: Store, move_start: MoveStart, quiz_id: str
+) -> None:
+    await started(store, quiz_id, "a", "b")
+    await answer(store, quiz_id, "b", 0, 0, "s1")
+    await store.serve_next(quiz_id, "b", 1, "c-b")
+    await answer(store, quiz_id, "b", 1, 1, "s2")  # b: two correct answers, more than a's one
+    await move_start(quiz_id, 256 << REACHED_BITS)  # unclamped, this outweighs 256 points
+    await answer(store, quiz_id, "a", 0, 0, "s3")
+    rows = (await store.ranks_of(quiz_id, ["a", "b"])).rows
+    assert [rows["b"].rank, rows["a"].rank] == [1, 2]
+
+
 async def test_standings_pages(store: Store, quiz_id: str) -> None:
     await started(store, quiz_id, *"abcde")
     page = await store.standings_page(quiz_id, 1, 2)
@@ -249,14 +292,22 @@ async def test_snapshot_up_to_200_players_carries_all(store: Store, quiz_id: str
     assert snap.you is None
 
 
-async def test_snapshot_above_200_players_carries_top_50(store: Store, quiz_id: str) -> None:
+@pytest.mark.parametrize(
+    ("players", "shown"),
+    [(FULL_LIST_MAX, FULL_LIST_MAX), (FULL_LIST_MAX + 1, TOP_N)],
+    ids=["full-list-max", "one-above"],
+)
+async def test_snapshot_carries_the_top_n_only_above_full_list_max(
+    store: Store, quiz_id: str, players: int, shown: int
+) -> None:
     await started(store, quiz_id)
-    for n in range(201):
-        await store.join(quiz_id, f"u{n:03}", "U", f"c{n}")
-    snap = await store.snapshot(quiz_id, "u200")
-    assert (snap.player_count, snap.online_count, len(snap.rows)) == (201, 201, 50)
-    assert [row.rank for row in snap.rows] == list(range(1, 51))
-    assert snap.you == Row(201, "u200", "U", 0)
+    users = [f"u{n:03}" for n in range(players)]
+    for n, user in enumerate(users):
+        await store.join(quiz_id, user, "U", f"c{n}")
+    snap = await store.snapshot(quiz_id, users[-1])
+    assert (snap.player_count, snap.online_count, len(snap.rows)) == (players, players, shown)
+    assert [row.rank for row in snap.rows] == list(range(1, shown + 1))
+    assert snap.you == Row(players, users[-1], "U", 0)
 
 
 async def test_dirty_gates_publish_and_tick_holds(
