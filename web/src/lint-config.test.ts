@@ -36,7 +36,8 @@ async function lint(code: string, filePath: string): Promise<ESLint.LintResult['
   return result?.messages ?? []
 }
 
-describe('eslint config', () => {
+// The first type-aware lint builds the TypeScript program, which takes several seconds on CI.
+describe('eslint config', { timeout: 30_000 }, () => {
   it('accepts browser globals in a .vue file', async () => {
     expect(await lint(component, 'src/App.vue')).toEqual([])
   })
