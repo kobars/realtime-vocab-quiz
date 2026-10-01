@@ -7,6 +7,7 @@ The files are read as text, so the tests need no Docker daemon.
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,85 @@ def test_web_image_serves_dist_from_unprivileged_nginx_with_an_spa_fallback() ->
     assert not any("$uri/" in line for line in try_files)
     assert "COPY --from=builder /web/dist /usr/share/nginx/html" in runtime
     assert any(line.startswith("HEALTHCHECK") for line in runtime)
+
+
+def _location_blocks(conf: str) -> list[str]:
+    """Return the body of each ``location`` block of an nginx config, comments dropped and
+    nested blocks kept inside their location."""
+    text = re.sub(r"#.*", "", conf)
+    blocks = []
+    for match in re.finditer(r"^\s*location\b[^{;]*\{", text, re.MULTILINE):
+        depth, end = 1, match.end()
+        while depth:
+            depth += {"{": 1, "}": -1}.get(text[end], 0)
+            end += 1
+        blocks.append(text[match.end() : end - 1])
+    return blocks
+
+
+def _snippet_headers(snippet: str) -> dict[str, str]:
+    """Map each header name of the snippet to its line; every other non-comment line fails."""
+    lines = [
+        line for line in snippet.splitlines() if line.strip() and not line.lstrip().startswith("#")
+    ]
+    # The unindented quoted form is the one smoke_images.sh parses; always: a missing asset's
+    # 404 has them too.
+    for line in lines:
+        assert re.fullmatch(r'add_header \S+ "[^"]+" always;', line), line
+    names = [line.split()[1] for line in lines]
+    assert len(names) == len(set(names)), names
+    return dict(zip(names, lines, strict=True))
+
+
+def test_location_blocks_skip_comments_and_keep_nested_blocks() -> None:
+    conf = """# each location sets Cache-Control
+    location /a/ {
+        if ($x) { return 404; }
+        include /etc/nginx/security-headers.conf;
+    }
+    location / { add_header Cache-Control "no-cache"; }
+"""
+    first, second = _location_blocks(conf)
+    assert "include /etc/nginx/security-headers.conf;" in first
+    assert "add_header Cache-Control" in second
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        '    add_header Strict-Transport-Security "x" always;',
+        (
+            'add_header Referrer-Policy "no-referrer" always;\n'
+            'add_header Referrer-Policy "same-origin" always;'
+        ),
+    ],
+)
+def test_snippet_headers_reject_an_indented_or_repeated_header(snippet: str) -> None:
+    with pytest.raises(AssertionError):
+        _snippet_headers(snippet)
+
+
+def test_web_image_sends_the_security_headers_from_every_location_that_adds_headers() -> None:
+    """nginx drops the inherited add_header lines in a location that sets its own."""
+    _, runtime = _stages(ROOT / "web" / "Dockerfile")
+    assert "COPY web/security-headers.conf /etc/nginx/security-headers.conf" in runtime
+    conf = (ROOT / "web" / "nginx.conf").read_text(encoding="utf-8")
+    with_headers = [block for block in _location_blocks(conf) if "add_header" in block]
+    assert with_headers
+    for block in with_headers:
+        assert "include /etc/nginx/security-headers.conf;" in block, block
+    headers = _snippet_headers((ROOT / "web" / "security-headers.conf").read_text(encoding="utf-8"))
+    assert set(headers) == {
+        "Content-Security-Policy",
+        "X-Content-Type-Options",
+        "Referrer-Policy",
+        "Permissions-Policy",
+    }
+    csp = headers["Content-Security-Policy"]
+    assert "frame-ancestors 'none'" in csp
+    # form-action has no default-src fallback.
+    assert "form-action 'self'" in csp
+    assert "unsafe-inline" not in csp
 
 
 def test_runtime_stages_take_the_os_security_fixes_and_end_as_a_non_root_user() -> None:
