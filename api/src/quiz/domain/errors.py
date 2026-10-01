@@ -1,4 +1,4 @@
-# AI-ASSISTED: domain error codes of docs/spec/protocol.md §6 raised by the session state machine.
+# AI-ASSISTED: error codes of docs/spec/protocol.md §6 raised by the state machine and the store.
 from enum import StrEnum
 
 
@@ -9,6 +9,8 @@ class ErrorCode(StrEnum):
     ALREADY_ANSWERED = "ALREADY_ANSWERED"
     INVALID_STATE = "INVALID_STATE"
     QUIZ_ENDED = "QUIZ_ENDED"
+    QUIZ_NOT_FOUND = "QUIZ_NOT_FOUND"
+    SESSION_REPLACED = "SESSION_REPLACED"
 
 
 class DomainError(Exception):
