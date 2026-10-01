@@ -72,6 +72,11 @@ files = ["src", "tests", "../scripts", "../load"]
 explicit_package_bases = true
 warn_unreachable = true
 
+# pre-commit ships no py.typed; its sources are typed, so read them instead of skipping them.
+[[tool.mypy.overrides]]
+module = ["pre_commit.*"]
+follow_untyped_imports = true
+
 [tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = ["tests", "../scripts/tests", "../load/tests"]
