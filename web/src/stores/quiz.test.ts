@@ -34,7 +34,6 @@ const board = (seq: number, myScore: number): Leaderboard => ({ v: 1, type: 'lea
   onlineCount: 3, entries: [{ ...me, rank: 1, score: myScore }, { ...rival, rank: 2 }] })
 const error = (code: ErrorCode, requestType: string | null): ProtocolError => ({ v: 1, type: 'error', code, message: '', requestType })
 
-/** Joins and returns the store with the opened socket. */
 async function joinQuiz() {
   const store = useQuizStore()
   store.join('VOCAB-42', 'Ana')
@@ -68,10 +67,7 @@ beforeEach(() => {
     }),
   })
 })
-afterEach(() => {
-  vi.useRealTimers()
-  vi.restoreAllMocks()
-})
+afterEach(() => void (vi.useRealTimers(), vi.restoreAllMocks()))
 
 it('join: connecting, then resyncing on joined, then joined with the standings on snapshot', async () => {
   const { store, socket } = await joinQuiz()

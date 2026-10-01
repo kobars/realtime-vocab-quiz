@@ -90,13 +90,8 @@ export const useQuizStore = defineStore('quiz', () => {
   }
 
   /** Start, Continue, Skip, Next question or See my result: each asks for the index the current screen implies. */
-  function next(): void {
-    if (s.quiz !== null && !s.ended) client.value?.next(nextIndex.value)
-  }
-
-  function loadPage(offset: number): void {
-    client.value?.getLeaderboard(offset, PAGE_SIZE)
-  }
+  const next = (): void => (s.quiz === null || s.ended ? undefined : client.value?.next(nextIndex.value))
+  const loadPage = (offset: number): void => client.value?.getLeaderboard(offset, PAGE_SIZE)
 
   function handle(event: ClientEvent): void {
     if (event.type !== 'status') return receive(event)
@@ -184,13 +179,8 @@ export const useQuizStore = defineStore('quiz', () => {
     if (mine) Object.assign(s, { myRank: mine.rank, myScore: mine.score })
   }
 
-  function setCursor(cursor: number, open: boolean): void {
-    if (s.quiz !== null) Object.assign(s.quiz, { cursor, cursorOpen: open })
-  }
-
-  function end(): void {
-    Object.assign(s, { ended: true, pending: null, phase: 'results' })
-  }
+  const setCursor = (cursor: number, open: boolean): void => void (s.quiz && Object.assign(s.quiz, { cursor, cursorOpen: open }))
+  const end = (): void => void Object.assign(s, { ended: true, pending: null, phase: 'results' })
 
   return { ...toRefs(s), nextIndex, msLeft, join, answer, next, loadPage }
 })
