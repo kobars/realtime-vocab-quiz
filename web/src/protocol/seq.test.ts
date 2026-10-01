@@ -112,5 +112,44 @@ describe('SeqTracker', () => {
     tracker.broadcast(board(6))
     expect(tracker.broadcast(ended(12))).toEqual({ apply: [ended(12)], resync: null })
     expect(tracker.lastSeq).toBe(12)
+    // The snapshot that answers the resync was read before the end: it must not replay frame 6.
+    expect(tracker.snapshot(5)).toEqual({ apply: [], resync: null })
+    expect(tracker.lastSeq).toBe(12)
+  })
+
+  it.each([undefined, 'open'] as const)(
+    'keeps lastSeq at the final seq when an older snapshot (status %j) arrives after quiz_ended',
+    (status) => {
+      const tracker = trackerAt(4)
+      tracker.pong(6)
+      tracker.broadcast(ended(6))
+      expect(tracker.snapshot(4, status)).toEqual({ apply: [], resync: null })
+      expect(tracker.lastSeq).toBe(6)
+      expect(tracker.pong(6).resync).toBeNull()
+    },
+  )
+
+  it('ignores a status open snapshot after quiz_ended, even above the final seq', () => {
+    const tracker = trackerAt(4)
+    tracker.broadcast(ended(5))
+    tracker.joined(5)
+    expect(tracker.snapshot(7, 'open')).toEqual({ apply: [], resync: null })
+    expect(tracker.lastSeq).toBe(5)
+  })
+
+  it('accepts a snapshot with status ended after quiz_ended', () => {
+    const tracker = trackerAt(4)
+    tracker.broadcast(ended(5))
+    tracker.joined(5)
+    expect(tracker.snapshot(5, 'ended')).toEqual({ apply: [], resync: null })
+    expect(tracker.lastSeq).toBe(5)
+  })
+
+  it('drops leaderboard frames after quiz_ended instead of resyncing', () => {
+    const tracker = trackerAt(3)
+    tracker.broadcast(ended(4))
+    expect(tracker.broadcast(board(2))).toEqual({ apply: [], resync: null })
+    expect(tracker.broadcast(board(5))).toEqual({ apply: [], resync: null })
+    expect(tracker.lastSeq).toBe(4)
   })
 })

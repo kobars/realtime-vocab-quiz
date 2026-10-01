@@ -1,5 +1,5 @@
 // AI-ASSISTED: SeqTracker applies broadcasts in seq order and decides when to resync (protocol spec §3).
-import type { Leaderboard, QuizEnded } from './types.generated'
+import type { Leaderboard, QuizEnded, Snapshot } from './types.generated'
 
 export type Broadcast = Leaderboard | QuizEnded
 
@@ -24,6 +24,8 @@ export class SeqTracker {
   private last = 0
   private resyncing = false
   private buffer: Broadcast[] = []
+  /** The seq of the applied `quiz_ended`: from then on the standings are final. */
+  private finalSeq: number | null = null
 
   constructor(private readonly random: () => number = Math.random) {}
 
@@ -44,8 +46,11 @@ export class SeqTracker {
     // quiz_ended is the last broadcast of a quiz: always applied, whatever its seq.
     if (frame.type === 'quiz_ended') {
       this.last = frame.seq
+      this.finalSeq = frame.seq
       return { apply: [frame], resync: null }
     }
+    // No script publishes after the end, so a leaderboard frame that arrives now is older.
+    if (this.finalSeq !== null) return nothing()
     if (this.resyncing) {
       this.buffer.push(frame)
       return nothing()
@@ -68,10 +73,19 @@ export class SeqTracker {
     return this.startResync(0)
   }
 
-  /** The snapshot replaces the standings: L = its `atSeq`, then the buffered newer broadcasts apply in order. */
-  snapshot(atSeq: number): SeqStep {
-    this.last = atSeq
+  /**
+   * The snapshot replaces the standings: L = its `atSeq`, then the buffered newer broadcasts apply in order.
+   * After `quiz_ended`, a snapshot read before the end (`status: open`, or without a status an `atSeq`
+   * below the final seq) only ends the resync: the final standings and L stay.
+   */
+  snapshot(atSeq: number, status?: Snapshot['status']): SeqStep {
     this.resyncing = false
+    const readBeforeEnd = status === 'open' || (status === undefined && atSeq < (this.finalSeq ?? 0))
+    if (this.finalSeq !== null && readBeforeEnd) {
+      this.buffer = []
+      return nothing()
+    }
+    this.last = atSeq
     const buffered = this.buffer.filter((frame) => frame.seq > atSeq).sort((a, b) => a.seq - b.seq)
     this.buffer = []
     const step = nothing()
