@@ -8,7 +8,7 @@ from redis.asyncio import Redis
 from redis.exceptions import NoScriptError
 
 _LUA = files("quiz.adapters.redis") / "lua"
-SCRIPTS = ("create_quiz",)
+SCRIPTS = ("create_quiz", "join")
 SCORING_LIBS: dict[str, tuple[str, ...]] = {"score_answer": ("points",)}
 
 type Reply = list[str | int | None]
