@@ -2,9 +2,11 @@
 """The quiz store: every write that changes quiz state, behind one interface.
 
 The store reads its own clock and computes points itself: no method takes a time or
-points from the caller. Refusals raise ``DomainError`` and write nothing.
+points from the caller. Refusals raise ``DomainError`` and write nothing; a ``QUIZ_ENDED``
+refusal carries ``end_seq``, None while no ``quiz_ended`` was published yet.
 """
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -70,6 +72,13 @@ class Page:
 
 
 @dataclass(frozen=True, slots=True)
+class Ranks:
+    at_seq: int
+    player_count: int
+    rows: Mapping[str, Row | None]  # per asked user id; None if that user is not a player
+
+
+@dataclass(frozen=True, slots=True)
 class Snapshot:
     at_seq: int
     status: Literal["open", "ended"]
@@ -84,6 +93,12 @@ class Publish:
     status: Literal["published", "clean", "busy", "ended"]
     seq: int | None = None  # published: the new seq; ended: the end seq, if announced
     retry_ms: int = 0  # busy: how long the tick token still holds
+
+
+@dataclass(frozen=True, slots=True)
+class Renewed:
+    status: Literal["renewed", "ended"]
+    removed: int = 0  # renewed: how many stale presence entries were dropped
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +134,9 @@ class Store(Protocol):
 
     async def standings_page(self, quiz_id: str, offset: int, limit: int) -> Page: ...
 
-    async def rank_of(self, quiz_id: str, user_id: str) -> Row | None: ...
+    async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> Ranks:
+        """The rank and score of each user, read at the same seq as ``at_seq``."""
+        ...
 
     async def snapshot(self, quiz_id: str, user_id: str | None) -> Snapshot: ...
 
@@ -129,4 +146,14 @@ class Store(Protocol):
 
     async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> End:
         """Announce the end once; a first host call only marks it (docs/spec/redis.md §3.1)."""
+        ...
+
+    async def renew_presence(
+        self, quiz_id: str, stale_ms: int, pairs: Sequence[tuple[str, str]]
+    ) -> Renewed:
+        """Renew each (user id, connection id) still held; drop entries unseen for ``stale_ms``."""
+        ...
+
+    async def mark_dirty(self, quiz_id: str) -> None:
+        """Make the next tick publish, as after a Redis restart (docs/spec/redis.md §5)."""
         ...

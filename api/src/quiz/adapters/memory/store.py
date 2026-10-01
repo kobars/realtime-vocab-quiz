@@ -2,6 +2,7 @@
 """The Redis store's single-process twin: per quiz, one lock, one clock read per command."""
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
@@ -151,10 +152,12 @@ class MemoryStore:
             quiz.state = step.state
             return Answered(result, step_back)
 
-    async def rank_of(self, quiz_id: str, user_id: str) -> Row | None:
+    async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> port.Ranks:
         quiz = self._quiz(quiz_id)
         async with quiz.lock:
-            return next((row for row in quiz.rows() if row.user_id == user_id), None)
+            rows = {row.user_id: row for row in quiz.rows()}
+            asked = {user_id: rows.get(user_id) for user_id in user_ids}
+            return port.Ranks(quiz.state.seq, len(rows), asked)
 
     async def standings_page(self, quiz_id: str, offset: int, limit: int) -> port.Page:
         if offset < 0 or not 1 <= limit <= FULL_LIST_MAX:
@@ -208,3 +211,11 @@ class MemoryStore:
             quiz.state = s.transition(quiz.state, s.End(), now).state
             quiz.end_seq = quiz.state.seq
             return port.End("ended", quiz.end_seq)
+
+    async def renew_presence(
+        self, quiz_id: str, stale_ms: int, pairs: Sequence[tuple[str, str]]
+    ) -> port.Renewed:
+        raise NotImplementedError
+
+    async def mark_dirty(self, quiz_id: str) -> None:
+        raise NotImplementedError
