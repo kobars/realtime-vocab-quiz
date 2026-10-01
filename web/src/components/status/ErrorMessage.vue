@@ -1,12 +1,14 @@
-<!-- AI-ASSISTED: a short message for the errors the player should see, and the blocking card for the store's blocked state: "Use this tab" or "Reload" (UI spec §3.7, §4.3). -->
+<!-- AI-ASSISTED: a short message for the errors the player should see, and the blocking card for the store's blocked state: "Use this tab", "Reload" or "Try again" (UI spec §3.7, §4.3). -->
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { useQuizStore } from '@/stores/quiz'
+import { type Blocked, useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 
 /** How long a message the client recovers from by itself stays visible. */
 const HIDE_AFTER_MS = 6_000
+/** The cards whose action reloads the page; the others join again from this tab. */
+const RELOAD_ON: readonly Blocked[] = ['version', 'policy']
 
 type Notice = keyof typeof strings.errors
 const isNotice = (code: string): code is Notice => Object.hasOwn(strings.errors, code)
@@ -25,11 +27,10 @@ watch(() => store.lastError, (error) => {
 watch(() => store.blocked, (blocked) => blocked !== null && void nextTick(() => button.value?.$el.focus()), { immediate: true })
 onBeforeUnmount(() => clearTimeout(timer))
 
-/** "Use this tab": a new ticket and `join` from this tab, and the other tab gets the card. "Reload": the new version. */
+/** "Use this tab" (the other tab then gets the card) and "Try again" join again with a new ticket; "Reload" reloads. */
 function act(): void {
-  const quiz = store.quiz
-  if (store.blocked === 'version') window.location.reload()
-  else if (quiz) store.join(quiz.quizId, quiz.displayName)
+  if (store.blocked !== null && RELOAD_ON.includes(store.blocked)) window.location.reload()
+  else store.retry()
 }
 </script>
 
@@ -49,6 +50,14 @@ function act(): void {
     >
       {{ strings.blocked[store.blocked].action }}
     </Button>
+    <a
+      v-if="store.blocked === 'policy'"
+      href="/"
+      data-test="home"
+      class="text-sm text-primary underline-offset-4 hover:underline"
+    >
+      {{ strings.notFound.home }}
+    </a>
   </div>
   <p
     v-else

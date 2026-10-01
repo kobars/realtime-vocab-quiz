@@ -24,10 +24,13 @@ export interface QuizSocket {
   close(code?: number): void
 }
 
-/** Server messages in the order to apply them (broadcasts only once SeqTracker releases them), plus status changes. */
+/**
+ * Server messages in the order to apply them (broadcasts only once SeqTracker releases them), plus status changes.
+ * `closed` follows a final close code or `stop`; `failed` means the client gave up after 10 connects without a `joined`.
+ */
 export type ClientEvent =
   | ServerMessage
-  | { type: 'status'; status: 'connecting' | 'open' | 'resyncing' | 'reconnecting' | 'closed'; code: number | null }
+  | { type: 'status'; status: 'connecting' | 'open' | 'resyncing' | 'reconnecting' | 'closed' | 'failed'; code: number | null }
 
 export interface QuizClientOptions {
   api: AuthApi
@@ -405,7 +408,8 @@ export class QuizClient {
     if (this.stopped) return
     const wait = this.backoff.closed(code, this.o.now())
     this.stopped = wait === null
-    this.emit({ type: 'status', status: wait === null ? 'closed' : 'reconnecting', code })
+    const status = wait !== null ? 'reconnecting' : this.backoff.exhausted ? 'failed' : 'closed'
+    this.emit({ type: 'status', status, code })
     if (wait !== null) this.after(wait, () => void this.connect())
   }
 

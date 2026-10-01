@@ -1,6 +1,7 @@
 // AI-ASSISTED: tests for QuizClient: connect, reconnect, seq wiring, liveness and answer retries, on a fake socket and fake timers.
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { type ClientEvent, QuizClient, type QuizClientOptions, type QuizSocket, SNAPSHOT_TIMEOUT_MS } from './client'
+import { httpAuthApi, IDENTITY_TIMEOUT_MS } from './identity'
 import type { ServerMessage } from './types.generated'
 
 class FakeSocket implements QuizSocket {
@@ -93,6 +94,32 @@ it('treats an open slower than 5 s, or a failed ticket request, as 1006', async 
   await wait(2)
   await connected(false)
   expect([slow.closedWith, sockets(), FakeSocket.all[1]?.url]).toEqual([1005, 2, 'ws://quiz.test/ws?ticket=t2'])
+})
+
+it('a session request that never answers fails after 5 s and reconnects with backoff, instead of hanging on connecting', async () => {
+  const fetchFn = vi.fn<typeof fetch>(() => new Promise(() => undefined))
+  const client = start(() => 0, { api: httpAuthApi('/api', fetchFn) })
+  await wait(4_999)
+  expect(events).toEqual([{ type: 'status', status: 'connecting', code: null }])
+  await wait(1)
+  expect(events.at(-1)).toEqual({ type: 'status', status: 'reconnecting', code: 1006 })
+  await wait(1)
+  expect([fetchFn.mock.calls.length, sockets()]).toEqual([2, 0])
+  // The tab shares one session request per storage: let the second one time out too, so later tests start clean.
+  client.stop()
+  await wait(IDENTITY_TIMEOUT_MS)
+})
+
+it('gives up with status failed after 10 connects in a row without a joined, and opens no more sockets', async () => {
+  start()
+  for (let i = 0; i < 9; i++) {
+    ;(await connected(i % 2 === 0)).drop()
+    expect(events.at(-1)).toEqual({ type: 'status', status: 'reconnecting', code: 1006 })
+  }
+  ;(await connected()).drop()
+  expect(events.at(-1)).toEqual({ type: 'status', status: 'failed', code: 1006 })
+  await wait(60_000)
+  expect(sockets()).toBe(10)
 })
 
 it('waits 5 s plus the backoff after 1013', async () => {
