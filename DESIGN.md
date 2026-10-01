@@ -73,7 +73,7 @@ translations.
 
 **Context.** The quiz service is the one component built for real. The identity provider and the
 content service are mocks behind ports, so a real one can replace each without touching the
-core; the quiz host is a mock admin action. All three are dashed.
+core; the quiz host uses a token-gated mock admin API. All three are dashed.
 
 ```mermaid
 flowchart LR
@@ -92,40 +92,49 @@ flowchart LR
     class idp,content,host mock
 ```
 
-**Containers.**
+**Containers.** The two mocks are not containers of their own: each API node loads them
+in-process as adapters (dashed), and the identity mock keeps its sessions and tickets in Redis.
 
 ```mermaid
 flowchart LR
     browser["Browser<br/>Vue 3 SPA<br/>one WebSocket per tab"]
     nginx["nginx :8080<br/>static client, /api and /ws proxy"]
-    subgraph nodes["API nodes (FastAPI on uvicorn)"]
-        api1["api-1<br/>gateway, use cases, fan-out<br/>/metrics"]
-        api2["api-2<br/>gateway, use cases, fan-out<br/>/metrics"]
+    subgraph api1["api-1 (FastAPI on uvicorn)"]
+        core1["gateway, use cases, fan-out<br/>/metrics"]
+        ids1["mock identity adapter<br/>sessions and tickets"]
+        bank1["mock question bank adapter<br/>JSON files in the image"]
     end
-    redis[("Redis 8<br/>primary database, AOF everysec<br/>Lua scripts, sorted sets, pub/sub")]
-    ids["Mock identity<br/>sessions and tickets<br/>(keys in Redis)"]
-    bank["Mock question bank<br/>(JSON files in the image)"]
+    subgraph api2["api-2 (FastAPI on uvicorn)"]
+        core2["gateway, use cases, fan-out<br/>/metrics"]
+        ids2["mock identity adapter<br/>sessions and tickets"]
+        bank2["mock question bank adapter<br/>JSON files in the image"]
+    end
+    redis[("Redis 8<br/>primary database, AOF everysec<br/>Lua scripts, sorted sets, pub/sub<br/>session and ticket keys")]
     browser -- "POST /api/sessions, /api/tickets<br/>GET /ws (quiz.v1)" --> nginx
-    nginx --> api1
-    nginx --> api2
-    api1 -- "scripts, subscribe" --> redis
-    api2 -- "scripts, subscribe" --> redis
-    api1 -.-> ids
-    api2 -.-> ids
-    api1 -.-> bank
-    api2 -.-> bank
+    nginx --> core1
+    nginx --> core2
+    core1 -- "in-process" --> ids1
+    core1 -- "in-process" --> bank1
+    core2 -- "in-process" --> ids2
+    core2 -- "in-process" --> bank2
+    core1 -- "scripts, subscribe" --> redis
+    core2 -- "scripts, subscribe" --> redis
+    ids1 -- "sessions, tickets" --> redis
+    ids2 -- "sessions, tickets" --> redis
     classDef mock stroke-dasharray: 5 5
-    class ids,bank mock
+    class ids1,bank1,ids2,bank2 mock
 ```
 
 **Walk-through.** The client gets a mock session once (`POST /sessions`) and a single-use,
 30 s ticket before every connect (`POST /tickets`); the `/api` prefix is dropped before the
 API. It opens
 `GET /ws?ticket=…` with the subprotocol `quiz.v1`; nginx sends the socket to either node, and
-the node checks the origin, the ticket and the connection caps before the upgrade. Every
-request (`join`, `next`, `answer`, `resync`) becomes one Lua script in Redis, which checks the
-deadline and the idempotency keys on Redis `TIME` and writes atomically; the reply goes back on
-the same socket. A scoring answer sets the quiz's `dirty` flag. Every node that serves the quiz
+the node checks the origin, the ticket and the connection caps before the upgrade. Each
+write request (`join`, `next`, `answer`) becomes one Lua script in Redis, which checks the
+deadline on Redis `TIME` and writes atomically; for `answer` the script also checks the two
+idempotency keys (the `submissionId` and "already answered"). A `resync` runs one
+read-only script that returns the standings at one `seq` and writes nothing. The reply goes back
+on the same socket. A scoring answer sets the quiz's `dirty` flag. Every node that serves the quiz
 calls the tick script about every 200 ms; the one that wins the tick token increments `seq` and
 publishes one `leaderboard` frame on `quiz:{<quizId>}:events`, and every node relays it to its
 own sockets. Redis is the only database: the mock identity keeps its sessions and tickets
@@ -134,10 +143,17 @@ JSON files when a node starts.
 
 ## 4. Components (D-2)
 
-The server is one Python package, `quiz` (`api/src/quiz/`), split into layers that
-import-linter enforces in `make check`: the domain imports nothing else, the use cases see only
-the domain, the ports and the wire contracts, the adapters never import each other, and only
-the composition root (`quiz/main.py`) wires them.
+The server is one Python package, `quiz` (`api/src/quiz/`), split into layers. The
+import-linter contracts in `api/pyproject.toml`, run by `make check`, enforce these rules: the
+domain imports no other part of the package and none of Pydantic, FastAPI, Starlette, uvicorn,
+redis-py, structlog or the Prometheus client; the ports and the use cases never import the
+adapters, the fan-out, the settings, the composition root (`quiz/main.py`), redis-py or the web
+framework; the ports never import the use cases; the memory, Redis, mock identity, mock question
+bank and HTTP adapters never import each other, and all but the HTTP adapter never import the
+use cases, the fan-out, the settings or the web framework; and no module imports the
+composition root. The WebSocket gateway and the fan-out are outside these contracts, and no
+contract stops a module other than `quiz/main.py` from building an adapter: that the
+composition root alone wires them is a convention, not a check.
 
 | Component | Role | Owns | Talks to |
 |---|---|---|---|
@@ -148,8 +164,8 @@ the composition root (`quiz/main.py`) wires them.
 | Contracts (`quiz/contracts/`) | The wire protocol, defined once | Pydantic models of every message and the codec; the source of the generated JSON Schema and TypeScript types | Used by the use cases, the gateway and the client (generated types) |
 | App (`quiz/app/`) | The use cases | `QuizService`: join, next, answer, ping, resync, leaderboard pages; turns store results into replies and errors | The ports (`Store`, `QuestionBank`, `Clock`) |
 | Ports (`quiz/ports/`) | The interfaces the core depends on | `Store`, `Clock`, `QuestionBank`, `TicketStore` | Implemented by the adapters |
-| Store (`quiz/adapters/redis/`, `quiz/adapters/memory/`) | Atomic quiz state | The Redis adapter: key names, script loading and the Lua scripts (join, serve, score, tick, end); the memory twin for unit tests, with an injected clock | Redis (scripts, `TIME`) |
-| Gateway (`quiz/adapters/ws/`, `quiz/adapters/http/`) | The edge of a node | The `/ws` endpoint, the upgrade checks (origin, ticket, caps), limits before parsing, heartbeat and send buffers; `POST /sessions`, `POST /tickets`, `/readyz`, `/metrics` | Clients through nginx; the use cases; the ticket store |
+| Store (`quiz/adapters/redis/`, `quiz/adapters/memory/`) | Atomic quiz state | The Redis adapter: key names, script loading and every Lua script of [redis spec §3](docs/spec/redis.md#3-scripts) (`create_quiz`, `join`, `serve_question`, `score_answer`, `publish_leaderboard`, `leave`, `end_quiz`, `renew_presence`, `mark_dirty` and the read-only `read_standings`); the memory twin for unit tests, with an injected clock | Redis (scripts, `TIME`) |
+| Gateway (`quiz/adapters/ws/`, `quiz/adapters/http/`) | The edge of a node | The `/ws` endpoint, the upgrade checks (origin, ticket, caps), limits before parsing, heartbeat and send buffers; `POST /sessions`, `POST /tickets`, `GET /quizzes/{quizId}`, `/healthz`, `/readyz`, `/metrics`; the mock admin `POST /admin/quizzes` (only with `ADMIN_MOCK=1` and the `X-Admin-Token` header, else 404) | Clients through nginx; the use cases; the ticket store, the store and the question bank |
 | Fan-out (`quiz/fanout/`) | Leaderboard delivery across nodes | The 200 ms tick loop per served quiz, the pub/sub subscription, relay to local sockets, snapshots after a resubscribe | Redis (tick script, pub/sub); the gateway's sockets |
 | Mock identity (`quiz/adapters/mock_auth/`) | Stands in for an identity provider | Sessions and single-use tickets (Redis, or memory in tests), display-name rules | Redis |
 | Mock question bank (`quiz/adapters/mock_questions/`) | Stands in for a content service | Seed quizzes in `data/*.json`, validated at start | Local files |
@@ -242,14 +258,15 @@ it.
 | Scale-out | Two API nodes, nginx, one Redis, a two-node integration test and load runs |
 
 **Mocked.** The identity and question-bank mocks sit behind ports (`TicketStore`,
-`QuestionBank`) and say `MOCK:` in their module docstrings; quiz admin is a set of make targets
-and one host action.
+`QuestionBank`); quiz admin is a token-gated mock admin API in the HTTP adapter, off unless
+`ADMIN_MOCK=1`. All three say `MOCK:` in their code: the adapters' module docstrings, the
+`/admin` routes and the `ADMIN_MOCK` setting in `quiz/config.py`.
 
 | Mock | What this build does | What production would use instead |
 |---|---|---|
 | Identity and tickets (`quiz/adapters/mock_auth/`) | `POST /sessions` makes an anonymous user ID and a session token; `POST /tickets` makes a single-use 30 s ticket; both kept in Redis | The company's identity provider (OIDC) for users and sessions; the single-use ticket mechanism stays as built |
 | Question bank (`quiz/adapters/mock_questions/`) | Seed quizzes read from JSON files at start-up | A content service or database, edited in an authoring tool |
-| Quiz admin | `make new-quiz` and `make demo` create a quiz; a mock host action "end now" ends it | An authenticated admin API and UI with roles, scheduling and quiz settings |
+| Quiz admin (`quiz/adapters/http/`, `ADMIN_MOCK`) | `POST /admin/quizzes {quizId, timeLimitMs, windowMs}` starts a quiz from the bank, only with `ADMIN_MOCK=1` and a matching `X-Admin-Token` header (else 404); the make targets `make new-quiz` and `make demo` create a quiz; a mock host action "end now" ends a quiz early | The admin API behind the identity provider, with per-user roles in place of one shared token, plus an admin UI for scheduling and quiz settings |
 
 <!-- AI-ASSISTED-END -->
 
