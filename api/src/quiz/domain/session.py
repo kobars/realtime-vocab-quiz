@@ -8,7 +8,7 @@ from typing import NamedTuple, assert_never
 from quiz.domain import events as ev
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.scoring import DEFAULT_TIME_LIMIT_MS, score_answer
-from quiz.domain.standings import Standing, record_points, standings
+from quiz.domain.standings import RankedStanding, Standing, record_points, standings
 
 MAX_WINDOW_MS = 60 * 60 * 1000
 
@@ -37,6 +37,7 @@ class QuizState:
     time_limit_ms: int = DEFAULT_TIME_LIMIT_MS
     players: Mapping[str, Player] = field(default_factory=dict)
     seq: int = 0  # the last broadcast seq
+    dirty: bool = False  # the standings changed since the last broadcast
     ended_ms: int | None = None  # set once, when quiz_ended is broadcast
 
     def is_open(self, now: int) -> bool:
@@ -78,10 +79,15 @@ class Answer:
 
 @dataclass(frozen=True, slots=True)
 class End:
-    """The host's "end now", or the end found after the deadline; a no-op once ended."""
+    """The host's "end now"; a no-op once the quiz has ended."""
 
 
-type Command = Join | ServeNext | Answer | End
+@dataclass(frozen=True, slots=True)
+class Tick:
+    """One standings frame if they changed; ends the quiz once the deadline has passed."""
+
+
+type Command = Join | ServeNext | Answer | End | Tick
 type Reply = Player | ev.Event | None
 
 
@@ -99,8 +105,8 @@ def transition(state: QuizState, command: Command, now: int) -> Step:
             return _serve_next(state, command, now)
         case Answer():
             return _answer(state, command, now)
-        case End():
-            return _end(state, now)
+        case End() | Tick():
+            return _broadcast(state, now, end=isinstance(command, End))
         case _:
             assert_never(command)
 
@@ -116,8 +122,9 @@ def _require_open(state: QuizState, now: int) -> None:
         raise DomainError(ErrorCode.QUIZ_ENDED, "the quiz has ended")
 
 
-def _with_player(state: QuizState, player: Player) -> QuizState:
-    return replace(state, players={**state.players, player.standing.user_id: player})
+def _with_player(state: QuizState, player: Player, *, dirty: bool) -> QuizState:
+    players = {**state.players, player.standing.user_id: player}
+    return replace(state, players=players, dirty=state.dirty or dirty)
 
 
 def _join(state: QuizState, user_id: str, now: int) -> Step:
@@ -125,7 +132,7 @@ def _join(state: QuizState, user_id: str, now: int) -> Step:
     if (player := state.players.get(user_id)) is not None:  # a reconnect
         return Step(state, (), player)
     player = Player(Standing(user_id, total=0, reached_rel_ms=max(0, now - state.start_ms)))
-    return Step(_with_player(state, player), (ev.ParticipantJoined(user_id, now),), player)
+    return Step(_with_player(state, player, dirty=True), (ev.ParticipantJoined(user_id, now),), player)
 
 
 def _served(state: QuizState, player: Player, now: int) -> ev.QuestionServed:
@@ -155,7 +162,7 @@ def _serve_next(state: QuizState, command: ServeNext, now: int) -> Step:
         player = replace(player, cursor=i, serve_ms=now, cursor_open=True)
         reply = _served(state, player, now)
     events.append(reply)
-    return Step(_with_player(state, player), tuple(events), reply)
+    return Step(_with_player(state, player, dirty=False), tuple(events), reply)
 
 
 def _answer(state: QuizState, command: Answer, now: int) -> Step:
@@ -187,12 +194,21 @@ def _answer(state: QuizState, command: Answer, now: int) -> Step:
     events: tuple[ev.Event, ...] = (result,)
     if finished:
         events += (ev.PlayerFinished(user_id, total),)
-    return Step(_with_player(state, player), events, result)
+    return Step(_with_player(state, player, dirty=points > 0), events, result)
 
 
-def _end(state: QuizState, now: int) -> Step:
-    if state.ended_ms is not None:  # quiz_ended is sent once
+def _ranked(state: QuizState) -> tuple[RankedStanding, ...]:
+    return tuple(standings(player.standing for player in state.players.values()))
+
+
+def _broadcast(state: QuizState, now: int, *, end: bool) -> Step:
+    if state.ended_ms is not None:  # quiz_ended was the last broadcast
         return Step(state, (), None)
-    entries = tuple(standings(player.standing for player in state.players.values()))
-    ended = ev.QuizEnded(state.seq + 1, min(now, state.deadline_ms), entries)
-    return Step(replace(state, seq=ended.seq, ended_ms=ended.at_ms), (ended,), ended)
+    seq = state.seq + 1
+    if end or not state.is_open(now):
+        ended = ev.QuizEnded(seq, min(now, state.deadline_ms), _ranked(state))
+        return Step(replace(state, seq=seq, dirty=False, ended_ms=ended.at_ms), (ended,), ended)
+    if not state.dirty:
+        return Step(state, (), None)
+    frame = ev.StandingsBroadcast(seq, _ranked(state))
+    return Step(replace(state, seq=seq, dirty=False), (frame,), frame)
