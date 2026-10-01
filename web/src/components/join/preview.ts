@@ -4,20 +4,20 @@ export interface QuizPreview {
   title: string
   questionCount: number
   status: 'open' | 'ended'
-  playerCount: number
+  players: number
 }
 
 export type PreviewResult = { kind: 'found'; quiz: QuizPreview } | { kind: 'not-found' } | { kind: 'unavailable' }
 
 function toPreview(value: unknown): QuizPreview | null {
   if (typeof value !== 'object' || value === null) return null
-  const { title, questionCount, status, playerCount } = value as Record<string, unknown>
+  const { title, questionCount, status, players } = value as Record<string, unknown>
   const valid =
     typeof title === 'string' &&
     Number.isInteger(questionCount) &&
     (status === 'open' || status === 'ended') &&
-    Number.isInteger(playerCount)
-  return valid ? { title, questionCount: questionCount as number, status, playerCount: playerCount as number } : null
+    Number.isInteger(players)
+  return valid ? { title, questionCount: questionCount as number, status, players: players as number } : null
 }
 
 /**
