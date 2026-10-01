@@ -1,4 +1,4 @@
-# AI-ASSISTED: slow clients, session replacement, the leave grace and the server heartbeat.
+# AI-ASSISTED: slow clients, session replacement, sender edge cases, leave grace and heartbeat.
 import asyncio
 import json
 import socket
@@ -17,9 +17,11 @@ from websockets.sync.client import connect as ws_connect
 from websockets.typing import Origin, Subprotocol
 
 from quiz.adapters.ws.heartbeat import server_config
+from quiz.adapters.ws.limits import RateLimiter
 from quiz.adapters.ws.registry import Registry
 from quiz.adapters.ws.sender import Sender
-from quiz.app.service import Connection
+from quiz.adapters.ws.session import Deps, serve
+from quiz.app.service import Connection, Outcome, QuizService
 from quiz.config import KIB, Settings
 from quiz.contracts import messages as m
 from quiz.contracts.codec import encode
@@ -214,3 +216,79 @@ def test_the_server_pings_and_drops_a_socket_that_never_pongs() -> None:
         assert json.loads(alive.recv())["type"] == "pong"
     server.should_exit = True
     thread.join(5)
+
+
+class BrokenSocket(Socket):  # the peer is gone: every write fails
+    async def send_text(self, text: str) -> None:  # noqa: ARG002
+        raise ConnectionResetError
+
+
+def blob(size: int) -> bytes:  # one frame of exactly ``size`` bytes
+    head, tail = b'{"type":"blob","pad":"', b'"}'
+    return head + b"x" * (size - len(head) - len(tail)) + tail
+
+
+async def test_the_hard_limit_closes_1013_even_when_the_frame_in_flight_fills_it() -> None:
+    sock = Socket(reading=False)
+    sender = sender_of(sock)
+    sender.send_frame(blob(256 * KIB - 10))
+    await asyncio.sleep(0)  # the writer takes it: it is in flight and blocks
+    sender.send(page())  # past the hard limit; the error alone is past it too
+    assert sender.close_code == 1013
+    sock.reading.set()
+    await asyncio.wait_for(sender.task, 1)
+    assert [f.get("code") for f in sock.frames] == [None, "UNAVAILABLE"]
+    assert sock.closed == 1013
+
+
+async def test_a_close_before_the_writer_runs_still_ends_within_flush_s() -> None:
+    dead = Socket(reading=False)
+    sender = sender_of(dead, 0.1)
+    sender.send(page())
+    sender.close(4001)  # the writer task has not started yet
+    await asyncio.wait_for(sender.task, 1)
+    assert (dead.frames, dead.closed) == ([], 4001)
+
+
+async def test_replacing_a_socket_whose_writer_failed_does_not_raise() -> None:
+    registry = Registry(cast("Store", None), 10_000)
+    conn = Connection("c0", "u0", "VOCAB-42")
+    sender = sender_of(BrokenSocket())
+    registry.bind(conn, sender)
+    sender.send(page())
+    await asyncio.wait_for(sender.task, 1)  # the write failed: the writer is gone
+    registry.replace("c0")  # runs inside the newer socket's join
+    registry.broadcast("VOCAB-42", board(1), leaderboard=True)
+    assert sender.close_code == 4001
+
+
+class Talking(Socket):  # a client that sends ``texts``, then leaves; it reads nothing
+    def __init__(self, *texts: str) -> None:
+        super().__init__(reading=False)
+        self.inbound: list[dict[str, Any]] = [
+            {"type": "websocket.receive", "text": t} for t in texts
+        ]
+        self.inbound.append({"type": "websocket.disconnect", "code": 1000})
+
+    async def receive(self) -> dict[str, Any]:
+        await asyncio.sleep(0)
+        return self.inbound.pop(0)
+
+
+class Service:  # records the messages the receive loop hands to the use cases
+    def __init__(self) -> None:
+        self.handled: list[m.ClientMessage] = []
+
+    async def handle(self, conn: Connection, msg: m.ClientMessage) -> Outcome:  # noqa: ARG002
+        self.handled.append(msg)
+        return Outcome()
+
+
+async def test_a_closing_socket_hands_no_more_frames_to_the_use_cases() -> None:
+    sock, service = Talking(json.dumps(JOIN), PING), Service()
+    sender = sender_of(sock, 0.1)
+    sender.close(4001)  # replaced; its writer is still flushing to a client that does not read
+    deps = Deps(cast("QuizService", service), Registry(cast("Store", None), 10_000), 16 * KIB)
+    limiter = RateLimiter(20, 40, lambda: 0)
+    code = await serve(cast("WebSocket", sock), Connection("c0", "u0"), limiter, sender, deps)
+    assert (code, service.handled) == (4001, [])
