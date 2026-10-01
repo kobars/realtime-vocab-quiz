@@ -35,7 +35,7 @@ test: ## Run unit, property and contract tests (no Redis)
 	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance")
 	$(call step,vitest,$(VITEST))
 test-integration: ## Run the tests that need Redis (REDIS_URL or a container per run)
-	$(call step,pytest integration,$(PYTEST) tests/integration tests/contract -m integration; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ])
+	$(call step,pytest integration,$(PYTEST) tests/integration tests/contract -m integration)
 check: ## Run every check a change must pass
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,pre-commit hooks,uv run --project api --locked pre-commit run --all-files)
