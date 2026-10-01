@@ -217,6 +217,9 @@ export class QuizClient {
         this.settle(message.submissionId)
         this.inFlight = this.inFlight.filter((id) => id !== message.submissionId)
         break
+      case 'rank_update':
+      case 'leaderboard_page':
+        break
       case 'quiz_ended':
         // Ui spec §4.3: the end drops any pending request.
         this.dropRequests()

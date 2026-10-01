@@ -186,6 +186,9 @@ export const useQuizStore = defineStore('quiz', () => {
         return
       case 'error':
         return onError(message)
+      case 'pong':
+        // The client consumes pong itself and never emits it.
+        return
     }
   }
 
