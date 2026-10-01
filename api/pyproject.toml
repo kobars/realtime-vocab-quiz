@@ -75,7 +75,7 @@ known-first-party = [
 [tool.review-budget]
 info = 100000
 warning = 150000
-limit = 200000
+limit = 1000
 
 # make check runs deptry on src, and on tests, ../scripts and ../load with the Makefile's extra flags.
 [tool.deptry]

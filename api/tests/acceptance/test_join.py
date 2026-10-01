@@ -39,3 +39,4 @@ async def test_reconnect_keeps_user_and_total(quiz_server: QuizServer) -> None:
     assert result["pointsAwarded"] >= 100
     assert joined["type"] == "joined"
     assert (joined["userId"], joined["score"]) == (bob.joined["userId"], result["score"])
+# Scratch edit to check that CI guards the acceptance tests.
