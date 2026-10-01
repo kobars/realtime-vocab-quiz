@@ -61,7 +61,7 @@ A reconnecting `join` writes no player state (names, totals, board, serve): only
 
 **Reads at one `seq`.** Reads that must agree with one `seq` (`snapshot`, `leaderboard_page`, `rank_update`) use one read-only script, `read_standings(offset, limit, topN, fullListMax, uid…)`, which returns `seq`, `playerCount`, `onlineCount`, the status, the rows and, for each given `uid`, its `rank`, display name and `score` (`nil` if that user is not a player) in one step. `snapshot.you` passes the connection's user. A player who scored and is outside a frame's top 50 gets `rank_update` from that frame's `ranks`, so it carries the frame's `seq` as `atSeq` (protocol §4); `score_answer` puts the player in `scored`, and the script that builds the frame computes the ranks. A player whose rank only shifted gets at most one `rank_update` per second, from `read_standings` with the node's players outside the top 50, with that read's `seq` as `atSeq`. Each node relays `frame` to every socket of the quiz and sends `rank_update` only to its own sockets listed in `ranks`.
 
-**Clock step back.** When `score_answer` clamps `e` (`now < serveMs`), it returns `stepBack = 1` after the stored reply, and the scoring service increments `quiz_clock_step_back_total` (domain §2). The flag stays out of the stored reply, so a replay is unchanged and never counts twice.
+**Clock step back.** When `score_answer` clamps `e` (`now < serveMs`), it returns `stepBack = 1` after the stored reply, and the scoring service increments `redis_clock_step_total` (domain §2). The flag stays out of the stored reply, so a replay is unchanged and never counts twice.
 
 ### 3.1 Ending a quiz
 
@@ -135,4 +135,4 @@ The gate is atomic: inside one script the node sees no token, deletes `dirty` (a
 - `api/tests/integration/test_create_quiz.py::test_invalid_quiz_shape_is_rejected` (`timeLimitMs = 0`, no questions, duplicate question IDs).
 - `api/tests/unit/test_memory_store.py::test_join_after_clock_step_back_clamps_reached_time` (the join's board score decodes to total 0 and `reachedRelMs = 0`) and `api/tests/integration/test_join_script.py::test_first_join_board_score_round_trips`; the Python encoder already refuses an unclamped `reachedRelMs = −1` (`test_sort_score_rejects_out_of_range`).
 - `api/tests/integration/test_tick.py::test_publish_on_missing_quiz_returns_not_found` and `::test_mark_dirty_sets_dirty_with_ttl` (the restart nudge and the loop's stop branch).
-- `api/tests/unit/test_memory_store.py::test_clock_step_back_returns_flag_outside_stored_reply` and `api/tests/unit/test_answer_service.py::test_step_back_flag_increments_counter` (the metric path).
+- `api/tests/unit/test_memory_store.py::test_clock_step_back_returns_flag_outside_stored_reply` and `api/tests/unit/app/test_service.py::test_clock_step_back_counts_once_and_never_on_a_replay` (the metric path).
