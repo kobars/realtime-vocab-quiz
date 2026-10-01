@@ -181,7 +181,11 @@ The HTTP endpoints (`/docs` serves the OpenAPI page). A store outage answers 503
 | `POST /tickets`, header `Authorization: Bearer <sessionToken>` | MOCK: 201 `{ticket, expiresInMs}`; 401 for an unknown session |
 | `GET /quizzes/{quizId}` | `{quizId, title, questionCount, status, players}`; `status` is `ended` from the deadline alone. Every unknown ID gets the same 404 body |
 | `POST /admin/quizzes {quizId, timeLimitMs, windowMs}` | MOCK admin: only with `ADMIN_MOCK=1` and the `X-Admin-Token` header, else 404. 201, or 409 when the quiz exists |
+| `POST /admin/quizzes/{quizId}/end` | MOCK admin, same rule: the host's "end now" (Redis §3.1): `end_quiz(host)` marks, a second call announces. 200 `{quizId, status: "ended", endSeq}`, idempotent; 404 for an unknown quiz |
 | `GET /healthz`; `GET /readyz` | Liveness; readiness: 503 when Redis is unreachable |
+| `GET /metrics` | The Prometheus text format: `ws_connections`, `answers_total{result}`, `leaderboard_frames_total`, `tick_duration_seconds`, `redis_clock_step_total` |
+
+Logs are JSON lines on stderr, one per event; each line carries `quiz_id` and `request_id` (`null` when unknown). The request id is the client's `X-Request-ID` when it is safe (1–64 of `A-Za-z0-9_.-`), else a fresh one, and the response echoes it.
 
 ## 9. Limits
 
