@@ -11,5 +11,12 @@ export default defineConfig({
     environment: 'happy-dom',
     include: ['src/**/*.test.ts'],
     css: { include: [/(tokens|main)\.css/] },
+    // make check runs with --coverage; the thresholds are the measured values, rounded down.
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,vue}'],
+      reporter: [['text', { skipFull: true }]],
+      thresholds: { statements: 96, branches: 94, functions: 96, lines: 97 },
+    },
   },
 })

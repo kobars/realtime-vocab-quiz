@@ -47,7 +47,7 @@ check: ## Run every check a change must pass
 	$(call step,contracts drift,uv run --project api --locked python scripts/gen_contracts.py --check)
 	$(call step,eslint,pnpm -C web exec eslint --max-warnings 0 .)
 	$(call step,vue-tsc,pnpm -C web exec vue-tsc --noEmit)
-	$(call step,vitest,$(VITEST))
+	$(call step,vitest,$(VITEST) --coverage)
 	$(call step,web build,pnpm -C web build)
 audit: audit-python audit-web audit-secrets ## Run the dependency audits and the secret scan (needs the network)
 audit-python: ## Audit the locked Python dependencies with pip-audit
