@@ -179,3 +179,62 @@ it('ALREADY_ANSWERED unlocks the choices and rejoins on the same socket', async 
   socket.receive(error('ALREADY_ANSWERED', 'answer'))
   expect([store.pending, socket.sent.at(-1)?.type]).toEqual([null, 'join'])
 })
+
+it('quiz_ended during a gap resync drops the resyncing pill, and the open snapshot that follows keeps it dropped', async () => {
+  const { store, socket } = await playing()
+  socket.receive(board(4, 150))
+  socket.receive(board(6, 290))
+  await wait(125)
+  expect(store.connection).toBe('resyncing')
+  socket.receive({ type: 'quiz_ended', seq: 7, playerCount: 2, entries: [rival, me], you: { rank: 2, score: 0 } })
+  expect([store.phase, store.connection]).toEqual(['results', 'joined'])
+  socket.receive(snapshot(6))
+  expect([store.phase, store.connection]).toEqual(['results', 'joined'])
+})
+
+it('QUESTION_NOT_OPEN on an answer unlocks the choices, so the rejoin re-serves the question and a new answer goes out', async () => {
+  const { store, socket } = await playing()
+  socket.receive(question(0))
+  store.answer(1)
+  socket.receive(error('QUESTION_NOT_OPEN', 'answer'))
+  expect([store.pending, socket.sent.at(-1)?.type]).toEqual([null, 'join'])
+  socket.receive(joined({ cursor: 0, cursorOpen: true }))
+  expect(socket.sent.at(-1)).toEqual({ v: 1, type: 'next', questionIndex: 0 })
+  socket.receive(question(0))
+  store.answer(2)
+  expect(socket.sent.at(-1)).toEqual({ v: 1, type: 'answer', questionIndex: 0, choiceIndex: 2, submissionId: 's-2' })
+})
+
+it('a retried answer keeps the choices locked while the server is busy', async () => {
+  const { store, socket } = await playing()
+  socket.receive(question(0))
+  store.answer(1)
+  socket.receive(error('UNAVAILABLE', 'answer'))
+  expect(store.pending?.submissionId).toBe('s-1')
+})
+
+it('a question that arrives after quiz_ended changes nothing, and no answer goes out', async () => {
+  const { store, socket } = await playing()
+  socket.receive({ type: 'quiz_ended', seq: 4, playerCount: 2, entries: [rival, me], you: { rank: 2, score: 0 } })
+  socket.receive(question(1))
+  expect([store.phase, store.question]).toEqual(['results', null])
+  store.answer(0)
+  expect(socket.sent.filter((message) => message.type === 'answer')).toEqual([])
+})
+
+it('a rejoin during the feedback for the last question keeps feedback, and See my result asks for the result', async () => {
+  const { store, socket } = await playing()
+  socket.receive(question(1))
+  store.answer(1)
+  socket.receive(result(1, 's-1', 140))
+  socket.onclose?.({ code: 1006 })
+  await wait(130)
+  const second = sockets.at(-1) as FakeSocket
+  second.onopen?.()
+  second.receive(joined({ cursor: 1, cursorOpen: false, finished: true, score: 140 }))
+  expect([store.phase, store.finished]).toEqual(['feedback', true])
+  store.next()
+  expect(second.sent.at(-1)).toEqual({ v: 1, type: 'next', questionIndex: 2 })
+  second.receive({ type: 'finished', atSeq: 5, score: 140, rank: 1, playerCount: 2 })
+  expect(store.phase).toBe('finished')
+})

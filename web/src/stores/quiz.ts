@@ -1,7 +1,7 @@
 // AI-ASSISTED: the Pinia quiz store: turns QuizClient events into the state the screens read (UI spec §3, §4).
 import { defineStore } from 'pinia'
 import { computed, reactive, shallowRef, toRefs } from 'vue'
-import { type ClientEvent, QuizClient } from '@/protocol/client'
+import { type ClientEvent, QuizClient, RETRY_ANSWER_ON } from '@/protocol/client'
 import { httpAuthApi } from '@/protocol/identity'
 import type { AnswerResult, Entry, ErrorCode, Joined, ProtocolError, Question, ServerMessage, You } from '@/protocol/types.generated'
 
@@ -108,6 +108,8 @@ export const useQuizStore = defineStore('quiz', () => {
       case 'joined':
         return onJoined(message)
       case 'question':
+        // A reply built before the end that arrives after quiz_ended never undoes it (protocol §3).
+        if (s.ended) return
         s.question = { ...message, deadlineAt: deps.now() + message.remainingMs }
         if (s.pending?.questionIndex !== message.questionIndex) s.pending = null
         setCursor(message.questionIndex, true)
@@ -153,16 +155,20 @@ export const useQuizStore = defineStore('quiz', () => {
     s.quiz = { ...message, endsAt: deps.now() + message.quizRemainingMs }
     Object.assign(s, { myScore: message.score, finished: message.finished, connection: 'resyncing' })
     if (s.ended) return
+    // Feedback for the answered, closed cursor stays, even on the last question (UI spec §4.2).
+    if (!message.cursorOpen && s.phase === 'feedback' && s.lastResult?.questionIndex === message.cursor) return
     if (message.finished) s.phase = 'finished'
     else if (message.cursorOpen) {
       // Ask for the open question again, unless an answer to it is on its way (`next` re-serves closed questions too).
       if (s.pending?.questionIndex !== message.cursor) client.value?.next(message.cursor)
       if (s.phase !== 'question') s.phase = 'intro'
-    } else if (!(s.phase === 'feedback' && s.lastResult?.questionIndex === message.cursor)) s.phase = 'intro'
+    } else s.phase = 'intro'
   }
 
   function onError({ code, message, requestType }: ProtocolError): void {
     s.lastError = { code, message, requestType }
+    // The client settles every answer error but these, so the choices unlock.
+    if (requestType === 'answer' && !RETRY_ANSWER_ON.includes(code)) s.pending = null
     if (code === 'QUIZ_NOT_FOUND') {
       client.value?.stop()
       client.value = null
@@ -171,10 +177,7 @@ export const useQuizStore = defineStore('quiz', () => {
       if (s.connection === 'connecting') s.connection = 'joined'
       end()
     } else if (code === 'UNSUPPORTED_VERSION') client.value?.stop()
-    else if (REJOIN_ON.includes(code) && !s.ended) {
-      if (code === 'ALREADY_ANSWERED') s.pending = null
-      client.value?.rejoin()
-    }
+    else if (REJOIN_ON.includes(code) && !s.ended) client.value?.rejoin()
   }
 
   function standings(seq: number, rows: Entry[], players: number, online: number, you?: You | null): void {
@@ -184,7 +187,11 @@ export const useQuizStore = defineStore('quiz', () => {
   }
 
   const setCursor = (cursor: number, open: boolean): void => void (s.quiz && Object.assign(s.quiz, { cursor, cursorOpen: open }))
-  const end = (): void => void Object.assign(s, { ended: true, pending: null, phase: 'results' })
+  /** The end drops the pending answer and the resync pill: a snapshot read before it never arrives (UI spec §4.3). */
+  function end(): void {
+    Object.assign(s, { ended: true, pending: null, phase: 'results' })
+    if (s.connection === 'resyncing') s.connection = 'joined'
+  }
 
   return { ...toRefs(s), nextIndex, msLeft, join, answer, next, loadPage }
 })
