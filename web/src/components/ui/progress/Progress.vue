@@ -1,7 +1,9 @@
+<!-- AI-ASSISTED: shadcn-vue progress bar, changed to fill against max instead of 100. -->
 <script setup lang="ts">
 import type { ProgressRootProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
+import { computed } from "vue"
 import {
   ProgressIndicator,
   ProgressRoot,
@@ -16,6 +18,13 @@ const props = withDefaults(
 )
 
 const delegatedProps = reactiveOmit(props, "class")
+
+// The share of max that is filled, in percent, kept within 0–100.
+const percent = computed(() => {
+  const max = props.max ?? 100
+  const value = ((props.modelValue ?? 0) / max) * 100
+  return Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0))
+})
 </script>
 
 <template>
@@ -32,7 +41,7 @@ const delegatedProps = reactiveOmit(props, "class")
     <ProgressIndicator
       data-slot="progress-indicator"
       class="bg-primary h-full w-full flex-1 transition-all"
-      :style="`transform: translateX(-${100 - (props.modelValue ?? 0)}%);`"
+      :style="`transform: translateX(-${100 - percent}%);`"
     />
   </ProgressRoot>
 </template>
