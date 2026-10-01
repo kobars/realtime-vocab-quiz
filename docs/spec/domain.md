@@ -41,27 +41,28 @@ Question indexes are 0-based: `0 … N−1`. The player record holds the index o
 
 | State | Meaning | Leaves by |
 |---|---|---|
-| `joined` | Registered with score 0; no question served yet (`cursor = −1`) | `next {questionIndex: 0}` → `served(0)` |
+| `joined` | Registered with score 0; no question served yet (`cursor = −1`) | `next {questionIndex: 0}` → `served(0)`; `next {N}` → `finished` |
 | `served(i)` | Question `i` is open for this player, `now ≤ serveMs + T` | `answer` → `answered(i)`; `next {i+1}` → `skipped(i)` then `served(i+1)`; time passes → `expired(i)` |
 | `expired(i)` | Derived, never stored: question `i` is open and `now > serveMs + T` | `answer` → `answered(i)` with 0 points (late); `next {i+1}` → closed with 0, then `served(i+1)` |
 | `answered(i)` | Closed by the player's first answer (points 0–150) | `next {i+1}` → `served(i+1)`; if `i = N−1` → `finished` |
 | `skipped(i)` | Closed by `next` before any answer; scores 0 | (already moved on to `served(i+1)` or `finished`) |
-| `finished` | The last question is closed | nothing; the player keeps watching the leaderboard |
+| `finished` | The last question is closed, or the player sent `next {N}` | nothing; the player keeps watching the leaderboard |
 
-Every transition happens only while the quiz is `open`. `next {questionIndex: N}` closes an open last question as skipped and marks the player `finished`; it serves nothing. Joining does not serve a question: the player's clock for question 0 starts when the client asks for it, so a slow page load costs nothing. A player whose last question is answered is `finished` at once.
+Every transition happens only while the quiz is `open`. `next {questionIndex: N}` closes the open question (if any) as skipped and marks the player `finished`, from any cursor; it serves nothing, and the questions after the cursor score 0 (§5.1 row 3). Joining does not serve a question: the player's clock for question 0 starts when the client asks for it, so a slow page load costs nothing. A player whose last question is answered is `finished` at once.
 
 ```mermaid
 stateDiagram-v2
     [*] --> joined: join
     joined --> served: next(0)
+    joined --> finished: next(N)
     served --> answered: answer (on time)
-    served --> skipped: next(i+1)
+    served --> skipped: next(i+1) or next(N)
     served --> expired: now > serveMs + T
     expired --> answered: answer (late, 0 points)
-    expired --> skipped: next(i+1) (0 points)
+    expired --> skipped: next(i+1) or next(N) (0 points)
     answered --> served: next(i+1), i+1 < N
     skipped --> served: same request serves i+1 < N
-    answered --> finished: i = N-1
+    answered --> finished: i = N-1, or next(N)
     skipped --> finished: next(N)
     finished --> [*]
 ```
@@ -94,13 +95,17 @@ A skipped question scores 0. A player's total is the sum of the points of their 
 
 ### 5.1 `next {questionIndex: i}`
 
-| Case (player's `cursor = c`) | Result |
-|---|---|
-| `i = c + 1`, question `c` closed (or `c = −1`) | serve `i`: `serveMs = TIME` is stored |
-| `i = c + 1`, question `c` still open (served or expired) | in one script: close `c` as skipped (0 points), then serve `i` |
-| `i = c` (a retry of the serve) | return question `i` with its **stored** `serveMs`; nothing is written |
-| `i = N` | close `c` as skipped if it is open, mark `finished`; nothing is served |
-| any other `i` | `error INVALID_STATE`; nothing is written |
+The rows are checked in this order, and the first match wins (`c` is the player's `cursor`, `N` the number of questions):
+
+| # | Case | Result | Writes |
+|---|---|---|---|
+| 1 | The player is `finished` and `i = N` (a repeat of the finishing request) | the `finished` reply with the current values | nothing |
+| 2 | `i = c` and `c ≥ 0` (a retry of the serve, also after question `c` closed or the player finished) | question `c` with its **stored** `serveMs` | nothing |
+| 3 | `i = N`, from any cursor | close question `c` as skipped (0 points) if it is open, mark the player `finished`; nothing is served | skip, `finished` |
+| 4 | `i = c + 1 < N`, the player is not `finished` | close question `c` as skipped (0 points) if it is open (or expired), then serve `i`: `serveMs = TIME` is stored | skip, serve |
+| 5 | any other `i`, including `i = c + 1` for a `finished` player | `error INVALID_STATE` | nothing |
+
+Row 3 lets a player stop early: the questions after `c` are never served and score 0. Because row 3 comes before row 4, `next {N}` from `c = N−1` finishes the player; it never serves a question `N`. A player who finished stays finished: only rows 1, 2 and 5 can match.
 
 The serve payload never contains the correct choice.
 
