@@ -24,6 +24,7 @@ from quiz.adapters.redis import RedisStore
 from quiz.adapters.ws.endpoint import Gateway
 from quiz.app.service import QuizService
 from quiz.config import Settings
+from quiz.obs.logs import configure_logging
 from quiz.ports.clock import Clock
 from quiz.ports.questions import QuestionBank
 from quiz.ports.store import Limits, Store
@@ -129,6 +130,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
             raise
         await _stop_all(services.shutdown, None)
 
+    configure_logging()
     app = FastAPI(title="Real-time vocabulary quiz", lifespan=lifespan)
     app.state.services = services
     app.state.gateway = gateway = Gateway(services.settings, services.tickets, services.service)
