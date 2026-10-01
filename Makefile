@@ -6,6 +6,11 @@ SHELL := /bin/bash
 step = @printf '==> %s\n' '$(1)'; $(2) || { printf 'make: step "%s" failed\n' '$(1)' >&2; exit 1; }
 PYTEST = cd api && uv run --locked pytest
 VITEST = pnpm -C web exec vitest run
+# Tests and dev tools import dev-group packages and use few of the service's runtime ones, so
+# only their missing (DEP001) and transitive (DEP003) imports are checked. --exclude replaces
+# deptry's default, which skips every folder named tests. pydantic pins pydantic-core to one
+# exact version, so scripts/gen_contracts.py may import it directly.
+DEPTRY_TOOLS = cd api && uv run --locked deptry tests ../scripts ../load --exclude '\.venv' --ignore DEP002,DEP004 --per-rule-ignores DEP003=pydantic_core
 # The image tag; both images build from the repository root, so the root .dockerignore applies.
 IMAGE_TAG ?= dev
 # The API node that the Vite dev server proxies to (web/vite.config.ts) and that server's origins.
@@ -41,6 +46,8 @@ check: ## Run every check a change must pass
 	$(call step,pre-commit hooks,uv run --project api --locked pre-commit run --all-files)
 	$(call step,mypy,cd api && uv run --locked mypy)
 	$(call step,import layers,cd api && uv run --locked lint-imports)
+	$(call step,dependencies,cd api && uv run --locked deptry src)
+	$(call step,tool dependencies,$(DEPTRY_TOOLS))
 	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance" --cov)
 	$(call step,contracts drift,uv run --project api --locked python scripts/gen_contracts.py --check)
 	$(call step,vue-tsc,pnpm -C web exec vue-tsc --noEmit)
