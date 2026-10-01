@@ -17,6 +17,7 @@ from redis.asyncio import Redis
 from quiz.adapters.redis.keys import quiz_keys
 from quiz.adapters.redis.scripts import Reply, Scripts
 from quiz.domain.errors import DomainError, ErrorCode
+from quiz.domain.events import AnswerScored
 from quiz.domain.session import Question
 from quiz.ports import store as port
 from quiz.ports.store import Created, Joined
@@ -92,7 +93,12 @@ class RedisStore:
     async def serve_next(
         self, quiz_id: str, user_id: str, question_index: int, conn_id: str
     ) -> port.Served | port.Finished:
-        raise NotImplementedError
+        reply = await self._run("serve_question", quiz_id, user_id, question_index, conn_id)
+        kind, index, question_id, left, seq = reply[1:6]
+        if kind == "finished":
+            total, rank, count = (int(v or 0) for v in reply[6:9])
+            return port.Finished(int(seq or 0), total, rank, count)
+        return port.Served(int(seq or 0), int(index or 0), str(question_id), int(left or 0))
 
     async def apply_answer(  # noqa: PLR0913, PLR0917 - the port's signature
         self,
@@ -103,7 +109,12 @@ class RedisStore:
         submission_id: str,
         conn_id: str,
     ) -> port.Answered:
-        raise NotImplementedError
+        args = (user_id, question_index, choice_index, submission_id, conn_id)
+        reply = await self._run("score_answer", quiz_id, *args)
+        i, choice, key, correct, late, points, total, seq, back = (int(v or 0) for v in reply[1:10])
+        flags = bool(correct), bool(late)
+        result = AnswerScored(user_id, i, submission_id, choice, key, *flags, points, total, seq)
+        return port.Answered(result, bool(back))
 
     async def standings_page(self, quiz_id: str, offset: int, limit: int) -> port.Page:
         raise NotImplementedError

@@ -19,3 +19,21 @@ end
 local function board_score(total, reached_rel_ms)
   return string.format('%.0f', (1073741824 - total) * 4194304 + reached_rel_ms)
 end
+
+-- The deadline check, then the player and presence checks of docs/spec/redis.md §3, for a meta
+-- read as HMGET startMs, deadlineMs, endedMs, endSeq, ... Returns an error reply, or nil and the
+-- player's serve entry {cursor, serveMs, finished}.
+local function check_player(meta, now, uid, conn)
+  if meta[3] or now >= tonumber(meta[2]) then
+    return {'QUIZ_ENDED', meta[4] or false}
+  end
+  local serve = redis.call('HGET', KEYS[K.serve], uid)
+  local held = redis.call('HGET', KEYS[K.present], uid)
+  if not serve or not held then
+    return {'NOT_JOINED'}
+  end
+  if cjson.decode(held)[1] ~= conn then
+    return {'SESSION_REPLACED'}
+  end
+  return nil, cjson.decode(serve)
+end
