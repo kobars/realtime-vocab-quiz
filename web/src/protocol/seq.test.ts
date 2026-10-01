@@ -25,28 +25,32 @@ const seqs = (frames: { seq: number }[]) => frames.map((frame) => frame.seq)
 /** A tracker that has applied a snapshot at `atSeq`. */
 const trackerAt = (atSeq: number, random = () => 0.5) => {
   const tracker = new SeqTracker(random)
-  tracker.joined(0)
+  tracker.joined()
   tracker.snapshot(atSeq)
   return tracker
 }
 
 describe('SeqTracker', () => {
-  it('sends one resync with the last applied seq on joined, then resets to atSeq', () => {
+  it('sends one resync with the last applied seq on each joined, and keeps L until the snapshot', () => {
     const tracker = trackerAt(4)
-    expect(tracker.joined(9)).toEqual({ apply: [], resync: { lastSeq: 4, delayMs: 0 }, check: null })
+    expect(tracker.joined()).toEqual({ apply: [], resync: { lastSeq: 4, delayMs: 0 }, check: null })
+    expect(tracker.lastSeq).toBe(4)
+    // The link dropped before the snapshot: the next joined resyncs from the same L.
+    expect(tracker.joined().resync).toEqual({ lastSeq: 4, delayMs: 0 })
+    tracker.snapshot(9)
     expect(tracker.lastSeq).toBe(9)
   })
 
   it('asks for no second resync after a reconnect until the snapshot', () => {
     const tracker = trackerAt(4)
-    tracker.joined(9)
+    tracker.joined()
     expect(tracker.broadcast(board(12)).resync).toBeNull()
     expect(tracker.pong(12).resync).toBeNull()
   })
 
   it('resets to snapshot.atSeq, drops older buffered frames and applies newer ones in order', () => {
     const tracker = new SeqTracker()
-    tracker.joined(0)
+    tracker.joined()
     for (const seq of [8, 6, 7, 5]) tracker.broadcast(board(seq))
     const step = tracker.snapshot(6)
     expect(seqs(step.apply)).toEqual([7, 8])
@@ -155,7 +159,7 @@ describe('SeqTracker', () => {
   it('ignores a status open snapshot after quiz_ended, even above the final seq', () => {
     const tracker = trackerAt(4)
     tracker.broadcast(ended(5))
-    tracker.joined(5)
+    tracker.joined()
     expect(tracker.snapshot(7, 'open')).toEqual({ apply: [], resync: null, check: null })
     expect(tracker.lastSeq).toBe(5)
   })
@@ -163,7 +167,7 @@ describe('SeqTracker', () => {
   it('accepts a snapshot with status ended after quiz_ended', () => {
     const tracker = trackerAt(4)
     tracker.broadcast(ended(5))
-    tracker.joined(5)
+    tracker.joined()
     expect(tracker.snapshot(5, 'ended')).toEqual({ apply: [], resync: null, check: null })
     expect(tracker.lastSeq).toBe(5)
   })
