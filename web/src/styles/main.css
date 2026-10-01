@@ -1,0 +1,43 @@
+/* AI-ASSISTED: Tailwind entry: maps the theme onto the tokens so classes never carry raw values. */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import './tokens.css';
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-destructive: var(--destructive);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Tailwind has no theme namespace for these, so they are utilities that read the tokens. */
+@utility shadow-card { box-shadow: var(--shadow-card); }
+@utility duration-fast { transition-duration: var(--motion-fast); }
+@utility duration-base { transition-duration: var(--motion-base); }
+@utility duration-slow { transition-duration: var(--motion-slow); }
+@utility ease-standard { transition-timing-function: var(--ease-standard); }
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  body { @apply bg-background text-foreground font-sans antialiased; }
+}
