@@ -18,7 +18,7 @@ defineProps<{ quiz: QuizPreview }>()
       </Badge>
     </div>
     <p class="text-sm text-muted-foreground tabular-nums">
-      {{ strings.join.preview.questions(quiz.questionCount) }} · {{ strings.join.preview.players(quiz.playerCount) }}
+      {{ strings.join.preview.questions(quiz.questionCount) }} · {{ strings.join.preview.players(quiz.players) }}
     </p>
     <p
       v-if="quiz.status === 'ended'"

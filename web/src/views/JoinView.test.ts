@@ -12,7 +12,7 @@ import { strings } from '@/strings'
 let emit: (event: ClientEvent) => void
 let start: ReturnType<typeof vi.fn>
 let preview: { status: number; body: unknown }
-const open = { title: 'Everyday words', questionCount: 10, status: 'open', playerCount: 3 }
+const open = { title: 'Everyday words', questionCount: 10, status: 'open', players: 3 }
 
 beforeEach(() => {
   setActivePinia(createPinia())

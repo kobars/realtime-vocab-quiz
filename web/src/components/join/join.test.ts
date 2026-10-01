@@ -33,7 +33,7 @@ describe('display name', () => {
 
 describe('quiz preview', () => {
   const reply = (status: number, body: unknown) => vi.fn(async () => new Response(JSON.stringify(body), { status }))
-  const open = { title: 'Everyday words', questionCount: 10, status: 'open', playerCount: 3 }
+  const open = { title: 'Everyday words', questionCount: 10, status: 'open', players: 3 }
 
   it('reads the public quiz information', async () => {
     const fetchFn = reply(200, open)
