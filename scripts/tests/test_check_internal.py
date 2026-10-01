@@ -6,6 +6,7 @@ passes the guard's own scan of the tracked files.
 """
 
 import io
+import os
 import subprocess
 from pathlib import Path
 
@@ -95,13 +96,35 @@ def test_file_mode_scans_contents_and_names(
     assert check_internal.main([str(dirty_name)]) == 1
 
 
-def git(cwd: Path, *args: str) -> None:
+HOSTILE_GIT_CONFIG = "[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n"
+
+
+def git(cwd: Path, *args: str, env: dict[str, str] | None = None) -> None:
+    """Run git isolated from the user's and the system's git configuration."""
     subprocess.run(
         ["git", "-c", "user.name=t", "-c", "user.email=t@noreply.invalid", *args],  # noqa: S607
         cwd=cwd,
         check=True,
         capture_output=True,
+        env={
+            **os.environ,
+            **(env or {}),
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+        },
     )
+
+
+def test_git_helper_ignores_the_global_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hostile = tmp_path / "gitconfig"
+    hostile.write_text(HOSTILE_GIT_CONFIG)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(hostile))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "Add the store port")
 
 
 def test_commits_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,6 +137,35 @@ def test_commits_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert check_internal.main(["--commits", "HEAD~1..HEAD"]) == 1
 
 
+@pytest.mark.parametrize("role", ["AUTHOR", "COMMITTER"])
+def test_commits_mode_scans_author_and_committer_emails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    role: str,
+) -> None:
+    git(tmp_path, "init", "-q")
+    monkeypatch.chdir(tmp_path)
+    noreply = {f"GIT_{role}_EMAIL": "12345+someone@users.noreply.github.com"}
+    git(tmp_path, "commit", "-q", "--allow-empty", "-m", "Add the store port", env=noreply)
+    assert check_internal.main(["--commits", "HEAD"]) == 0
+
+    personal = {f"GIT_{role}_EMAIL": j("someone", "@", "example.org")}
+    git(tmp_path, "commit", "-q", "--allow-empty", "-m", "Add the tick", env=personal)
+    assert check_internal.main(["--commits", "HEAD~1..HEAD"]) == 1
+    assert f"{role.lower()} email: email address" in capsys.readouterr().out
+
+
+def test_empty_commit_range_is_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    git(tmp_path, "init", "-q")
+    git(tmp_path, "commit", "-q", "--allow-empty", "-m", "Add the store port")
+    monkeypatch.chdir(tmp_path)
+    assert check_internal.main(["--commits", ""]) == 2
+    assert "empty" in capsys.readouterr().err
+
+
 def test_bad_commit_range_is_an_error_not_a_crash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -121,3 +173,34 @@ def test_bad_commit_range_is_an_error_not_a_crash(
     monkeypatch.chdir(tmp_path)
     assert check_internal.main(["--commits", "no-such-ref..HEAD"]) == 2
     assert "git failed" in capsys.readouterr().err
+
+
+def test_symlink_target_is_scanned_not_followed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    git(tmp_path, "init", "-q")
+    monkeypatch.chdir(tmp_path)
+    Path("link").symlink_to(j("/", "Users/someone/notes.md"))
+    git(tmp_path, "add", "link")
+    git(tmp_path, "commit", "-q", "-m", "Add a link")
+
+    assert check_internal.main([]) == 1
+    assert "link: symlink target: home path" in capsys.readouterr().out
+    assert check_internal.main(["link"]) == 1
+
+    Path("dirty.md").write_text(j("see K", "-045\n"))
+    Path("relative-link").symlink_to("dirty.md")
+    assert check_internal.main(["relative-link"]) == 0
+
+
+def test_absolute_paths_are_named_relative_to_the_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "home" / "someone" / "repo"
+    (repo / "docs").mkdir(parents=True)
+    git(repo, "init", "-q")
+    readme = repo / "docs" / "README.md"
+    readme.write_text("nothing to see\n")
+    monkeypatch.chdir(repo / "docs")
+    assert check_internal.main([str(readme)]) == 0
+    assert check_internal.main(["README.md"]) == 0
