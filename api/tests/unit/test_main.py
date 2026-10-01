@@ -1,5 +1,6 @@
 # AI-ASSISTED: the composition root: store choice, lifespan hooks and the liveness route.
 import time
+from typing import Literal
 
 import httpx
 import pytest
@@ -93,7 +94,7 @@ def test_module_app_is_built_once_on_first_access(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.parametrize("store", ["memory", "redis"])
-def test_the_store_limits_come_from_the_settings(store: str) -> None:
+def test_the_store_limits_come_from_the_settings(store: Literal["memory", "redis"]) -> None:
     settings = Settings.model_validate(
         {"store": store, "redis_url": "redis://unused:1/0", "tick_ms": 50}
         | {"top_n": 1, "full_list_max": 2}
@@ -104,7 +105,7 @@ def test_the_store_limits_come_from_the_settings(store: str) -> None:
 
 @pytest.mark.parametrize("store", ["memory", "redis"])
 def test_the_resync_limit_runs_on_a_monotonic_clock(
-    monkeypatch: pytest.MonkeyPatch, store: str
+    monkeypatch: pytest.MonkeyPatch, store: Literal["memory", "redis"]
 ) -> None:
     settings = Settings(store=store, redis_url="redis://unused:1/0")
     service = services_of(create_app(settings)).service
