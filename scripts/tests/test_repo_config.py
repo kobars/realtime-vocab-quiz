@@ -1,4 +1,4 @@
-# AI-ASSISTED: checks on the pre-commit hooks and the CI workflow triggers.
+# AI-ASSISTED: checks on the pre-commit hooks, make check and the CI workflow triggers.
 """Tests for the repository's hook and workflow configuration.
 
 The files are read as text, so the tests need no YAML library.
@@ -84,3 +84,10 @@ def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
     # Image scans fail on CRITICAL and HIGH findings that have a fix, for both images.
     assert workflow.count("ignore-unfixed: true") == workflow.count("image-ref:") == 2
     assert workflow.count("severity: CRITICAL,HIGH") == 2
+
+
+def test_make_check_runs_every_pre_commit_hook_on_every_file() -> None:
+    recipe = _block(
+        ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
+    )
+    assert any("pre-commit run --all-files" in line for line in recipe)
