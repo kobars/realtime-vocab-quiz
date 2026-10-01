@@ -139,7 +139,7 @@ export const useQuizStore = defineStore('quiz', () => {
     else if (event.status === 'closed' && event.code !== null) s.blocked = BLOCKED_BY_CLOSE[event.code] ?? s.blocked
   }
 
-  function receive(message: ServerMessage): void {
+  function receive(message: Exclude<ClientEvent, { type: 'status' }>): void {
     if (s.busy !== null && (RETRIED_BY_REPLY[message.type] === s.busy || message.type === 'quiz_ended')) s.busy = null
     switch (message.type) {
       case 'joined':
@@ -186,9 +186,6 @@ export const useQuizStore = defineStore('quiz', () => {
         return
       case 'error':
         return onError(message)
-      case 'pong':
-        // The client consumes pong itself and never emits it.
-        return
     }
   }
 

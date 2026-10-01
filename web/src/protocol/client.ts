@@ -29,7 +29,7 @@ export interface QuizSocket {
  * `closed` follows a final close code or `stop`; `failed` means the client gave up after 10 connects without a `joined`.
  */
 export type ClientEvent =
-  | ServerMessage
+  | Exclude<ServerMessage, { type: 'pong' }>
   | { type: 'status'; status: 'connecting' | 'open' | 'resyncing' | 'reconnecting' | 'closed' | 'failed'; code: number | null }
 
 export interface QuizClientOptions {

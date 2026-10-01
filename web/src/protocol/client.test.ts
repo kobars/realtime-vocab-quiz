@@ -1,5 +1,5 @@
 // AI-ASSISTED: tests for QuizClient: connect, reconnect, seq wiring, liveness and answer retries, on a fake socket and fake timers.
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, expectTypeOf, it, vi } from 'vitest'
 import { type ClientEvent, QuizClient, type QuizClientOptions, type QuizSocket, SNAPSHOT_TIMEOUT_MS } from './client'
 import { httpAuthApi, IDENTITY_TIMEOUT_MS } from './identity'
 import type { ServerMessage } from './types.generated'
@@ -268,6 +268,14 @@ it('sends a resync again each time its snapshot does not arrive in time, until i
   socket.receive({ type: 'snapshot', atSeq: 2, status: 'open' })
   await wait(3 * SNAPSHOT_TIMEOUT_MS)
   expect([resyncs(), leaderboards()]).toEqual([4, [3, 4, 5, 6, 7]])
+})
+
+it('consumes pong itself and never hands it to the UI', async () => {
+  start()
+  const socket = await joinedSocket()
+  socket.receive({ type: 'pong', seq: 0 })
+  expect(events.map((event) => event.type)).not.toContain('pong')
+  expectTypeOf<Extract<ClientEvent, { type: 'pong' }>>().toBeNever()
 })
 
 it('resyncs when the broadcast that a pong announced has not arrived 1 s later', async () => {
