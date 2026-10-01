@@ -30,14 +30,14 @@ Each decision uses the format below. ADRs are never renumbered; a later ADR supe
 
 ## ADR-001 — Build the real-time quiz service, with a Python and FastAPI server; mock identity, questions and admin
 
-<!-- AI-ASSISTED-BEGIN: ADR-001 drafted with Claude Code from the challenge requirements and api/pyproject.toml, checked by hand against the ports in api/src/quiz/ports/ and the mock adapters. -->
+<!-- AI-ASSISTED-BEGIN: ADR-001 drafted with Claude Code from the requirements and api/pyproject.toml, checked by hand against the ports in api/src/quiz/ports/ and the mock adapters. -->
 
 - **Status:** accepted
 - **Date:** 2026-10-01
 
 ### Context
 
-The challenge asks for one core real-time component built for real, with the rest of the system mocked (I-1). A real-time quiz needs a client, a server that holds the sockets and scores answers, a store, an identity provider, a source of questions and some way to create and end quizzes. The part that carries the hard requirements is the path from an answer to a leaderboard on every screen: atomic scoring (AC-4), many joins at once (AC-2) and prompt updates across nodes (AC-6). The server must hold thousands of mostly idle sockets per node, validate every inbound frame strictly, and share its message definitions with a TypeScript client.
+The product needs one real-time quiz service built for real; identity, questions and admin sit behind ports and are mocked. A real-time quiz needs a client, a server that holds the sockets and scores answers, a store, an identity provider, a source of questions and some way to create and end quizzes. The part that carries the hard requirements is the path from an answer to a leaderboard on every screen: atomic scoring (AC-4), many joins at once (AC-2) and prompt updates across nodes (AC-6). The server must hold thousands of mostly idle sockets per node, validate every inbound frame strictly, and share its message definitions with a TypeScript client.
 
 ### Decision
 
@@ -67,7 +67,7 @@ The challenge asks for one core real-time component built for real, with the res
 
 ### Context
 
-The challenge asks for a real-time vocabulary quiz: users join with a quiz ID, scores update in real time, and a leaderboard shows everyone's standings; the scoring must be accurate and consistent (AC-4). It does not say who decides when a question opens and closes. The service runs on two API nodes behind nginx with one Redis, so any rule that needs one node to act at a given moment needs coordination between nodes. The speed bonus depends on elapsed time, and the obvious floating-point formula rounds wrongly for some inputs (for `T = 20,000` it gives 132 instead of 133 at 6,800 ms).
+The product is a real-time vocabulary quiz: users join with a quiz ID, scores update in real time, and a leaderboard shows everyone's standings; the scoring must be accurate and consistent (AC-4). Nothing says who decides when a question opens and closes. The service runs on two API nodes behind nginx with one Redis, so any rule that needs one node to act at a given moment needs coordination between nodes. The speed bonus depends on elapsed time, and the obvious floating-point formula rounds wrongly for some inputs (for `T = 20,000` it gives 132 instead of 133 at 6,800 ms).
 
 ### Decision
 
@@ -241,7 +241,7 @@ One schema in one Redis: every key of a quiz is `quiz:{<quizId>}:<name>`, with t
 
 - **A separate Redis for pub/sub:** isolates fan-out load, but the tick could no longer increment `seq` and publish atomically. Rejected for v1.
 - **Key names without a hash tag:** fine on one Redis, but multi-key scripts fail on a Cluster. Rejected.
-- **A database for final results:** results outlive the TTL, but nothing in the challenge needs that. Out of scope.
+- **A database for final results:** results outlive the TTL, but no current feature needs that. Out of scope.
 
 ### Consequences
 

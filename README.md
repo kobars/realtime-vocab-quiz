@@ -60,7 +60,10 @@ infrastructure files: hadolint (settings in `.hadolint.yaml`), shellcheck,
 and on any `nginx.conf` under `infra/`), Trivy on the configuration (fails on any
 finding) and on both images (fails on a CRITICAL or HIGH finding that has a fix), and
 `scripts/smoke_images.sh`, which runs each image as a non-root user on a read-only
-root filesystem until its healthcheck passes (locally: `make build && scripts/smoke_images.sh`).
+root filesystem until its healthcheck passes, then checks that the web image sends every
+security header of `web/security-headers.conf` (CSP, `nosniff`, `Referrer-Policy`,
+`Permissions-Policy`) on `/` and on a hashed asset (locally:
+`make build && scripts/smoke_images.sh`).
 
 `make help` lists every target; a target whose work has not landed yet prints
 `not yet`.
@@ -69,6 +72,5 @@ root filesystem until its healthcheck passes (locally: `make build && scripts/sm
 
 - [DESIGN.md](DESIGN.md) — the system design
 - [docs/DECISIONS.md](docs/DECISIONS.md) — architecture decision records
-- [docs/TRACEABILITY.md](docs/TRACEABILITY.md) — requirements and their evidence
 - [AGENTS.md](AGENTS.md) — rules for contributors and coding agents
 - [SECURITY.md](SECURITY.md) — how to report a vulnerability, and the security scans
