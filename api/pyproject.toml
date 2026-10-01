@@ -1,0 +1,33 @@
+[project]
+name = "quiz"
+version = "0.1.0"
+description = "Real-time vocabulary quiz service: WebSocket gateway, scoring and live leaderboard."
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.142.2",
+    "prometheus-client>=0.26.0",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
+    "redis[hiredis]>=8.1.0",
+    "structlog>=26.1.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.10.2,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "hypothesis>=6.168.3",
+    "import-linter>=2.15",
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.9",
+]
+load = [
+    "websockets>=17.1",
+]
