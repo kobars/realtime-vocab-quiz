@@ -1,3 +1,4 @@
+# AI-ASSISTED: project metadata, dependency set and build backend chosen at bootstrap.
 [project]
 name = "quiz"
 version = "0.1.0"
