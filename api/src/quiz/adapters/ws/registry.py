@@ -12,7 +12,6 @@ import logging
 from quiz.adapters.ws.sender import Sender
 from quiz.app.service import CLOSE_REPLACED, Connection
 from quiz.contracts import messages as m
-from quiz.domain.errors import DomainError
 from quiz.ports.store import Store
 
 log = logging.getLogger(__name__)
@@ -71,5 +70,5 @@ class Registry:
             del self._grace[key]
         try:
             await self._store.leave(*key, conn_id)
-        except ConnectionError, TimeoutError, DomainError:  # the presence sweep drops it later
+        except Exception:  # a timer has no caller to raise to; the presence sweep drops it later
             log.warning("the leave of a closed connection failed", exc_info=True)
