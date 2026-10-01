@@ -8,6 +8,7 @@ from pydantic import TypeAdapter, ValidationError
 from quiz.contracts.messages import (
     CLIENT_ADAPTER,
     SERVER_ADAPTER,
+    Broadcast,
     ClientMessage,
     ServerMessage,
     message_types,
@@ -119,6 +120,10 @@ def test_every_message_has_examples() -> None:
     assert set(SERVER) == message_types(ServerMessage)
 
 
+def test_message_types_reads_a_plain_union() -> None:
+    assert message_types(Broadcast) == {"leaderboard", "quiz_ended"}
+
+
 @pytest.mark.parametrize("kind", sorted(EXAMPLES))
 def test_valid_message_round_trips(kind: str) -> None:
     raw = frame(kind, EXAMPLES[kind][0])
@@ -146,3 +151,4 @@ def test_message_with_a_missing_field_is_rejected(kind: str) -> None:
 def test_unknown_field_is_rejected(kind: str) -> None:
     with pytest.raises(ValidationError, match="Extra inputs"):
         adapter(kind).validate_json(frame(kind, {**EXAMPLES[kind][0], "extra": 1}))
+
