@@ -1,4 +1,4 @@
-# AI-ASSISTED: target list created at bootstrap; each target's recipe is filled in by the change that implements it.
+# AI-ASSISTED: build, run, test and check targets.
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
@@ -17,7 +17,7 @@ IMAGE_TAG ?= dev
 DEV_API_PORT ?= 8001
 DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
 
-.PHONY: help build up down dev-api demo demo-stop test test-integration check acceptance load contracts new-quiz ai-log audit audit-python audit-web audit-secrets
+.PHONY: help build up down dev-api test test-integration check acceptance contracts audit audit-python audit-web audit-secrets
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -32,10 +32,6 @@ down: ## Stop the development Redis
 	docker compose down
 dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)
 	cd api && ALLOWED_ORIGINS='$(DEV_ORIGINS)' uv run --locked python -m quiz --host 127.0.0.1 --port $(DEV_API_PORT)
-demo: ## Run the full stack with seed data and bots
-	@echo "not yet"
-demo-stop: ## Stop the demo stack
-	@echo "not yet"
 test: ## Run unit, property and contract tests (no Redis)
 	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance")
 	$(call step,vitest,$(VITEST))
@@ -63,12 +59,6 @@ audit-secrets: ## Scan the whole git history for secrets with gitleaks 8.25 or l
 	$(call step,secret scan,gitleaks git --redact --verbose --no-banner .)
 acceptance: ## Run the acceptance tests (ACCEPTANCE_STORE=redis: on a Redis of their own)
 	$(call step,pytest acceptance,$(PYTEST) tests/acceptance)
-load: ## Run the load scenarios with the bot swarm
-	@echo "not yet"
 contracts: ## Regenerate the JSON Schema and TypeScript types
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,contracts,uv run --project api --locked python scripts/gen_contracts.py)
-new-quiz: ## Create a fresh 60-minute quiz and print its ID and URL
-	@echo "not yet"
-ai-log: ## Build AI-LOG.md from the entries in docs/ai-log
-	@echo "not yet"

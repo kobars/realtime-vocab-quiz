@@ -1,4 +1,4 @@
-# AI-ASSISTED: checks on the pre-commit hooks, make check, deptry and the CI workflow triggers.
+# AI-ASSISTED: checks on the pre-commit hooks, make targets, deptry and the CI workflow triggers.
 """Tests for the repository's hook and workflow configuration.
 
 The workflows and the Makefile are read as text; the hook test uses pre-commit's own
@@ -195,3 +195,12 @@ def test_dependency_check_fails_when_a_direct_import_is_undeclared(tmp_path: Pat
     result = _deptry("src", "--config", str(tmp_path / "pyproject.toml"))
     assert result.returncode == 1
     assert "DEP003 'starlette' imported but it is a transitive dependency" in result.stderr
+
+
+def test_every_make_target_is_phony_and_none_is_a_placeholder() -> None:
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    phony = re.search(r"^\.PHONY:(.*)$", makefile, re.MULTILINE)
+    assert phony is not None
+    targets = re.findall(r"^([a-z][a-z-]*):(?!=)", makefile, re.MULTILINE)
+    assert sorted(phony.group(1).split()) == sorted(targets)
+    assert "not yet" not in makefile
