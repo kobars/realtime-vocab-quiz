@@ -29,10 +29,9 @@ are mocks behind ports, and quiz admin is a mock host action (§14).
 
 ## 2. Assumptions and non-goals
 
-**How we read the README.** The README asks for joining by quiz ID, scores that update in real
-time and a leaderboard that updates promptly. It does not say who opens and closes questions.
-We read "real-time" as live scores and one shared live board, and let each player set their own
-pace. A host-led quiz would need one owner per quiz to open and close questions on time, with a
+**Requirements.** Players join by quiz ID, scores update in real time and the leaderboard
+updates promptly; nothing says who opens and closes questions. We read "real-time" as live
+scores and one shared live board, and let each player set their own pace. A host-led quiz would need one owner per quiz to open and close questions on time, with a
 failover story; the self-paced model needs no owner, because no rule depends on a timer
 (ADR-002, ADR-006). Host-led stays future work.
 
@@ -45,14 +44,13 @@ failover story; the self-paced model needs no owner, because no rule depends on 
 | Time | The server decides time on one clock (Redis `TIME`); the client countdown is display only |
 | Clients | Current browsers with WebSocket support; phones and desktops |
 | Store | One Redis 8 (Valkey 8 also works) with AOF `everysec`; a crash can lose about 1 s of answers (§11) |
-| Load (our target, not a README requirement) | Thousands of concurrent sockets over **two API nodes** behind nginx, with a cap of 10,000 sockets per process |
-| Latency (our target, not a README requirement) | C5: p99 below 500 ms from "answer accepted" to "leaderboard delivered", measured by the load bots |
+| Load (our target) | Thousands of concurrent sockets over **two API nodes** behind nginx, with a cap of 10,000 sockets per process |
+| Latency (our target) | C5: p99 below 500 ms from "answer accepted" to "leaderboard delivered", measured by the load bots |
 
-The README asks the system to "perform well even under heavy load" (F-2) without a number. Our
-measurable reading of F-2 is the load and latency rows above, run on one and on two nodes and
-reported in §9. Two nodes are our choice: they make the scale-out claims of §10 real.
+There is no load number in the requirements; our targets are the rows above, run on one and on
+two nodes and reported in §9. Two nodes are our choice: they make the scale-out claims of §10 real.
 
-**Why the design meets each README acceptance criterion.**
+**How the design meets each acceptance criterion.**
 
 | ID | Criterion | How the design meets it |
 |---|---|---|
@@ -179,7 +177,7 @@ TODO: the flow from joining a quiz to a leaderboard update.
 
 ## 6. Technologies and justification
 
-<!-- AI-ASSISTED-BEGIN: drafted with Claude Code from docs/DECISIONS.md, api/pyproject.toml and web/package.json; the versions were read from api/uv.lock and web/pnpm-lock.yaml. -->
+<!-- AI-ASSISTED-BEGIN: drafted with Claude Code from docs/DECISIONS.md, api/pyproject.toml and web/package.json. -->
 
 Each choice is set against the alternative it beat and the cost we accept for it. The ADR
 column points to the full reasoning in [docs/DECISIONS.md](docs/DECISIONS.md).
@@ -196,25 +194,7 @@ column points to the full reasoning in [docs/DECISIONS.md](docs/DECISIONS.md).
 | Packaging and running | Docker Compose: Redis, two API nodes, nginx and the built client | Kubernetes (kind or minikube); processes started by hand | One command brings the whole stack up the same way on any machine with Docker; the tests start their own Redis container on a free port | One host: no autoscaling, rolling deploy or node spread; production would need an orchestrator | — |
 | Build and test tooling | uv and pnpm with committed lock files; pytest, pytest-asyncio and Hypothesis; Vitest | pip or Poetry; npm; unittest | Fast, reproducible installs from the lock files in CI and locally; property tests for the rules that must hold for every input | Two toolchains (Python and Node) to install; the lock files are regenerated, never merged by hand | — |
 
-**Resolved versions.** Read from the lock files (`api/uv.lock`, `web/pnpm-lock.yaml`) and the
-version pins next to them; a lock-file change updates this table.
-
-| Package | Version | Source |
-|---|---|---|
-| Python | 3.14 | `.python-version` |
-| FastAPI / Starlette | 0.142.2 / 1.7.0 | `api/uv.lock` |
-| uvicorn (uvloop, httptools, websockets) | 0.54.0 (0.23.0, 0.8.0, 17.1) | `api/uv.lock` |
-| Pydantic / pydantic-settings | 2.13.5 / 2.15.0 | `api/uv.lock` |
-| redis-py (hiredis) | 8.1.0 (3.4.2) | `api/uv.lock` |
-| prometheus-client | 0.26.0 | `api/uv.lock` |
-| structlog | 26.1.0 | `api/uv.lock` |
-| pytest / Hypothesis | 9.1.1 / 6.168.3 | `api/uv.lock` |
-| Redis server | `redis:8-alpine` | `compose.yaml` |
-| Node / pnpm | 24 / 11.20.0 | `.nvmrc`, `web/package.json` |
-| Vue / Vue Router / Pinia | 3.5.43 / 5.3.1 / 4.0.3 | `web/pnpm-lock.yaml` |
-| Vite / TypeScript | 8.3.1 / 6.0.3 | `web/pnpm-lock.yaml` |
-| Tailwind CSS / reka-ui | 4.3.3 / 2.10.5 | `web/pnpm-lock.yaml` |
-| Vitest | 5.0.2 | `web/pnpm-lock.yaml` |
+Exact versions: `api/uv.lock` and `web/pnpm-lock.yaml`.
 
 <!-- AI-ASSISTED-END -->
 
@@ -371,7 +351,7 @@ every quiz runs there.
    Above 200 players the frame shrinks to the top 50, and each other player gets their own
    `rank_update`.
 6. **What changes at 100,000 players.** We chose a design sized for thousands of sockets on two
-   nodes over one built for 100,000 now, because the README asks for a working real-time quiz,
+   nodes over one built for 100,000 now, because the goal is a working real-time quiz,
    and we accept these changes for 100,000 players:
    - Sockets: at least 10 processes at the 10,000 cap, more if the measured per-node number is
      lower, and a load balancer layer instead of one nginx, which would hold 200,000 sockets
