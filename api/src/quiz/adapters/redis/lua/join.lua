@@ -37,4 +37,4 @@ local open = cursor >= 0 and finished == 0
   and redis.call('HEXISTS', KEYS[K.answered], uid .. '|' .. cursor) == 0
 return {'ok', tonumber(redis.call('GET', KEYS[K.seq])) or 0, cursor, open and 1 or 0, finished,
   tonumber(redis.call('HGET', KEYS[K.totals], uid)), tonumber(meta[5]), tonumber(meta[6]),
-  deadline - now, replaced}
+  deadline - now, redis.call('HGET', KEYS[K.names], uid), replaced}
