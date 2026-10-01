@@ -51,7 +51,7 @@ check: ## Run every check a change must pass
 	$(call step,web build,pnpm -C web build)
 audit: audit-python audit-web audit-secrets ## Run the dependency audits and the secret scan (needs the network)
 audit-python: ## Audit the locked Python dependencies with pip-audit
-	$(call step,python audit,set -o pipefail; uv export --project api --locked --no-emit-project | uvx pip-audit@2.10.1 -r /dev/stdin --disable-pip --strict)
+	$(call step,python audit,set -o pipefail; uv export --project api --locked --all-groups --no-emit-project | uvx pip-audit@2.10.1 -r /dev/stdin --disable-pip --strict)
 audit-web: ## Audit the production web dependencies (high severity and above)
 	$(call step,web audit,pnpm -C web audit --prod --audit-level high)
 audit-secrets: ## Scan the whole git history for secrets with gitleaks 8.25 or later (.gitleaks.toml)
