@@ -42,13 +42,8 @@ def _docker(*args: str, check: bool = True) -> str:
     return run.stdout
 
 
-def _start_redis() -> tuple[str, str]:
-    """Run redis:8-alpine on a free host port that Docker picks; return (container, url)."""
-    run = ["run", "-d", "--rm", "-p", "127.0.0.1::6379", "redis:8-alpine"]
-    container = _docker(*run, "redis-server", "--appendonly", "yes").strip()
-    port = _docker("port", container, "6379/tcp").splitlines()[0].rsplit(":", 1)[1]
-    url = f"redis://127.0.0.1:{port}/0"
-    deadline = time.monotonic() + 30
+def _wait_ready(url: str, wait_s: float) -> None:
+    deadline = time.monotonic() + wait_s
     while True:
         try:
             with SyncRedis.from_url(url) as client:
@@ -58,7 +53,24 @@ def _start_redis() -> tuple[str, str]:
                 raise
             time.sleep(0.1)
         else:
-            return container, url
+            return
+
+
+def _start_redis(wait_s: float = 30) -> tuple[str, str]:
+    """Run redis:8-alpine on a free host port that Docker picks; return (container, url).
+
+    ``--rm`` acts only once the container stops, so any failure after ``docker run`` removes it.
+    """
+    run = ["run", "-d", "--rm", "-p", "127.0.0.1::6379", "redis:8-alpine"]
+    container = _docker(*run, "redis-server", "--appendonly", "yes").strip()
+    try:
+        port = _docker("port", container, "6379/tcp").splitlines()[0].rsplit(":", 1)[1]
+        url = f"redis://127.0.0.1:{port}/0"
+        _wait_ready(url, wait_s)
+    except BaseException:
+        _docker("rm", "-f", container, check=False)
+        raise
+    return container, url
 
 
 @pytest.fixture(scope="session")
@@ -67,6 +79,8 @@ def redis_url() -> Iterator[str]:
     if url := os.environ.get("REDIS_URL"):
         if urlparse(url).port == DEV_REDIS_PORT:
             pytest.fail(f"REDIS_URL points at the dev Redis on port {DEV_REDIS_PORT}; unset it")
+        with SyncRedis.from_url(url) as client:  # WAITAOF needs AOF; a CI service starts without
+            client.config_set("appendonly", "yes")
         yield url
         return
     container, url = _start_redis()
