@@ -1,4 +1,4 @@
-# AI-ASSISTED: error codes of docs/spec/protocol.md §6 raised by the state machine and the store.
+# AI-ASSISTED: error codes of docs/spec/protocol.md §7 raised by the state machine and the store.
 from enum import StrEnum
 
 
@@ -14,8 +14,13 @@ class ErrorCode(StrEnum):
 
 
 class DomainError(Exception):
-    """A refused command; the state it was applied to is unchanged."""
+    """A refused command; the state it was applied to is unchanged.
 
-    def __init__(self, code: ErrorCode, message: str) -> None:
+    A ``QUIZ_ENDED`` refusal carries ``end_seq``: the seq of ``quiz_ended``, or None while no
+    end was announced, in which case the caller runs ``end_quiz`` (docs/spec/redis.md §3.1).
+    """
+
+    def __init__(self, code: ErrorCode, message: str, *, end_seq: int | None = None) -> None:
         super().__init__(f"{code}: {message}")
         self.code = code
+        self.end_seq = end_seq
