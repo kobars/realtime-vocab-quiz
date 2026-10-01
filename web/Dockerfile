@@ -17,11 +17,13 @@ RUN pnpm build
 
 FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
 # Unknown paths fall back to index.html, so client routes survive a reload; hashed assets cache long.
+# No $uri/ step: a Vite build has no directory indexes, and it would 301 a directory path.
 COPY <<'CONF' /etc/nginx/conf.d/default.conf
 server {
     listen 8080;
     server_name _;
     server_tokens off;
+    absolute_redirect off;
     root /usr/share/nginx/html;
     index index.html;
 
@@ -32,7 +34,7 @@ server {
 
     location / {
         add_header Cache-Control "no-cache";
-        try_files $uri $uri/ /index.html;
+        try_files $uri /index.html;
     }
 }
 CONF
