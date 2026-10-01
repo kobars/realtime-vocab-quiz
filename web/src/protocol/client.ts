@@ -1,8 +1,8 @@
-// AI-ASSISTED: QuizClient owns the socket: connect with a fresh ticket, reconnect through Backoff, SeqTracker wiring and liveness (protocol spec §3, §7, §9).
+// AI-ASSISTED: QuizClient owns the socket: connect with a fresh ticket, reconnect through Backoff, SeqTracker wiring, liveness and answer retries (protocol spec §2.1, §3, §7, §9).
 import { Backoff, OPEN_TIMEOUT_MS } from './backoff'
 import { type AuthApi, connectTicket } from './identity'
 import { SeqTracker, type SeqStep } from './seq'
-import type { ClientMessage, ServerMessage } from './types.generated'
+import type { Answer, ClientMessage, ErrorCode, ServerMessage } from './types.generated'
 
 export const SUBPROTOCOL = 'quiz.v1'
 export const PING_INTERVAL_MS = 25_000
@@ -10,6 +10,8 @@ export const LIVENESS_TIMEOUT_MS = 50_000
 export const RETRY_AFTER_MS = 1_000
 /** A failed or slow open, a failed ticket request and a silent link all count as this close code. */
 const DEAD_LINK = 1006
+/** Answer errors that mean "not done, send it again"; every other answer error settles the answer. */
+const RETRY_ANSWER_ON: readonly ErrorCode[] = ['RATE_LIMITED', 'UNAVAILABLE']
 
 /** The part of the browser WebSocket that the client uses. */
 export interface QuizSocket {
@@ -49,6 +51,12 @@ export class QuizClient {
   private displayName = ''
   /** The `lastSeq` of the last resync sent, repeated when the server rate-limits it. */
   private lastResync = 0
+  /** Answers the server has not settled yet, by `submissionId`, oldest first; kept across reconnects. */
+  private readonly unsettled = new Map<string, Answer>()
+  /** The `submissionId`s sent on the current socket and not answered yet, oldest first. */
+  private inFlight: string[] = []
+  /** True once the current socket got `joined`: answers go out at once instead of waiting. */
+  private joined = false
   /** Timers of the current connection; a disconnect cancels them all. */
   private readonly timers = new Set<Timer>()
   private liveness: Timer | undefined
@@ -72,11 +80,23 @@ export class QuizClient {
     this.quizId = quizId
     this.displayName = displayName
     this.stopped = false
+    this.unsettled.clear()
     void this.connect()
   }
 
   next(questionIndex: number): void {
     this.send({ v: 1, type: 'next', questionIndex })
+  }
+
+  /**
+   * Answers question `questionIndex` with one new `submissionId`, which it returns. The client sends that same
+   * answer until the server settles it: again after each reconnect, and 1 s after `RATE_LIMITED` or `UNAVAILABLE`.
+   */
+  answer(questionIndex: number, choiceIndex: number): string {
+    const submissionId = crypto.randomUUID()
+    this.unsettled.set(submissionId, { v: 1, type: 'answer', questionIndex, choiceIndex, submissionId })
+    if (this.joined) this.sendAnswer(submissionId)
+    return submissionId
   }
 
   /** The user left: close with 1000 and never reconnect. */
@@ -119,6 +139,14 @@ export class QuizClient {
         // The resync goes out before the UI hears of the join.
         this.backoff.joined(this.o.now())
         this.run(this.tracker.joined(message.atSeq))
+        if (!this.joined) {
+          this.joined = true
+          for (const submissionId of this.unsettled.keys()) this.sendAnswer(submissionId)
+        }
+        break
+      case 'answer_result':
+        this.unsettled.delete(message.submissionId)
+        this.inFlight = this.inFlight.filter((id) => id !== message.submissionId)
         break
       case 'leaderboard':
       case 'quiz_ended':
@@ -133,6 +161,7 @@ export class QuizClient {
           const lastSeq = this.lastResync
           this.after(RETRY_AFTER_MS, () => this.send({ v: 1, type: 'resync', lastSeq }))
         }
+        if (message.requestType === 'answer') this.answerFailed(message.code)
         break
     }
     this.emit(message)
@@ -148,6 +177,21 @@ export class QuizClient {
     }
     if (resync.delayMs === 0) send()
     else this.after(resync.delayMs, send)
+  }
+
+  private sendAnswer(submissionId: string): void {
+    const answer = this.unsettled.get(submissionId)
+    if (answer === undefined) return
+    this.inFlight.push(submissionId)
+    this.send(answer)
+  }
+
+  /** An answer error carries no `submissionId`: the server replies in order, so it belongs to the oldest in flight. */
+  private answerFailed(code: ErrorCode): void {
+    const submissionId = this.inFlight.shift()
+    if (submissionId === undefined) return
+    if (RETRY_ANSWER_ON.includes(code)) this.after(RETRY_AFTER_MS, () => this.sendAnswer(submissionId))
+    else this.unsettled.delete(submissionId)
   }
 
   private send(message: ClientMessage): void {
@@ -177,10 +221,15 @@ export class QuizClient {
     if (wait !== null) this.after(wait, () => void this.connect())
   }
 
-  /** Drops the socket and its timers: the open timeout, a pending gap resync, a resync retry, ping and liveness. */
+  /**
+   * Drops the socket and its timers: the open timeout, a pending gap resync, a resync or answer retry, ping and
+   * liveness. Unsettled answers stay, for the next `joined`.
+   */
   private disconnect(): void {
     if (this.socket !== null) this.socket.onopen = this.socket.onmessage = this.socket.onclose = null
     this.socket = null
+    this.joined = false
+    this.inFlight = []
     for (const timer of this.timers) clearTimeout(timer)
     this.timers.clear()
     clearInterval(this.ping)
