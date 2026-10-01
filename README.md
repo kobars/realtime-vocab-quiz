@@ -48,9 +48,10 @@ used; `api/tests`, `scripts/` and `load/` import only declared packages); pytest
 (without the `integration` and `acceptance` markers) with a branch-coverage
 floor (`api/pyproject.toml`); the contract drift check; vue-tsc; Vitest with coverage thresholds
 (`web/vitest.config.ts`); and the client build (`pnpm -C web build`). Every pull
-request runs the same gate in GitHub Actions (`.github/workflows/ci.yml`), plus the
-Redis integration tests and the guard on the commit messages and the PR text (run
-again when the PR text is edited). A weekly job (`.github/workflows/links.yml`)
+request and every push to `main` runs the same gate in GitHub Actions
+(`.github/workflows/ci.yml`), plus the Redis integration tests. Each workflow ends in
+one gate job (`ci-required`, `security-required`, `containers-required`) that fails
+when a job it needs fails or is cancelled. A weekly job (`.github/workflows/links.yml`)
 also checks the external links.
 Another workflow (`.github/workflows/containers.yml`) checks the container and
 infrastructure files: hadolint (settings in `.hadolint.yaml`), shellcheck,
