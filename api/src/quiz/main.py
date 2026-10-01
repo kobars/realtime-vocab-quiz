@@ -15,6 +15,7 @@ from quiz.adapters.memory import MemoryStore
 from quiz.adapters.mock_auth import MemoryTicketStore, RedisTicketStore
 from quiz.adapters.mock_questions import MockQuestionBank
 from quiz.adapters.redis import RedisStore
+from quiz.adapters.ws.endpoint import Gateway
 from quiz.app.service import QuizService
 from quiz.config import Settings
 from quiz.ports.clock import Clock
@@ -79,6 +80,8 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
 
     app = FastAPI(title="Real-time vocabulary quiz", lifespan=lifespan)
     app.state.services = services
+    app.state.gateway = gateway = Gateway(services.settings, services.tickets, services.service)
+    app.add_api_websocket_route("/ws", gateway.endpoint)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
