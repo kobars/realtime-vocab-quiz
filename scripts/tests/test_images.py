@@ -113,8 +113,15 @@ def test_api_image_pings_every_heartbeat_and_drops_a_socket_without_a_pong_by_th
     assert config.ws_ping_interval == config.ws_ping_timeout == heartbeat_s == 25
 
 
+@pytest.mark.parametrize(
+    ("argv", "address"),
+    [
+        ([], ("0.0.0.0", 8000)),  # noqa: S104 - the image's command
+        (["--host", "127.0.0.1", "--port", "8001"], ("127.0.0.1", 8001)),  # make dev-api
+    ],
+)
 def test_python_m_quiz_serves_the_module_app_with_the_server_config(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], address: tuple[str, int]
 ) -> None:
     started: list[uvicorn.Config] = []
 
@@ -126,7 +133,7 @@ def test_python_m_quiz_serves_the_module_app_with_the_server_config(
             started.append(self.config)
 
     monkeypatch.setattr(uvicorn, "Server", Server)
-    quiz_main.main()
+    quiz_main.main(argv)
     (config,) = started
     assert config.app is module_app()
-    assert (config.host, config.port, config.ws_ping_interval) == ("0.0.0.0", 8000, 25)  # noqa: S104
+    assert (config.host, config.port, config.ws_ping_interval) == (*address, 25)
