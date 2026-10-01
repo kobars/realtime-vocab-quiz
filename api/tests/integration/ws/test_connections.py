@@ -191,18 +191,25 @@ def open_ws(client: TestClient, ticket: str | None) -> Any:  # noqa: ANN401
     return client.websocket_connect(f"/ws?ticket={ticket}", ["quiz.v1"], headers={"origin": ORIGIN})
 
 
+def reply(ws: Any) -> dict[str, Any]:  # noqa: ANN401
+    """The next message that is not a leaderboard: the tick may relay one at any time."""
+    while (msg := ws.receive_json())["type"] == "leaderboard":
+        pass
+    return cast("dict[str, Any]", msg)
+
+
 def test_a_second_socket_of_the_user_closes_the_first_with_4001() -> None:
     with quiz_client() as client:
         first, second = tickets(client, 2)
         with open_ws(client, first) as old, open_ws(client, second) as new:
             old.send_json(JOIN)
-            assert old.receive_json()["type"] == "joined"
+            assert reply(old)["type"] == "joined"
             new.send_json(JOIN)
-            assert new.receive_json()["type"] == "joined"
-            assert old.receive_json()["code"] == "SESSION_REPLACED"
+            assert reply(new)["type"] == "joined"
+            assert reply(old)["code"] == "SESSION_REPLACED"
             assert old.receive()["code"] == 4001
             new.send_text(PING)
-            assert new.receive_json()["type"] == "pong"
+            assert reply(new)["type"] == "pong"
 
 
 def test_a_drop_leaves_after_the_grace_unless_the_player_comes_back() -> None:

@@ -24,10 +24,11 @@ from quiz.adapters.redis import RedisStore
 from quiz.adapters.ws.endpoint import Gateway
 from quiz.app.service import QuizService
 from quiz.config import Settings
+from quiz.fanout.tick import Ticker
 from quiz.obs.logs import configure_logging
 from quiz.ports.clock import Clock
 from quiz.ports.questions import QuestionBank
-from quiz.ports.store import Limits, Store
+from quiz.ports.store import FeedStore, Limits
 from quiz.ports.tickets import TicketStore
 
 Hook = Callable[[], Awaitable[None]]
@@ -64,7 +65,7 @@ def redis_probe(client: Redis) -> Probe:
 class Services:
     settings: Settings
     clock: Clock
-    store: Store
+    store: FeedStore
     tickets: TicketStore
     bank: QuestionBank
     service: QuizService
@@ -143,6 +144,9 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         services.settings, services.tickets, services.service, services.store
     )
     app.add_api_websocket_route("/ws", gateway.endpoint)
+    ticker = Ticker(services.store, gateway.registry, services.settings.node_id)
+    gateway.registry.watcher = ticker
+    services.shutdown.append(ticker.stop)  # stop hooks run in reverse: before the store closes
     s, ttl_ms = services.settings, TICKET_TTL_S * 1000
     token = s.admin_token.get_secret_value() if s.admin_mock and s.admin_token else None
     deps = HttpDeps(services.store, services.tickets, services.bank, services.ready, ttl_ms)
