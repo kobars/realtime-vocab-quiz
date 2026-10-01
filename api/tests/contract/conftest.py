@@ -16,6 +16,12 @@ from quiz.ports.store import Store
 MAX_ADVANCE_MS = 1_000
 # Far above the 200 ms tick, so no slow step lets a held token lapse; a busy publish cuts it back.
 HOLD_TICK_MS = 10_000
+# The deadline becomes the server's now in one round trip, so the next script often reads the
+# same ms: the exact deadline.
+DEADLINE_NOW_LUA = """
+local t = redis.call('TIME')
+redis.call('HSET', KEYS[1], 'deadlineMs', t[1] .. string.format('%03d', math.floor(t[2] / 1000)))
+"""
 
 
 class Harness(NamedTuple):
@@ -58,10 +64,7 @@ async def real_advance(ms: int) -> None:
 
 def redis_harness(store: Store, client: Redis, prefix: str) -> Harness:
     async def pass_deadline(quiz_id: str) -> None:
-        seconds, micros = await client.time()
-        await client.hset(
-            quiz_keys(quiz_id, prefix).meta, "deadlineMs", seconds * 1000 + micros // 1000
-        )
+        await client.eval(DEADLINE_NOW_LUA, 1, quiz_keys(quiz_id, prefix).meta)
 
     async def hold_tick(quiz_id: str) -> None:
         await client.set(quiz_keys(quiz_id, prefix).tick, "held", px=HOLD_TICK_MS)

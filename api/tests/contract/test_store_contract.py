@@ -20,9 +20,7 @@ type MoveStart = Callable[[str, int], Awaitable[None]]
 QUESTIONS = tuple(Question(f"q{i}", i % 4) for i in range(3))
 WINDOW_MS, LIMIT_MS = 600_000, 20_000
 SHORT_WINDOW_MS = 100  # far below LIMIT_MS, and short enough for a real clock to wait out
-# On a real clock pass_deadline makes the deadline the server's now: about every other try,
-# the next script reads that same ms.
-DEADLINE_TRIES = 50
+DEADLINE_TRIES = 30  # on a real clock, about every other pass_deadline hits the deadline ms itself
 
 
 async def refused(call: Awaitable[object]) -> ErrorCode:
