@@ -26,7 +26,7 @@ Switching the look later means replacing the token values in one file (§7.3); n
 | `/q/:quizId` | Short share link; redirects to `/?quiz=:quizId`, the join screen with the quiz ID filled in |
 | any other path | "Page not found" with a link back to `/` |
 
-- **Phones (below 1024 px):** one column. A two-tab switch at the top, "Quiz" and "Leaderboard", with my rank and score always visible in the header, so the leaderboard tab is never needed to know where I stand.
+- **Phones (below 1024 px):** one column. A two-tab switch at the top, "Quiz" and "Leaderboard", with my rank and score always visible in the header, so the leaderboard tab is never needed to know where I stand. The switch is a WAI-ARIA tab list: each tab controls its panel, only the selected tab is in the tab order, and the arrow keys, `Home` and `End` move the selection and the focus (§6.1). Both panels stay mounted, so a question on the hidden Quiz tab keeps its countdown and its pending answer. "Quiz" is selected when the screen opens.
 - **Desktops (1024 px and up):** two columns: the quiz on the left (at most 640 px wide), the live leaderboard on the right (360 px), both visible at once.
 - **Header (every quiz screen):** the quiz ID, the question counter ("Question 3 of 10"), my score, my rank ("#12 of 340"; its sources are in §3.5), and the connection pill (§3.7) while the connection is not `live`.
 - All copy lives in one strings module in `web/src/`, so a translation can be added later.
@@ -237,7 +237,8 @@ Nothing is lost: every animated change also has a static end state that carries 
 
 | Key | Where | Does |
 |---|---|---|
-| `1`–`4` | Question, while no text field has the focus | Chooses that answer (the same as clicking it) |
+| `1`–`4` | Question, while no text field has the focus and the question is shown (not under the phone's Leaderboard tab) | Chooses that answer (the same as clicking it) |
+| `←`, `→`, `Home`, `End` | The phone's tab list (§2) | Selects the previous, next, first or last tab and moves the focus to it |
 | `Enter` or `Space` | Feedback | Presses the focused "Next question" button |
 | `Tab`, `Shift+Tab` | Everywhere | Moves through the focus order (§6.2) |
 | `Escape` | "Show all players" panel | Closes it and returns the focus to its button |
@@ -246,7 +247,7 @@ The key hints are visible on the choice buttons, so the shortcut is discoverable
 
 ### 6.2 Focus order and focus moves
 
-- Focus order on a quiz screen: the skip link "Skip to quiz", the header, the quiz column (prompt, choices 1–4 in reading order, then "Skip" when shown), the leaderboard.
+- Focus order on a quiz screen: the skip link "Skip to quiz", the header, on phones the selected tab (then only its panel), the quiz column (prompt, choices 1–4 in reading order, then "Skip" when shown), the leaderboard.
 - When the screen changes, focus moves on purpose: to the "Start" button on the intro, to the prompt heading (`tabindex="-1"`) on a new question, to "Next question" on feedback, and to the results heading on results. Focus is never left on an element that disappeared.
 - Every focusable element shows the focus ring (§7.2): a 2 px solid ring with a 2 px offset, at least 3:1 against both backgrounds, drawn with `:focus-visible`.
 
