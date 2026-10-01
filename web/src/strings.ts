@@ -82,6 +82,7 @@ export const strings = {
     finished: 'You finished!',
     provisional: 'Provisional',
     rank: (rank: number, players: number) => `Rank #${rank} of ${players}`,
+    rankLive: (rank: number, players: number) => `Rank ${rank} of ${players}`,
     canChange: (time: string) => `Your rank can still change until the quiz ends in ${time}.`,
     points: (score: number) => `${score} points`,
     title: 'Final results',
