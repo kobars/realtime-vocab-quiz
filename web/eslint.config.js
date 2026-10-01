@@ -15,4 +15,12 @@ export default defineConfig(
     // vue-tsc already reports undefined names; core no-undef does not know the DOM globals.
     rules: { 'no-undef': 'off' },
   },
+  {
+    // Copied in by the shadcn-vue CLI: one-word names and optional props without defaults.
+    files: ['src/components/ui/**/*.vue'],
+    rules: {
+      'vue/multi-word-component-names': 'off',
+      'vue/require-default-prop': 'off',
+    },
+  },
 )
