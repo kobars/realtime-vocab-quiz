@@ -7,6 +7,7 @@ The files are read as text, so the tests need no Docker daemon.
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,30 @@ def test_web_image_serves_dist_from_unprivileged_nginx_with_an_spa_fallback() ->
     assert not any("$uri/" in line for line in try_files)
     assert "COPY --from=builder /web/dist /usr/share/nginx/html" in runtime
     assert any(line.startswith("HEALTHCHECK") for line in runtime)
+
+
+def test_web_image_sends_the_security_headers_from_every_location_that_adds_headers() -> None:
+    """nginx drops the inherited add_header lines in a location that sets its own."""
+    _, runtime = _stages(ROOT / "web" / "Dockerfile")
+    assert "COPY web/security-headers.conf /etc/nginx/security-headers.conf" in runtime
+    conf = (ROOT / "web" / "nginx.conf").read_text(encoding="utf-8")
+    locations = [block.split("}", 1)[0] for block in conf.split("location ")[1:]]
+    with_headers = [block for block in locations if "add_header" in block]
+    assert with_headers
+    for block in with_headers:
+        assert "include /etc/nginx/security-headers.conf;" in block, block
+    snippet = (ROOT / "web" / "security-headers.conf").read_text(encoding="utf-8").splitlines()
+    headers = {line.split()[1]: line for line in snippet if line.startswith("add_header ")}
+    assert set(headers) == {
+        "Content-Security-Policy",
+        "X-Content-Type-Options",
+        "Referrer-Policy",
+        "Permissions-Policy",
+    }
+    # The quoted form is the one smoke_images.sh parses; always: a missing asset's 404 has them too.
+    assert all(re.fullmatch(r'add_header \S+ "[^"]+" always;', line) for line in headers.values())
+    assert "frame-ancestors 'none'" in headers["Content-Security-Policy"]
+    assert "unsafe-inline" not in headers["Content-Security-Policy"]
 
 
 def test_runtime_stages_take_the_os_security_fixes_and_end_as_a_non_root_user() -> None:
