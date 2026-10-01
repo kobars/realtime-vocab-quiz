@@ -255,6 +255,8 @@ def parse(argv: list[str] | None = None) -> Options:
     finite = math.isfinite(a.ramp + a.duration)  # also an overflowing sum
     if not finite or a.duration <= 0 or a.ramp < 0 or a.think_ms < 0 or a.timeout_ms <= 0:
         cli.error("need finite --duration > 0 and --ramp >= 0, --think-ms >= 0, --timeout-ms > 0")
+    if not re.fullmatch(r"[\w.-]+", a.label, re.ASCII):
+        cli.error("--label may hold only letters, digits, '_', '.' and '-'")
     rest = {k: v for k, v in vars(a).items() if k not in {"url", "quiz_ids", "quizzes"}}
     return Options(url=a.url.rstrip("/"), quiz_ids=ids[: a.quizzes], **rest)
 
@@ -271,7 +273,8 @@ def save(result: dict[str, Any], label: str) -> Path:
 def main(argv: list[str] | None = None) -> int:
     opts = parse(argv)
     result = run(opts)
-    print(report(result), f"\nwritten: {save(result, opts.label)}", sep="")
+    print(report(result))  # before the save: a failed write keeps the report
+    print(f"written: {save(result, opts.label)}")
     return 0 if result["valid"] else 1
 
 

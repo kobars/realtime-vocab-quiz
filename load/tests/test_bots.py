@@ -15,6 +15,7 @@ from pydantic import SecretStr
 
 import bots
 from bots import BOARD_HEAD, converse, create_quizzes, main, parse, play, swarm
+from latency import summary
 from player import DEAD_LINK, NORMAL, OVERLOAD, Backoff, BoardWait, Player, Recorder
 from quiz.config import Settings
 from quiz.contracts.codec import encode_broadcast
@@ -91,8 +92,9 @@ def test_the_cli_checks_its_options() -> None:
     opts = parse(["--url", "https://quiz.example/api/", "--quizzes", "2", "--bots", "4"])
     assert opts.quiz_ids == ("VOCAB-42", "BIZ-20")
     assert opts.ws_url == "wss://quiz.example/ws"
-    for bad in ("--quizzes 4", "--procs 11", "--accuracy 1.5", "--duration -1", "--duration 0",
-                "--ramp nan", "--duration inf", "--think-ms -3", "--timeout-ms 0"):  # fmt: skip
+    for bad in ("--quizzes 4", "--bots 0", "--procs 11", "--accuracy 1.5", "--duration -1",
+                "--duration 0", "--ramp nan", "--duration inf", "--think-ms -3", "--timeout-ms 0",
+                "--label baseline/2proc"):  # fmt: skip
         with pytest.raises(SystemExit):
             parse(bad.split())
 
@@ -231,6 +233,19 @@ async def test_a_swarm_plays_whole_quizzes_against_the_app(app_url: str) -> None
     assert len(rec.answer_ms) == rec.counts["answers"]
     for failure in ("answer_timeout", "answer_missing", "failed_opens", "reconnects"):
         assert rec.counts[failure] == 0
+
+
+def test_the_report_is_printed_before_the_result_is_saved(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def full_disk(*_: object) -> Path:
+        raise OSError
+
+    monkeypatch.setattr(bots, "run", lambda _: summary(Recorder(), [], 1))
+    monkeypatch.setattr(bots, "save", full_disk)
+    with pytest.raises(OSError):  # noqa: PT011 - any write error
+        main([])
+    assert "INVALID: no answer samples" in capsys.readouterr().out
 
 
 async def test_quizzes_are_created_or_found_open(app_url: str) -> None:
