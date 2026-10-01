@@ -132,7 +132,8 @@ def _join(state: QuizState, user_id: str, now: int) -> Step:
     if (player := state.players.get(user_id)) is not None:  # a reconnect
         return Step(state, (), player)
     player = Player(Standing(user_id, total=0, reached_rel_ms=max(0, now - state.start_ms)))
-    return Step(_with_player(state, player, dirty=True), (ev.ParticipantJoined(user_id, now),), player)
+    joined = ev.ParticipantJoined(user_id, now)
+    return Step(_with_player(state, player, dirty=True), (joined,), player)
 
 
 def _served(state: QuizState, player: Player, now: int) -> ev.QuestionServed:
