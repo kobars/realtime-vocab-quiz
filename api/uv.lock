@@ -972,6 +972,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "anyio" },
     { name = "deptry" },
     { name = "httpx" },
     { name = "httpx2" },
@@ -1005,6 +1006,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "anyio", specifier = ">=4.15.1" },
     { name = "deptry", specifier = ">=0.25.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "httpx2", specifier = ">=2.13.1" },

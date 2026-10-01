@@ -21,6 +21,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "anyio>=4.15.1",
     "deptry>=0.25.1",
     "httpx>=0.28.1",
     "httpx2>=2.13.1",

@@ -150,13 +150,13 @@ def test_tool_dependency_check_fails_on_missing_and_transitive_imports(tmp_path:
     # A folder named tests is skipped by deptry's default exclude; the step must still scan it.
     probe = tmp_path / "tests" / "test_probe.py"
     probe.parent.mkdir()
-    probe.write_text("import anyio\nimport no_such_package\nimport pydantic_core\n")
+    probe.write_text("import httpcore\nimport no_such_package\nimport pydantic_core\n")
     _, flags = _deptry_tools()
     config = str(ROOT / "api" / "pyproject.toml")
     result = _deptry("tests", *flags, "--config", config, cwd=tmp_path)
     assert result.returncode == 1
     assert "DEP001 'no_such_package' imported but missing" in result.stderr
-    assert "DEP003 'anyio' imported but it is a transitive dependency" in result.stderr
+    assert "DEP003 'httpcore' imported but it is a transitive dependency" in result.stderr
     assert "pydantic_core" not in result.stderr
 
 
