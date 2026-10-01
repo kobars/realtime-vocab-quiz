@@ -1,6 +1,6 @@
 // AI-ASSISTED: tests for QuizClient: connect, reconnect, seq wiring, liveness and answer retries, on a fake socket and fake timers.
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { type ClientEvent, QuizClient, type QuizSocket } from './client'
+import { type ClientEvent, QuizClient, type QuizClientOptions, type QuizSocket } from './client'
 import type { ServerMessage } from './types.generated'
 
 class FakeSocket implements QuizSocket {
@@ -10,8 +10,17 @@ class FakeSocket implements QuizSocket {
   onclose: ((event: { code: number }) => void) | null = null
   sent: Record<string, unknown>[] = []
   closedWith: number | undefined
+  opened = false
   constructor(readonly url: string, readonly protocol: string) { FakeSocket.all.push(this) }
-  send = (data: string) => this.sent.push(JSON.parse(data) as Record<string, unknown>)
+  /** Like the browser WebSocket, `send` throws while the socket is still connecting. */
+  send = (data: string) => {
+    if (!this.opened) throw new DOMException('still connecting', 'InvalidStateError')
+    this.sent.push(JSON.parse(data) as Record<string, unknown>)
+  }
+  open = () => {
+    this.opened = true
+    this.onopen?.()
+  }
   close = (code = 1005) => (this.closedWith = code)
   types = () => this.sent.map((message) => message.type)
   receive = (message: Partial<ServerMessage>) => this.onmessage?.({ data: JSON.stringify({ v: 1, ...message }) })
@@ -25,7 +34,7 @@ const resync = (lastSeq: number) => ({ v: 1, type: 'resync', lastSeq })
 const wait = (ms: number) => vi.advanceTimersByTimeAsync(ms)
 let events: ClientEvent[]
 
-function start(random = () => 0) {
+function start(random = () => 0, options: Partial<QuizClientOptions> = {}) {
   let tickets = 0
   const createTicket = vi.fn(async () => `t${++tickets}`)
   const client = new QuizClient({
@@ -34,6 +43,7 @@ function start(random = () => 0) {
     random,
     socketFactory: (url, protocol) => new FakeSocket(url, protocol),
     onEvent: (event) => events.push(event),
+    ...options,
   })
   client.start('VOCAB-42', 'Ana')
   return Object.assign(client, { createTicket })
@@ -43,7 +53,7 @@ function start(random = () => 0) {
 async function connected(open = true) {
   for (let i = 0; i < 3; i++) await wait(0)
   const socket = FakeSocket.all.at(-1) as FakeSocket
-  if (open) socket.onopen?.()
+  if (open) socket.open()
   return socket
 }
 
@@ -137,6 +147,11 @@ it('sends one resync with the last applied seq on every joined', async () => {
   const second = await connected()
   second.receive(joined(4))
   expect(second.sent.slice(1)).toEqual([resync(1)])
+  // The link drops before the snapshot: joined.atSeq never moves the last applied seq.
+  second.drop()
+  const third = await connected()
+  third.receive(joined(5))
+  expect(third.sent.slice(1)).toEqual([resync(1)])
 })
 
 it('sends a gap resync after its delay', async () => {
@@ -170,6 +185,94 @@ it('retries a rate-limited resync after 1 s', async () => {
   expect(socket.types()).toEqual(['join', 'resync'])
   await wait(1)
   expect(socket.sent.slice(1)).toEqual([resync(0), resync(0)])
+})
+
+it('retries a resync after UNAVAILABLE with backoff, until the snapshot', async () => {
+  start(() => 0.5)
+  const socket = await connected()
+  socket.receive(joined(2))
+  socket.receive({ type: 'error', code: 'UNAVAILABLE', requestType: 'resync' })
+  await wait(124)
+  expect(socket.types()).toEqual(['join', 'resync'])
+  await wait(1)
+  socket.receive({ type: 'error', code: 'UNAVAILABLE', requestType: 'resync' })
+  await wait(249)
+  expect(socket.sent.slice(1)).toEqual([resync(0), resync(0)])
+  await wait(1)
+  expect(socket.sent.slice(1)).toEqual([resync(0), resync(0), resync(0)])
+  socket.receive({ type: 'snapshot', atSeq: 2, status: 'open' })
+  socket.receive(board(3))
+  expect(events.filter((event) => event.type === 'leaderboard')).toMatchObject([{ seq: 3 }])
+})
+
+it('resyncs when the broadcast that a pong announced has not arrived 1 s later', async () => {
+  start()
+  const socket = await joinedSocket()
+  socket.receive({ type: 'pong', seq: 1 })
+  socket.receive(board(1))
+  await wait(1_000)
+  socket.receive({ type: 'pong', seq: 2 })
+  await wait(999)
+  expect(socket.types()).toEqual(['join', 'resync'])
+  await wait(1)
+  expect(socket.sent.slice(1)).toEqual([resync(0), resync(1)])
+})
+
+it('emits a snapshot read before the end after quiz_ended no more, and applies a status ended one', async () => {
+  start()
+  const socket = await joinedSocket()
+  socket.receive({ type: 'quiz_ended', seq: 1 })
+  const ended = events.length
+  socket.receive({ type: 'snapshot', atSeq: 0, status: 'open' })
+  expect(events.slice(ended)).toEqual([])
+  socket.receive({ type: 'snapshot', atSeq: 1, status: 'ended' })
+  expect(events.slice(ended)).toMatchObject([{ type: 'snapshot', atSeq: 1, status: 'ended' }])
+})
+
+it('drops next() while the socket is still connecting instead of throwing', async () => {
+  const client = start()
+  const socket = await connected(false)
+  expect(() => client.next(0)).not.toThrow()
+  socket.open()
+  expect(socket.types()).toEqual(['join'])
+})
+
+it('opens one socket after start, stop, start while the first ticket request is pending', async () => {
+  const client = start()
+  client.stop()
+  client.start('VOCAB-42', 'Ana')
+  const socket = await connected()
+  expect([sockets(), socket.types()]).toEqual([1, ['join']])
+})
+
+it('ignores a stale ticket failure after start, stop, start', async () => {
+  let fail: (error: Error) => void = () => {}
+  const client = start()
+  client.createTicket.mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)))
+  client.stop()
+  // The first start() asks for its ticket only after the session exists, so this stale request is the one that fails.
+  client.start('VOCAB-42', 'Ana')
+  const socket = await connected()
+  fail(new Error('offline'))
+  await wait(0)
+  expect([sockets(), socket.closedWith]).toEqual([1, undefined])
+  expect(events).not.toContainEqual(expect.objectContaining({ status: 'reconnecting' }))
+})
+
+it('falls back to the default url when url is undefined', async () => {
+  start(() => 0, { url: undefined })
+  const socket = await connected()
+  expect(socket.url).toBe(`ws://${location.host}/ws?ticket=t1`)
+})
+
+it('never reads sessionStorage when a storage is given', async () => {
+  vi.spyOn(globalThis, 'sessionStorage', 'get').mockImplementation(() => {
+    throw new DOMException('blocked', 'SecurityError')
+  })
+  start(() => 0, { storage: localStorage })
+  expect(sockets()).toBe(0)
+  await connected()
+  expect(sockets()).toBe(1)
 })
 
 it('sends an app ping every 25 s, and reconnects after 50 s without an inbound message', async () => {
