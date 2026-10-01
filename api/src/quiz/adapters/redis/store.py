@@ -49,7 +49,7 @@ def _reachable() -> Iterator[None]:
 class RedisStore:
     def __init__(self, client: Redis, *, prefix: str = "", limits: Limits | None = None) -> None:
         self._client = client
-        self.limits = limits or Limits()  # for the tick and snapshot scripts, through ARGV
+        self.limits = limits or Limits()  # for the tick, end and standings scripts, through ARGV
         self._scripts = Scripts(client)
         self._prefix = prefix
 
@@ -124,7 +124,8 @@ class RedisStore:
         self, quiz_id: str, offset: int, limit: int, user_ids: Sequence[str] = ()
     ) -> tuple[port.Snapshot, dict[str, port.Row | None]]:
         """The standings at one seq (``limit`` 0: the broadcast rows) and each asked user's row."""
-        reply = await self._run("read_standings", quiz_id, offset, limit, *user_ids)
+        top_n, full = self.limits.top_n, self.limits.full_list_max
+        reply = await self._run("read_standings", quiz_id, offset, limit, top_n, full, *user_ids)
         seq, count, online, status = reply[1:5]
         rows = cast("list[list[str]]", reply[5])
         asked = cast("list[list[str] | None]", reply[6])
@@ -157,7 +158,9 @@ class RedisStore:
         return replace(snap, you=None if user_id is None else asked[user_id])
 
     async def publish_if_dirty(self, quiz_id: str, node_id: str) -> port.Publish:
-        reply = await self._run("publish_leaderboard", quiz_id, node_id)
+        lim = self.limits
+        args = (node_id, lim.tick_ms, lim.top_n, lim.full_list_max)
+        reply = await self._run("publish_leaderboard", quiz_id, *args)
         value = reply[1] if len(reply) > 1 else None
         match reply[0]:
             case "published" | "ended" as status:
@@ -170,7 +173,7 @@ class RedisStore:
                 raise ValueError(status)
 
     async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> port.End:
-        reply = await self._run("end_quiz", quiz_id, reason)
+        reply = await self._run("end_quiz", quiz_id, reason, self.limits.top_n)
         match reply[0]:
             case "ended":
                 return port.End("ended", int(reply[1] or 0))

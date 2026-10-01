@@ -1,5 +1,5 @@
 -- AI-ASSISTED: end_quiz of docs/spec/redis.md §3 and §3.1: the idempotent, once-only announcement.
--- ARGV: reason (deadline or host). A first host call only marks the end; the next host call,
+-- ARGV: reason (deadline or host), topN. A first host call only marks the end; the next host call,
 -- or a deadline call once due, publishes quiz_ended. Later calls return the same endSeq.
 local reason = ARGV[1]
 local meta = redis.call('HMGET', KEYS[K.meta], 'deadlineMs', 'endedMs', 'endSeq')
@@ -24,6 +24,6 @@ local seq = redis.call('INCR', KEYS[K.seq])
 redis.call('HSET', KEYS[K.meta], 'endSeq', seq)
 publish_frame({v = 1, type = 'quiz_ended', seq = seq,
   playerCount = redis.call('ZCARD', KEYS[K.board]), you = cjson.null},
-  standing_rows(0, TOP_N - 1), {})
+  standing_rows(0, tonumber(ARGV[2]) - 1), {})
 refresh()
 return {'ended', seq}

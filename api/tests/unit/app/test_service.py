@@ -13,7 +13,7 @@ from quiz.contracts import messages as m
 from quiz.domain import errors as domain
 from quiz.domain.session import Question
 from quiz.ports.questions import BankQuestion
-from quiz.ports.store import End, Page, Ranks, Snapshot
+from quiz.ports.store import End, Limits, Page, Ranks, Snapshot
 
 QUIZ, N = "VOCAB-1", 3
 E, SID = m.ErrorCode, "-0000-4000-8000-000000000000"
@@ -162,6 +162,17 @@ async def test_resync_adds_rank_update_outside_the_shown_entries(service: QuizSe
     assert len(top.entries) == m.TOP_N
     assert (top.you, snapshot.you) == (m.You(rank=50, score=0), m.You(rank=51, score=0))
     assert update == m.RankUpdate(atSeq=0, rank=51, score=0, playerCount=201)
+
+
+async def test_resync_rank_update_follows_the_configured_full_list_max() -> None:
+    store = MemoryStore(lambda: 1_000_000, Limits(200, 1, 2))
+    questions = tuple(Question(f"q{i}", 1) for i in range(N))
+    await store.create_quiz(QUIZ, questions, window_ms=60_000, time_limit_ms=20_000)
+    service = QuizService(store, Bank(), lambda: 1_000_000)
+    conns = [await joined(service, user) for user in ("a", "b", "c")]
+    snapshot, update = await send(service, conns[1], m.Resync(lastSeq=0))
+    assert ([e.userId for e in snapshot.entries], snapshot.you) == (["a"], m.You(rank=2, score=0))
+    assert update == m.RankUpdate(atSeq=0, rank=2, score=0, playerCount=3)
 
 
 async def test_session_replaced_closes_the_older_socket(service: QuizService) -> None:
