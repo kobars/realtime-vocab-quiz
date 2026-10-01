@@ -51,6 +51,8 @@ const initial = () => ({
   connection: 'idle' as Connection,
   closeCode: null as number | null,
   phase: 'join' as Phase,
+  /** The quiz ID sent in the last `join`; it stays after a join to an ended quiz, which binds no `quiz`. */
+  quizId: null as string | null,
   quiz: null as QuizInfo | null,
   question: null as CurrentQuestion | null,
   /** The answer sent for the current question and not settled yet: the choices stay locked. */
@@ -95,7 +97,7 @@ export const useQuizStore = defineStore('quiz', () => {
 
   function join(quizId: string, displayName: string): void {
     client.value?.stop()
-    Object.assign(s, initial(), { connection: 'connecting' })
+    Object.assign(s, initial(), { connection: 'connecting', quizId })
     const created = deps.createClient((event) => {
       if (client.value === created) handle(event)
     })
