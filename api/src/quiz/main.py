@@ -85,8 +85,8 @@ async def _stop_all(hooks: Sequence[Hook], pending: BaseException | None) -> Non
     if pending is None:
         msg = "stop hooks failed"
         raise ExceptionGroup(msg, errors)
-    for error in errors:
-        pending.add_note(f"stop hook failed: {error!r}")
+    for failure in errors:
+        pending.add_note(f"stop hook failed: {failure!r}")
 
 
 def create_app(settings: Settings | None = None, *, clock: Clock | None = None) -> FastAPI:
