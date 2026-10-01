@@ -8,7 +8,7 @@ import asyncio
 import logging
 import unicodedata
 import uuid
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
 
 from quiz.contracts import messages as m
@@ -16,12 +16,14 @@ from quiz.domain.errors import DomainError, ErrorCode
 from quiz.obs import metrics
 from quiz.ports.clock import Clock
 from quiz.ports.questions import QuestionBank
-from quiz.ports.store import Finished, Joined, Ranks, Store
+from quiz.ports.store import Finished, Joined, Ranks, Row, Store
 from quiz.ports.store import Snapshot as Shared
 
 log = logging.getLogger(__name__)
 
 RESYNC_INTERVAL_MS, NAME_MAX = 1_000, 32
+STANDINGS_TRIES = 3  # a tick or a join between the two reads of ``standings`` makes them differ
+type Standing = tuple[m.Snapshot] | tuple[m.Snapshot, m.RankUpdate]
 CLOSE_INTERNAL, CLOSE_REPLACED = 1011, 4001
 
 
@@ -56,6 +58,25 @@ def _error(code: m.ErrorCode, text: str, request_type: str) -> m.ProtocolError:
 def _key(read: Shared | Ranks) -> tuple[int, str, int]:
     """What the cached standings are keyed by: a join moves no ``seq``, so the count is in it."""
     return read.at_seq, read.status, read.player_count
+
+
+def _message(shared: Shared, you: Row | None) -> m.Snapshot:
+    return m.Snapshot(
+        atSeq=shared.at_seq,
+        status=shared.status,
+        playerCount=shared.player_count,
+        onlineCount=shared.online_count,
+        entries=[row.entry() for row in shared.rows],
+        you=None if you is None else m.You(rank=you.rank, score=you.score),
+    )
+
+
+def _standing(snap: m.Snapshot) -> Standing:
+    """The snapshot, then ``rank_update`` when the player is outside its entries (§4)."""
+    you, count = snap.you, snap.playerCount
+    if you is None or you.rank <= len(snap.entries):  # the store's limits cut the entries
+        return (snap,)
+    return (snap, m.RankUpdate(atSeq=snap.atSeq, rank=you.rank, score=you.score, playerCount=count))
 
 
 def _bound(conn: Connection, *, write: bool = False) -> str:
@@ -210,16 +231,24 @@ class QuizService:
         conn.last_resync_ms = now
         return Outcome(await self.standing(quiz_id, conn.user_id))
 
-    async def standing(
-        self, quiz_id: str, user_id: str
-    ) -> tuple[m.Snapshot] | tuple[m.Snapshot, m.RankUpdate]:
-        """A snapshot, then ``rank_update`` when the player is outside its entries (§4)."""
-        snap = await self.snapshot(quiz_id, user_id)
-        you, count = snap.you, snap.playerCount
-        if you is None or you.rank <= len(snap.entries):  # the store's limits cut the entries
-            return (snap,)
-        update = m.RankUpdate(atSeq=snap.atSeq, rank=you.rank, score=you.score, playerCount=count)
-        return (snap, update)
+    async def standing(self, quiz_id: str, user_id: str) -> Standing:
+        return _standing(await self.snapshot(quiz_id, user_id))
+
+    async def standings(
+        self, quiz_id: str, user_ids: Sequence[str]
+    ) -> tuple[Ranks, dict[str, Standing]]:
+        """The ``standing`` of each user, all at the seq of one rank read for all of them."""
+        for _ in range(STANDINGS_TRIES):
+            ranks = await self._store.ranks_of(quiz_id, user_ids)
+            shared = self._shared.get(quiz_id)
+            if shared is None or _key(shared) != _key(ranks):
+                shared = await self._refill(quiz_id)
+            if _key(shared) == _key(ranks):
+                return ranks, {
+                    user: _standing(_message(shared, row)) for user, row in ranks.rows.items()
+                }
+        msg = "the standings moved during every read"
+        raise ConnectionError(msg)
 
     async def _on_get_leaderboard(self, conn: Connection, msg: m.GetLeaderboard) -> m.ServerMessage:
         page = await self._store.standings_page(_bound(conn), msg.offset, msg.limit)
@@ -259,11 +288,4 @@ class QuizService:
             if _key(shared) != _key(ranks):
                 shared = self._shared[quiz_id] = await self._store.snapshot(quiz_id, user_id)
                 you = shared.you
-        return m.Snapshot(
-            atSeq=shared.at_seq,
-            status=shared.status,
-            playerCount=shared.player_count,
-            onlineCount=shared.online_count,
-            entries=[row.entry() for row in shared.rows],
-            you=None if you is None else m.You(rank=you.rank, score=you.score),
-        )
+        return _message(shared, you)

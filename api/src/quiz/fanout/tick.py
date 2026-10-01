@@ -54,27 +54,34 @@ class Ticker:
 
     async def _run(self, quiz_id: str) -> None:
         relay = Relay(quiz_id, self._store, self._sockets, self._store.limits)
-        failures = 0
+        progress = asyncio.Event()  # set by a relayed broadcast or a tick that went through
+        attempt, failed = 0, False
         while True:
             try:
                 async with self._store.subscribe(quiz_id) as messages:
-                    if failures:
+                    if failed:
                         await self._repair(quiz_id, relay)
-                        failures = 0
-                    await self._serve(quiz_id, relay, messages)
-            except Exception:
+                    await self._serve(quiz_id, relay, messages, progress)
+            except Exception as error:
+                if isinstance(error, DomainError) and error.code is ErrorCode.QUIZ_NOT_FOUND:
+                    return  # expired, or lost by the store: also from the repair's read (§5)
                 log.exception("fan-out of quiz %s failed: subscribing again", quiz_id)
             else:
                 return
-            await asyncio.sleep(backoff_s(failures))
-            failures += 1
+            if progress.is_set():
+                progress.clear()
+                attempt = 0
+            await asyncio.sleep(backoff_s(attempt))
+            attempt, failed = attempt + 1, True
 
-    async def _serve(self, quiz_id: str, relay: Relay, messages: AsyncIterator[str]) -> None:
-        """Relay and tick until the quiz ended or is gone; raise when either one fails."""
-        relaying = asyncio.create_task(_relay(relay, messages))
+    async def _serve(
+        self, quiz_id: str, relay: Relay, messages: AsyncIterator[str], progress: asyncio.Event
+    ) -> None:
+        """Relay and tick until the quiz ended; raise when either one fails or the quiz is gone."""
+        relaying = asyncio.create_task(_relay(relay, messages, progress))
         try:
             subscribed_at = await self._store.read_seq(quiz_id) or 0
-            ticking = asyncio.create_task(self._tick(quiz_id, relay))
+            ticking = asyncio.create_task(self._tick(quiz_id, relay, progress))
             try:
                 await asyncio.wait((relaying, ticking), return_when=asyncio.FIRST_COMPLETED)
                 if relaying.done():
@@ -93,16 +100,15 @@ class Ticker:
     async def _repair(self, quiz_id: str, relay: Relay) -> None:
         """Send each local player its standing, as for a resync, before relaying again."""
         self._service.drop_cache(quiz_id)
-        newest = -1
-        for user_id in list(self._sockets.players(quiz_id)):
-            replies = await self._service.standing(quiz_id, user_id)
-            newest = max(newest, replies[0].atSeq)
+        users = list(self._sockets.players(quiz_id))
+        ranks, standings = await self._service.standings(quiz_id, users)
+        for user_id, replies in standings.items():
             for reply in replies:
                 self._sockets.send_to(quiz_id, user_id, encode(reply))
-        relay.repaired(newest)
+        relay.repaired(ranks)
 
-    async def _tick(self, quiz_id: str, relay: Relay) -> int | None:
-        """Tick until the quiz ended (its end seq) or is gone (None)."""
+    async def _tick(self, quiz_id: str, relay: Relay, progress: asyncio.Event) -> int | None:
+        """Tick until the quiz ended: the seq of its ``quiz_ended``, if the store gave one."""
         clock = asyncio.get_running_loop().time
         shift_at = clock() + SHIFT_S
         while True:
@@ -110,6 +116,7 @@ class Ticker:
             try:
                 with metrics.TICK_DURATION.time():
                     result = await self._publish(quiz_id)
+                    progress.set()
                     if result.status == "ended":
                         if result.seq is not None:
                             return result.seq
@@ -122,10 +129,6 @@ class Ticker:
                     if clock() >= shift_at:
                         shift_at = clock() + SHIFT_S
                         await relay.shifted()
-            except DomainError as error:
-                if error.code is ErrorCode.QUIZ_NOT_FOUND:  # expired, or lost by the store
-                    return None
-                raise
             except ConnectionError, TimeoutError:
                 log.warning("tick of quiz %s: store unreachable", quiz_id)
             await asyncio.sleep(wait_s)
@@ -137,12 +140,13 @@ class Ticker:
         return result
 
 
-async def _relay(relay: Relay, messages: AsyncIterator[str]) -> None:
+async def _relay(relay: Relay, messages: AsyncIterator[str], progress: asyncio.Event) -> None:
     """Relay until ``quiz_ended``; a feed that fails or ends before it raises."""
     async for message in messages:
         try:
             if await relay.relay(message):
                 return
+            progress.set()
         except Exception:
             log.exception("broadcast not relayed")
     msg = "the subscription ended"
