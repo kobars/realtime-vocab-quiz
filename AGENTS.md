@@ -8,10 +8,12 @@ These rules apply to every change, whether a person or a coding agent makes it.
   (`uv.lock`, `pnpm-lock.yaml`) and generated files. Bigger work is split into several PRs.
 - Branch names are `<type>/<slug>`, for example `feat/redis-adapter` or `fix/answer-dedup`.
 - Rebase on `origin/main` and run `make check` before you push. `main` stays green.
-- Every PR is reviewed before it merges, by two reviewers (Claude Code `/code-review` and Codex).
-  Their findings are verified against the code, and the confirmed ones are fixed in the same PR
-  before the merge. A PR merges when CI and `make check` are green and the confirmed findings
-  are fixed.
+- Every PR is reviewed **before it merges**, once remote CI and `make check` are green: one review
+  round by two reviewers (Claude Code `/code-review` and Codex), whose findings are combined and
+  each verified against the code. Every confirmed finding, defects and cleanups alike, is fixed in
+  the same PR before the merge; each fix is checked against its finding (the code or the named
+  test), not given a second review round. A PR merges when remote CI and `make check` are green
+  again and the confirmed findings are fixed.
 
 ## Tests
 
