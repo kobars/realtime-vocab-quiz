@@ -138,8 +138,8 @@ docs/       specs, decisions and the AI log
 
 ## How AI was used
 
-The design and the code were written with Claude Code. Pull requests are reviewed by two AI
-reviewers, Claude Code `/code-review` and Codex, whose findings are checked against the code
+The design and the code were written with Claude Code. Each pull request gets two AI code
+reviews, from Claude Code `/code-review` and Codex; their findings are checked against the code
 before anything is fixed. Each change has an entry in
 [docs/ai-log/](docs/ai-log/README.md) that says what the AI did, what was wrong in its output,
 and which test now checks the fix. [DESIGN.md §15](DESIGN.md#15-ai-collaboration-in-design)

@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: hand-written index of the AI-LOG entries: tools, reviewers, how to read an entry, examples. -->
+<!-- AI-ASSISTED: hand-written index of the AI-LOG entries: tools, reviews, how to read an entry, examples. -->
 # AI log
 
 Every pull request in this repository has one entry here, `PR-<n>.md`, where `<n>` is the
