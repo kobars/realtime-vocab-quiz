@@ -1,8 +1,10 @@
-<!-- AI-ASSISTED: the quiz screen after the join: header with progress, score and rank, then intro, question or results by the client phase (UI spec §2, §3.2, §3.3, §3.6). -->
+<!-- AI-ASSISTED: the quiz screen after the join: header with progress, score and rank, the connection pill and error messages, then intro, question or results by the client phase (UI spec §2, §3.2, §3.3, §3.6, §3.7). -->
 <script setup lang="ts">
 import { computed, nextTick, useTemplateRef, watch } from 'vue'
 import LeaderboardPanel from '@/components/leaderboard/LeaderboardPanel.vue'
 import QuestionCard from '@/components/question/QuestionCard.vue'
+import ConnectionBanner from '@/components/status/ConnectionBanner.vue'
+import ErrorMessage from '@/components/status/ErrorMessage.vue'
 import { Button } from '@/components/ui/button'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
@@ -20,6 +22,9 @@ const shownIndex = computed(() => {
 
 const intro = computed(() => store.quiz !== null && (store.phase === 'intro' || store.phase === 'join'))
 watch(intro, (shown) => shown && void nextTick(() => start.value?.$el.focus()), { immediate: true })
+
+/** Another tab took over: its card replaces the quiz column and the leaderboard (UI spec §3.7). */
+const replaced = computed(() => store.lastError?.code === 'SESSION_REPLACED')
 </script>
 
 <template>
@@ -39,10 +44,12 @@ watch(intro, (shown) => shown && void nextTick(() => start.value?.$el.focus()), 
         <span data-test="score">{{ strings.quiz.score(store.myScore) }}</span>
         <span v-if="store.myRank !== null">{{ strings.quiz.rank(store.myRank, store.playerCount) }}</span>
       </p>
+      <ConnectionBanner />
     </header>
+    <ErrorMessage />
     <ResultsView v-if="store.phase === 'finished' || store.phase === 'results'" />
     <div
-      v-else
+      v-else-if="!replaced"
       class="grid gap-6 lg:grid-cols-[minmax(0,640px)_360px] lg:justify-between"
     >
       <QuestionCard
