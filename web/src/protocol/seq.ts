@@ -4,6 +4,8 @@ import type { Leaderboard, QuizEnded, Snapshot } from './types.generated'
 export type Broadcast = Leaderboard | QuizEnded
 
 export const GAP_WAIT_MAX_MS = 250
+/** How long a `pong.seq` above L may wait for its broadcast before the client resyncs. */
+export const PONG_CHECK_MS = 1000
 
 /** What the caller does after one inbound message. */
 export interface SeqStep {
@@ -11,13 +13,15 @@ export interface SeqStep {
   apply: Broadcast[]
   /** Send one `resync {lastSeq}` after `delayMs`, or nothing. */
   resync: { lastSeq: number; delayMs: number } | null
+  /** Call `pongCheck(pongSeq)` after `delayMs`, or nothing. */
+  check: { pongSeq: number; delayMs: number } | null
 }
 
-const nothing = (): SeqStep => ({ apply: [], resync: null })
+const nothing = (): SeqStep => ({ apply: [], resync: null, check: null })
 
 /**
  * Tracks the last applied broadcast `seq` (L). It never sends or waits itself: each method
- * returns the frames to apply and at most one resync to send. From a resync until the
+ * returns the frames to apply, at most one resync to send and at most one later check. From a resync until the
  * snapshot it buffers broadcasts instead of applying them, so it asks for one resync at a time.
  */
 export class SeqTracker {
@@ -39,7 +43,7 @@ export class SeqTracker {
     this.last = atSeq
     this.buffer = []
     this.resyncing = true
-    return { apply: [], resync: { lastSeq, delayMs: 0 } }
+    return { ...nothing(), resync: { lastSeq, delayMs: 0 } }
   }
 
   broadcast(frame: Broadcast): SeqStep {
@@ -47,7 +51,7 @@ export class SeqTracker {
     if (frame.type === 'quiz_ended') {
       this.last = frame.seq
       this.finalSeq = frame.seq
-      return { apply: [frame], resync: null }
+      return { ...nothing(), apply: [frame] }
     }
     // No script publishes after the end, so a leaderboard frame that arrives now is older.
     if (this.finalSeq !== null) return nothing()
@@ -58,7 +62,7 @@ export class SeqTracker {
     const last = this.last
     if (frame.seq === last + 1 || (frame.seq > last + 1 && frame.rebase)) {
       this.last = frame.seq
-      return { apply: [frame], resync: null }
+      return { ...nothing(), apply: [frame] }
     }
     if (frame.seq === last) return nothing()
     this.buffer.push(frame)
@@ -67,9 +71,18 @@ export class SeqTracker {
     return this.startResync(delayMs)
   }
 
-  /** `pong.seq` above L means a lost last frame; below L, a restarted store. */
+  /**
+   * `pong.seq` above L: a broadcast is on its way or was lost, so check again after
+   * PONG_CHECK_MS. At or below L (a counter read older than a relayed frame) or null: ignore.
+   */
   pong(seq: number | null): SeqStep {
-    if (seq === null || this.resyncing || seq === this.last) return nothing()
+    if (seq === null || this.resyncing || seq <= this.last) return nothing()
+    return { ...nothing(), check: { pongSeq: seq, delayMs: PONG_CHECK_MS } }
+  }
+
+  /** The check a `pong` asked for: resync if L is still below that `pong.seq`. */
+  pongCheck(pongSeq: number): SeqStep {
+    if (this.resyncing || pongSeq <= this.last) return nothing()
     return this.startResync(0)
   }
 
@@ -99,6 +112,6 @@ export class SeqTracker {
 
   private startResync(delayMs: number): SeqStep {
     this.resyncing = true
-    return { apply: [], resync: { lastSeq: this.last, delayMs } }
+    return { ...nothing(), resync: { lastSeq: this.last, delayMs } }
   }
 }
