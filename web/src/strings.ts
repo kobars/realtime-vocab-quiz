@@ -37,6 +37,22 @@ export const strings = {
     waiting: 'Waiting for the connection…',
     skip: 'Skip',
   },
+  connection: {
+    connecting: 'Connecting…',
+    reconnecting: 'Reconnecting…',
+    resyncing: 'Updating…',
+    closed: 'Disconnected. Reload the page to try again.',
+  },
+  errors: {
+    ALREADY_ANSWERED: 'That question was already answered; your first answer stands.',
+    QUESTION_NOT_OPEN: 'That question is closed; loading the current one.',
+    RATE_LIMITED: 'Too many requests; trying again in a second.',
+    SESSION_REPLACED: 'This quiz is open in another tab.',
+    QUIZ_ENDED: 'The quiz has ended.',
+    UNAVAILABLE: 'Server busy, retrying.',
+    other: 'Something went wrong; trying again.',
+    useThisTab: 'Use this tab',
+  },
   leaderboard: {
     title: 'Leaderboard',
     counts: (players: number, online: number) => `${players} players · ${online} online`,

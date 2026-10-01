@@ -173,6 +173,14 @@ it('QUIZ_NOT_FOUND stops the client and returns to idle with the error', async (
   expect([store.connection, store.phase, store.lastError?.code]).toEqual(['idle', 'join', 'QUIZ_NOT_FOUND'])
 })
 
+it('SESSION_REPLACED stops the client, so even a close that would reconnect opens no new socket', async () => {
+  const { store, socket } = await playing()
+  socket.receive(error('SESSION_REPLACED', null))
+  socket.onclose?.({ code: 1006 })
+  await wait(30_000)
+  expect([sockets.length, store.connection, store.lastError?.code]).toEqual([1, 'closed', 'SESSION_REPLACED'])
+})
+
 it('ALREADY_ANSWERED unlocks the choices and rejoins on the same socket', async () => {
   const { store, socket } = await playing()
   socket.receive(question(0))
