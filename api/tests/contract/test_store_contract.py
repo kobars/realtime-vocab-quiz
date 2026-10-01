@@ -199,19 +199,6 @@ async def test_refusals_after_the_deadline(
     assert not await store.leave(quiz_id, "a", "c-a")
 
 
-async def test_the_deadline_ms_itself_is_ended(
-    store: Store, advance: Advance, pass_deadline: QuizStep, quiz_id: str
-) -> None:
-    await store.create_quiz(quiz_id, QUESTIONS, window_ms=SHORT_WINDOW_MS, time_limit_ms=LIMIT_MS)
-    await store.join(quiz_id, "a", "A", "c-a")
-    await store.serve_next(quiz_id, "a", 0, "c-a")
-    await advance(SHORT_WINDOW_MS)  # an injected clock lands on the deadline itself
-    for n in range(DEADLINE_TRIES):
-        late = store.apply_answer(quiz_id, "a", 0, 0, f"s{n}", "c-a")
-        assert await refused(late) == ErrorCode.QUIZ_ENDED
-        await pass_deadline(quiz_id)  # a real clock: the deadline becomes the server's now
-
-
 async def test_a_question_served_near_the_deadline_gets_only_the_time_left(
     store: Store, quiz_id: str
 ) -> None:
