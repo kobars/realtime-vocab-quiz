@@ -1,5 +1,5 @@
 # AI-ASSISTED: acceptance tests for the standings (AC-5) and the live leaderboard broadcast (AC-6).
-import asyncio
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -58,9 +58,10 @@ async def test_ac6_broadcast_within_500_ms_of_an_answer(quiz_server: QuizServer)
     alice = await quiz_server.join("alice")
     bob = await quiz_server.join("bob")
     await bob.request("next", questionIndex=0)
-    loop = asyncio.get_running_loop()
-    sent = loop.time()
+    sent = time.monotonic()
     result = await bob.answer(0, key)
+    if quiz_server.manual_clock:  # let quiz time pass a tick, as a real clock would
+        await quiz_server.advance(250)
 
     def shows_bob_score(msg: Msg) -> bool:
         rows = msg["entries"] if msg["type"] == "leaderboard" else []
@@ -69,4 +70,4 @@ async def test_ac6_broadcast_within_500_ms_of_an_answer(quiz_server: QuizServer)
     frame = await alice.take(shows_bob_score, within_s=2.0)
     assert result["pointsAwarded"] > 0
     assert frame["seq"] >= 1
-    assert loop.time() - sent <= 0.5
+    assert time.monotonic() - sent <= 0.5

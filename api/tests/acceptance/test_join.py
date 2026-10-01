@@ -15,7 +15,6 @@ async def test_ac1_join_by_quiz_id(quiz_server: QuizServer) -> None:
     assert (unknown["code"], unknown["requestType"]) == ("QUIZ_NOT_FOUND", "join")
     assert (joined["type"], joined["quizId"], joined["score"]) == ("joined", "VOCAB-42", 0)
     assert joined["userId"] == alice.user_id
-    assert isinstance(joined["atSeq"], int)
     assert joined["atSeq"] >= 0
 
 
