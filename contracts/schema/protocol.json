@@ -25,6 +25,7 @@
           "type": "string"
         },
         "questionIndex": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
@@ -62,10 +63,12 @@
           "type": "string"
         },
         "atSeq": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "questionIndex": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
@@ -95,6 +98,7 @@
           "type": "integer"
         },
         "score": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         }
@@ -152,6 +156,7 @@
       "additionalProperties": false,
       "properties": {
         "rank": {
+          "maximum": 9007199254740992,
           "minimum": 1,
           "type": "integer"
         },
@@ -165,6 +170,7 @@
           "type": "string"
         },
         "score": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         }
@@ -214,18 +220,22 @@
           "type": "string"
         },
         "atSeq": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "score": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "rank": {
+          "maximum": 9007199254740992,
           "minimum": 1,
           "type": "integer"
         },
         "playerCount": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         }
@@ -255,6 +265,7 @@
           "type": "string"
         },
         "offset": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
@@ -318,6 +329,7 @@
           "type": "string"
         },
         "atSeq": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
@@ -335,18 +347,22 @@
           "type": "string"
         },
         "questionCount": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "timeLimitMs": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "quizRemainingMs": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "cursor": {
+          "maximum": 9007199254740992,
           "minimum": -1,
           "type": "integer"
         },
@@ -357,6 +373,7 @@
           "type": "boolean"
         },
         "score": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         }
@@ -393,6 +410,7 @@
           "type": "string"
         },
         "seq": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
@@ -400,10 +418,12 @@
           "type": "boolean"
         },
         "playerCount": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "onlineCount": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
@@ -441,14 +461,17 @@
           "type": "string"
         },
         "atSeq": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "offset": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "playerCount": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
@@ -489,6 +512,7 @@
           "type": "string"
         },
         "questionIndex": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         }
@@ -538,6 +562,7 @@
         "seq": {
           "anyOf": [
             {
+              "maximum": 9007199254740992,
               "minimum": 0,
               "type": "integer"
             },
@@ -609,10 +634,12 @@
           "type": "string"
         },
         "atSeq": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "questionIndex": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
@@ -632,10 +659,12 @@
           "type": "array"
         },
         "timeLimitMs": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "remainingMs": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         }
@@ -668,10 +697,12 @@
           "type": "string"
         },
         "seq": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "playerCount": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
@@ -718,18 +749,22 @@
           "type": "string"
         },
         "atSeq": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "rank": {
+          "maximum": 9007199254740992,
           "minimum": 1,
           "type": "integer"
         },
         "score": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "playerCount": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         }
@@ -759,6 +794,7 @@
           "type": "string"
         },
         "lastSeq": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         }
@@ -838,6 +874,7 @@
           "type": "string"
         },
         "atSeq": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
@@ -849,10 +886,12 @@
           "type": "string"
         },
         "playerCount": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
         "onlineCount": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         },
@@ -891,10 +930,12 @@
       "additionalProperties": false,
       "properties": {
         "rank": {
+          "maximum": 9007199254740992,
           "minimum": 1,
           "type": "integer"
         },
         "score": {
+          "maximum": 9007199254740992,
           "minimum": 0,
           "type": "integer"
         }

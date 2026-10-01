@@ -93,3 +93,45 @@ def test_a_broadcast_is_encoded_once_as_compact_json_with_every_field() -> None:
     assert json.loads(raw)["entries"] == [
         {"rank": 1, "userId": "u_1", "displayName": "Ana", "score": 150}
     ]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"v":1,"type":"get_leaderboard","offset":1000000000000000000000000000000,"limit":10}',
+        b'{"v":1,"type":"next","questionIndex":' + b"9" * 4000 + b"}",
+        b'{"v":1,"type":"resync","lastSeq":9007199254740993}',
+    ],
+    ids=["offset-1e30", "questionIndex-4000-digits", "lastSeq-2**53+1"],
+)
+def test_an_integer_above_the_wire_maximum_is_an_invalid_message(raw: bytes) -> None:
+    result = parse_client_message(raw)
+    assert isinstance(result, ProtocolError)
+    assert result.code == ErrorCode.INVALID_MESSAGE
+
+
+def test_an_integer_at_the_wire_maximum_is_parsed() -> None:
+    raw = f'{{"v":1,"type":"resync","lastSeq":{2**53}}}'.encode()
+    assert code_of(raw) is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "code"),
+    [
+        (b'{"type":"answer"}', ErrorCode.INVALID_MESSAGE),
+        (b'{"v":2,"type":"answer"}', ErrorCode.UNSUPPORTED_VERSION),
+    ],
+)
+def test_a_version_error_names_a_known_request_type(raw: bytes, code: ErrorCode) -> None:
+    result = parse_client_message(raw)
+    assert isinstance(result, ProtocolError)
+    assert result.code == code
+    assert result.requestType == "answer"
+
+
+@pytest.mark.parametrize("raw", [b'{"v":2,"type":"future"}', b'{"v":2,"type":7}', b'{"v":2}'])
+def test_a_version_error_without_a_known_type_has_no_request_type(raw: bytes) -> None:
+    result = parse_client_message(raw)
+    assert isinstance(result, ProtocolError)
+    assert result.code == ErrorCode.UNSUPPORTED_VERSION
+    assert result.requestType is None

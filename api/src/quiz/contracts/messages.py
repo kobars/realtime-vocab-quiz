@@ -22,8 +22,10 @@ SubmissionId = Annotated[
 ]
 DisplayName = Annotated[str, Field(min_length=1, max_length=32)]
 RawDisplayName = Annotated[str, Field(max_length=128)]
-NonNegative = Annotated[int, Field(ge=0)]
-Rank = Annotated[int, Field(ge=1)]
+# The largest integer on the wire: JSON clients that read numbers as doubles stay exact.
+MAX_WIRE_INT = 2**53
+NonNegative = Annotated[int, Field(ge=0, le=MAX_WIRE_INT)]
+Rank = Annotated[int, Field(ge=1, le=MAX_WIRE_INT)]
 ChoiceIndex = Annotated[int, Field(ge=0, le=3)]
 
 FULL_LIST_MAX = 200
@@ -134,7 +136,7 @@ class Joined(_Message):
     questionCount: NonNegative
     timeLimitMs: NonNegative
     quizRemainingMs: NonNegative
-    cursor: Annotated[int, Field(ge=-1)]
+    cursor: Annotated[int, Field(ge=-1, le=MAX_WIRE_INT)]
     cursorOpen: bool
     finished: bool
     score: NonNegative
