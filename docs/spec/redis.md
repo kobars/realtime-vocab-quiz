@@ -9,7 +9,7 @@ This document is the store design behind the quiz rules. It keeps the consistenc
 - **Every write with more than one step is one Lua script** (ADR-005). Redis runs one script at a time, so no interleaving of nodes can see or leave a half-done write. Each script receives every key of the quiz as `KEYS`, in the fixed order of §2, built by one function in the Redis adapter; scripts never build key names themselves.
 - **One clock.** Scripts read `TIME` (`now = sec × 1000 + floor(usec / 1000)`, integer ms) for every serve time, answer time, deadline check and reach time. The Python side never passes a time or points to a script. The in-memory store used by unit tests implements the same port with an injected clock (`clock: Callable[[], int]`, ms), which tests advance by hand.
 - **The `seq` rule** (C2). Only a script that publishes a broadcast runs `INCR seq`: `publish_leaderboard` and `end_quiz`. `create_quiz`, `join`, `serve_question`, `score_answer`, `leave`, `renew_presence` and `mark_dirty` never increment `seq` and never publish on `events`; they read `seq` for `atSeq`. `join` publishes only on `control`, which carries no `seq` and never reaches a client.
-- **The points formula exists once**, in `lua/lib/points.lua`; the loader puts it in front of `score_answer`. The Python twin is checked against it for every elapsed value from 0 to `T + 1`.
+- **The points formula exists once**, in `lua/lib/points.lua`; the loader puts it in front of `score_answer`. The Python twin is checked against it for every elapsed value from −1,000 (a clock step back) to `T + 1`.
 
 ## 2. Keys
 
@@ -125,6 +125,7 @@ The gate is atomic: inside one script the node sees no token, deletes `dirty` (a
 - `api/tests/integration/test_deadline.py::test_writes_after_deadline_write_nothing` and `::test_end_quiz_is_idempotent`.
 - `api/tests/property/test_standings_props.py::test_sort_score_round_trips`, `api/tests/unit/test_standings.py::test_sort_score_rejects_out_of_range` and `api/tests/integration/test_create_quiz.py::test_window_above_60_min_is_rejected`.
 - `api/tests/integration/test_points_parity.py::test_lua_points_match_python_for_every_elapsed`.
+- `api/tests/integration/test_score_script.py::test_script_points_match_python_and_land_in_the_standings` (the whole `score_answer` script against the domain rule) and `api/tests/integration/test_scoring_concurrency.py::test_concurrent_copies_of_one_answer_score_once` (C1: 50 concurrent copies score once).
 - `api/tests/integration/test_two_nodes.py::test_join_on_other_node_closes_old_socket_4001` and `api/tests/integration/test_session.py::test_replaced_connection_gets_session_replaced_and_writes_nothing` (session replacement across nodes, with the `connId` fence in `serve_question` and `score_answer`).
 - `api/tests/integration/test_session.py::test_repeat_join_on_same_connection_replaces_nothing` (`replacedConnId` is `nil` and nothing is published on `control`).
 - `api/tests/integration/test_deadline.py::test_host_end_publishes_only_after_fsync` (the mark refuses writes and publishes nothing; the second call publishes once) and `::test_host_mark_before_deadline_is_not_due_for_deadline_end`.
