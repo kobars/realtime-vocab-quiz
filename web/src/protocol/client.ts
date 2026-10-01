@@ -62,14 +62,16 @@ export class QuizClient {
   /** The `submissionId`s sent on the current socket and not answered yet, oldest first. */
   private inFlight: string[] = []
   /**
-   * The `next` sent on the current socket with no `question`, `finished` or final error yet, and the `UNAVAILABLE`
-   * replies it got (the backoff attempt of its next retry).
+   * The `next` sent on the current socket with no `question`, `finished` or final error yet, the `UNAVAILABLE`
+   * replies it got (the backoff attempt of its next retry), and whether it got `NOT_JOINED` and waits for `joined`.
    */
-  private pendingNext: { questionIndex: number; failures: number } | null = null
+  private pendingNext: { questionIndex: number; failures: number; afterJoin: boolean } | null = null
   /** The scheduled resend of `pendingNext`, if any. */
   private nextRetry: Timer | undefined
   /** True once the current socket got `joined`, and false again after `NOT_JOINED`: answers go out only while true. */
   private joined = false
+  /** True from a `join` sent on the current socket until its `joined` or its error. */
+  private joining = false
   /** `UNAVAILABLE` retries so far, by `submissionId`: the backoff attempt of the next one. */
   private readonly unavailable = new Map<string, number>()
   /** Timers of the current connection; a disconnect cancels them all. */
@@ -104,12 +106,14 @@ export class QuizClient {
 
   /**
    * Asks for question `questionIndex` (or the result, at N). The client sends the same `next` again 1 s after
-   * `RATE_LIMITED` and after the backoff after `UNAVAILABLE`, until a reply arrives; a disconnect forgets it.
+   * `RATE_LIMITED`, after the backoff after `UNAVAILABLE` and after the `joined` that follows `NOT_JOINED`, until a
+   * reply arrives. A `next` with no open socket is dropped; a disconnect or `quiz_ended` forgets it.
    */
   next(questionIndex: number): void {
     this.cancelNextRetry()
-    this.pendingNext = { questionIndex, failures: 0 }
-    this.send({ v: 1, type: 'next', questionIndex })
+    if (!this.open) return
+    this.pendingNext = { questionIndex, failures: 0, afterJoin: false }
+    this.sendNext()
   }
 
   /**
@@ -126,6 +130,7 @@ export class QuizClient {
 
   /** Sends `join` again on the open socket; the `joined` reply carries the stored `cursor` and `score`. */
   rejoin(): void {
+    this.joining = this.open
     this.send({ v: 1, type: 'join', quizId: this.quizId, displayName: this.displayName })
   }
 
@@ -174,15 +179,24 @@ export class QuizClient {
 
   private receive(message: ServerMessage): void {
     switch (message.type) {
-      case 'joined':
+      case 'joined': {
         // The resync goes out before the UI hears of the join.
         this.backoff.joined(this.o.now())
         this.run(this.tracker.joined())
+        this.joining = false
         if (!this.joined) {
           this.joined = true
           for (const submissionId of this.unsettled.keys()) this.sendAnswer(submissionId)
         }
-        break
+        const waiting = this.pendingNext?.afterJoin === true ? this.pendingNext : null
+        this.emit(message)
+        // Protocol spec §7: repeat the `next` that got NOT_JOINED, unless the UI asked for another one on `joined`.
+        if (waiting !== null && this.pendingNext === waiting) {
+          waiting.afterJoin = false
+          this.sendNext()
+        }
+        return
+      }
       case 'question':
       case 'finished':
         if (message.type === 'finished' || message.questionIndex === this.pendingNext?.questionIndex) {
@@ -194,8 +208,12 @@ export class QuizClient {
         this.settle(message.submissionId)
         this.inFlight = this.inFlight.filter((id) => id !== message.submissionId)
         break
-      case 'leaderboard':
       case 'quiz_ended':
+        // Ui spec §4.3: the end drops any pending request.
+        this.cancelNextRetry()
+        this.pendingNext = null
+        return this.run(this.tracker.broadcast(message))
+      case 'leaderboard':
         return this.run(this.tracker.broadcast(message))
       case 'snapshot': {
         // A snapshot read before the end that arrives after quiz_ended changes nothing, so the UI never sees it.
@@ -208,6 +226,9 @@ export class QuizClient {
       case 'pong':
         return this.run(this.tracker.pong(message.seq))
       case 'error':
+        if (message.requestType === 'join') this.joining = false
+        // This layer alone repairs a lost join, so one `join` goes out for any number of NOT_JOINED replies.
+        if (message.code === 'NOT_JOINED') this.joinAgain()
         if (message.requestType === 'resync') this.resyncFailed(message.code)
         if (message.code === 'RATE_LIMITED' && message.requestType === null) this.resendInFlight()
         if (message.requestType === 'answer') this.answerFailed(message.code)
@@ -265,7 +286,7 @@ export class QuizClient {
     const submissionId = this.inFlight.shift()
     if (submissionId === undefined) return
     if (!RETRY_ANSWER_ON.includes(code)) return this.settle(submissionId)
-    if (code === 'NOT_JOINED') return this.joinAgain()
+    if (code === 'NOT_JOINED') return
     let wait = RETRY_AFTER_MS
     if (code === 'UNAVAILABLE') {
       const attempt = this.unavailable.get(submissionId) ?? 0
@@ -276,13 +297,12 @@ export class QuizClient {
   }
 
   /**
-   * The server lost this player's join (protocol spec §7: `join`, then repeat the request). Answers wait, and the
-   * next `joined` resends every unsettled one.
+   * The server lost this player's join (protocol spec §7: `join`, then repeat the request). Answers and the pending
+   * `next` wait, and the next `joined` resends them. A `join` already in flight is not sent again.
    */
   private joinAgain(): void {
-    if (!this.joined) return
     this.joined = false
-    this.send({ v: 1, type: 'join', quizId: this.quizId, displayName: this.displayName })
+    if (!this.joining) this.rejoin()
   }
 
   /**
@@ -297,22 +317,26 @@ export class QuizClient {
   }
 
   /**
-   * Resends the pending `next` 1 s after `RATE_LIMITED` or after the backoff after `UNAVAILABLE`; any other error
-   * settles it. After `NOT_JOINED` the client joins again, and that `joined` (`cursorOpen`) drives the next request.
+   * Resends the pending `next` 1 s after `RATE_LIMITED` or after the backoff after `UNAVAILABLE`. After `NOT_JOINED`
+   * it waits for the `joined` of the rejoin, which repeats it; any other error settles it.
    */
   private nextFailed(code: ErrorCode): void {
     const pending = this.pendingNext
-    if (pending === null) return
+    if (pending === null || pending.afterJoin) return
     this.cancelNextRetry()
     let wait: number
     if (code === 'RATE_LIMITED') wait = RETRY_AFTER_MS
     else if (code === 'UNAVAILABLE') wait = backoffDelay(pending.failures++, this.o.random)
     else {
-      this.pendingNext = null
-      if (code === 'NOT_JOINED') this.joinAgain()
+      if (code === 'NOT_JOINED') pending.afterJoin = true
+      else this.pendingNext = null
       return
     }
-    this.nextRetry = this.after(wait, () => this.send({ v: 1, type: 'next', questionIndex: pending.questionIndex }))
+    this.nextRetry = this.after(wait, () => this.sendNext())
+  }
+
+  private sendNext(): void {
+    if (this.pendingNext !== null) this.send({ v: 1, type: 'next', questionIndex: this.pendingNext.questionIndex })
   }
 
   private cancelNextRetry(): void {
@@ -359,6 +383,7 @@ export class QuizClient {
     this.socket = null
     this.open = false
     this.joined = false
+    this.joining = false
     this.resyncFailures = 0
     this.inFlight = []
     this.pendingNext = null
