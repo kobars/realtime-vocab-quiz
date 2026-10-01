@@ -17,6 +17,8 @@ from websockets.sync.client import connect as ws_connect
 from websockets.typing import Origin, Subprotocol
 
 from quiz.adapters.memory import MemoryStore
+from quiz.adapters.mock_auth import MemoryTicketStore
+from quiz.adapters.ws import endpoint
 from quiz.adapters.ws.heartbeat import server_config
 from quiz.adapters.ws.limits import RateLimiter
 from quiz.adapters.ws.registry import Registry
@@ -548,3 +550,40 @@ async def test_a_present_socket_that_joins_again_after_the_end_still_leaves() ->
     registry.drop(conn)
     await asyncio.sleep(0.05)
     assert await online(store) == 0
+
+
+async def test_a_given_up_close_keeps_the_cap_slot_until_the_transport_is_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(endpoint, "Sender", partial(Sender, flush_s=0.05))
+    app = create_app(Settings())
+    services, gateway = services_of(app), app.state.gateway
+    create = partial(services.store.create_quiz, window_ms=60_000, time_limit_ms=20_000)
+    await create("VOCAB-42", (Question("q0", 1),))
+    tickets = cast("MemoryTicketStore", services.tickets)
+    ticket = await tickets.issue_ticket((await tickets.create_session("Ann"))[1])
+    inbound: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    inbound.put_nowait({"type": "websocket.connect"})
+    for text in (json.dumps(JOIN), "x" * (16 * KIB + 1)):  # the second frame closes it with 1009
+        inbound.put_nowait({"type": "websocket.receive", "text": text})
+
+    async def send(message: dict[str, Any]) -> None:
+        if message["type"] == "websocket.close":  # the peer reads nothing: it never goes out
+            await asyncio.Event().wait()
+
+    scope = {
+        "type": "websocket",
+        "path": "/ws",
+        "query_string": f"ticket={ticket}".encode(),
+        "headers": [(b"origin", ORIGIN.encode())],
+        "subprotocols": ["quiz.v1"],
+        "client": ("10.0.0.1", 5000),
+    }
+    ws = WebSocket(scope, inbound.get, send)  # type: ignore[arg-type]
+    handler = asyncio.create_task(gateway.endpoint(ws))
+    await asyncio.sleep(1.3)  # past flush_s and the close frame's own second: given up
+    assert gateway.registry.senders("VOCAB-42") == []  # the registry lets go at the deadline
+    assert (handler.done(), gateway.caps.total) == (False, 1)
+    inbound.put_nowait({"type": "websocket.disconnect", "code": 1006})
+    await asyncio.wait_for(handler, 1)
+    assert gateway.caps.total == 0

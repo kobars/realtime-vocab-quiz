@@ -7,8 +7,9 @@ a ``leaderboard`` takes the place of every ``leaderboard`` queued after the last
 and goes out with ``rebase: true``; every other message is a barrier and is never dropped.
 Above the hard limit the queue makes way for ``error UNAVAILABLE`` and close 1013. The queue
 gets ``flush_s`` after a close, and the close frame ``CLOSE_S`` more of its own. A socket that
-does not take them in that time is given up: its handler returns and uvicorn closes the
-transport gracefully, so the connection ends once its buffer flushes or the peer is gone."""
+does not take them in that time is given up (``given_up``): its receive loop ends, and the
+connection lasts until its buffer flushes or the peer is gone, holding its cap slot meanwhile
+(see the endpoint)."""
 
 import asyncio
 from collections import deque
@@ -46,6 +47,7 @@ class Sender:
         self._close_by: float | None = None
         self._deadline: asyncio.Timeout | None = None
         self.close_code: int | None = None  # set by close(); nothing is queued after it
+        self.given_up = False  # the close frame could not be written in time
         self.task = asyncio.create_task(self._run())  # ends once the socket is closed or gone
 
     @property
@@ -100,9 +102,12 @@ class Sender:
         # The close frame also waits for a writable transport, so it has a bound of its own
         # that a drain ending at the deadline has not used up.
         close_by = max(self._close_by or 0.0, asyncio.get_running_loop().time()) + CLOSE_S
-        with suppress(Exception):  # TimeoutError, or the socket dropped meanwhile
-            async with asyncio.timeout_at(close_by):
-                await self._ws.close(self.close_code or 1000)
+        with suppress(Exception):  # the socket dropped meanwhile
+            try:
+                async with asyncio.timeout_at(close_by):
+                    await self._ws.close(self.close_code or 1000)
+            except TimeoutError:
+                self.given_up = True
 
     async def _write(self) -> None:
         while True:
