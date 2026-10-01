@@ -16,29 +16,12 @@ COPY web/ ./
 RUN pnpm build
 
 FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
-# Unknown paths fall back to index.html, so client routes survive a reload; hashed assets cache long.
-# No $uri/ step: a Vite build has no directory indexes, and it would 301 a directory path.
-COPY <<'CONF' /etc/nginx/conf.d/default.conf
-server {
-    listen 8080;
-    server_name _;
-    server_tokens off;
-    absolute_redirect off;
-    root /usr/share/nginx/html;
-    index index.html;
-
-    location /assets/ {
-        add_header Cache-Control "public, max-age=31536000, immutable";
-        try_files $uri =404;
-    }
-
-    location / {
-        add_header Cache-Control "no-cache";
-        try_files $uri /index.html;
-    }
-}
-CONF
+# The base image runs as nginx (101); root only to take the Alpine security fixes its tag lacks.
+USER 0
+RUN apk upgrade --no-cache
+COPY web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /web/dist /usr/share/nginx/html
+USER 101:101
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
     CMD ["wget", "-q", "--spider", "http://127.0.0.1:8080/"]

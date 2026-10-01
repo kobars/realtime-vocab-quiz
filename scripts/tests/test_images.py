@@ -79,11 +79,29 @@ def test_web_image_serves_dist_from_unprivileged_nginx_with_an_spa_fallback() ->
     assert any("pnpm install --frozen-lockfile" in line for line in builder)
     assert "RUN pnpm build" in builder
     assert runtime[0].startswith("FROM nginxinc/nginx-unprivileged:")
+    assert "COPY web/nginx.conf /etc/nginx/conf.d/default.conf" in runtime
+    conf = (ROOT / "web" / "nginx.conf").read_text(encoding="utf-8").splitlines()
+    try_files = [line.strip() for line in conf if line.strip().startswith("try_files")]
     # No $uri/ fallback: it answers a directory path with a 301 to the internal port.
-    assert "try_files $uri /index.html;" in runtime
-    assert not any("$uri/" in line for line in runtime)
+    assert "try_files $uri /index.html;" in try_files
+    assert not any("$uri/" in line for line in try_files)
     assert "COPY --from=builder /web/dist /usr/share/nginx/html" in runtime
     assert any(line.startswith("HEALTHCHECK") for line in runtime)
+
+
+def test_runtime_stages_take_the_os_security_fixes_and_end_as_a_non_root_user() -> None:
+    """The base tags lag behind the distribution's security fixes, which the image scan fails on."""
+    _, api = _stages(ROOT / "api" / "Dockerfile")
+    _, web = _stages(ROOT / "web" / "Dockerfile")
+    assert any("apt-get upgrade -y" in line for line in api if line.startswith("RUN"))
+    assert any("apk upgrade --no-cache" in line for line in web if line.startswith("RUN"))
+    # pip is never used at run time, and its vendored libraries carry their own advisories.
+    assert any("pip uninstall --yes pip" in line for line in api if line.startswith("RUN"))
+    users = [[line for line in stage if line.startswith("USER ")] for stage in (api, web)]
+    assert [stage_users[-1] for stage_users in users] == [
+        "USER 10001:10001",
+        "USER 101:101",
+    ]
 
 
 def test_build_context_leaves_out_local_state() -> None:
