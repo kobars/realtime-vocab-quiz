@@ -119,7 +119,7 @@ class SessionMachine(RuleBasedStateMachine):
         index = self.cursor(user_id) + offset
         before = self.state
         out = self.apply(ServeNext(user_id, index))
-        if user_id in before.players and not before.is_open(self.now):
+        if not before.is_open(self.now):  # checked before the player exists
             assert out is ErrorCode.QUIZ_ENDED
         if isinstance(out, Step) and isinstance(out.reply, QuestionServed):
             assert out.reply.serve_ms == (self.serves[user_id, index] if offset == 0 else self.now)
@@ -143,10 +143,10 @@ class SessionMachine(RuleBasedStateMachine):
             assert out == Step(before, (), stored)
         elif stored is not None:  # a submission id reused on another question
             assert out is ErrorCode.INVALID_MESSAGE
-        elif player is None:
-            assert out is ErrorCode.NOT_JOINED
         elif not before.is_open(self.now):  # after the deadline a new answer writes nothing
             assert out is ErrorCode.QUIZ_ENDED
+        elif player is None:
+            assert out is ErrorCode.NOT_JOINED
         elif index == player.cursor and player.cursor_open:  # a fresh answer is accepted
             assert isinstance(out, Step)
             assert isinstance(out.reply, AnswerScored)
