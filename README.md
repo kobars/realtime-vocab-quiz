@@ -49,8 +49,9 @@ the client build (`pnpm -C web build`). Every pull request runs the same gate in
 the commit messages and the PR text (run again when the PR text is edited).
 A second workflow (`.github/workflows/containers.yml`) checks the container and
 infrastructure files: hadolint (settings in `.hadolint.yaml`), shellcheck,
-`docker compose config`, `nginx -t`, Trivy on the configuration and on both images
-(it fails on a CRITICAL or HIGH finding that has a fix), and
+`docker compose config`, `scripts/check_nginx.sh` (`nginx -t` on the web image's site
+and on any `nginx.conf` under `infra/`), Trivy on the configuration (fails on any
+finding) and on both images (fails on a CRITICAL or HIGH finding that has a fix), and
 `scripts/smoke_images.sh`, which runs each image as a non-root user on a read-only
 root filesystem until its healthcheck passes (locally: `make build && scripts/smoke_images.sh`).
 

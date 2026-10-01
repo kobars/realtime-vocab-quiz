@@ -41,14 +41,7 @@ jobs:
       - name: non-root, read-only smoke test
         run: scripts/smoke_images.sh "$IMAGE_TAG"
       - name: nginx -t
-        # The web image checks its own site config, then any nginx config under infra/.
-        run: |
-          docker run --rm --read-only --tmpfs /tmp "elsaquiz-web:$IMAGE_TAG" nginx -t
-          if [ -z "$(git ls-files 'infra/*.conf')" ]; then
-            echo "infra/ has no nginx config yet; skipped"
-          else
-            docker run --rm --read-only --tmpfs /tmp -v "$PWD/infra:/etc/nginx/conf.d:ro" "elsaquiz-web:$IMAGE_TAG" nginx -t
-          fi
+        run: scripts/check_nginx.sh "$IMAGE_TAG"
       - name: trivy image (api)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
