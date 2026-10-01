@@ -10,7 +10,7 @@ A quiz (for example `VOCAB-42`) has N questions (default 10), each with 4 choice
 ## 2. Time
 
 - **One clock.** Every time in this document is read from Redis `TIME` inside the script that does the write, in integer milliseconds. With several API nodes, all of them use the same clock. Client timestamps are never read; the client countdown is display only and runs from the server's `remainingMs`.
-- **Quiz start.** The quiz window starts when the quiz is created (`startMs`). `deadlineMs = startMs + windowMs`. `windowMs` is set per quiz: default 10 min, at most 60 min. `make demo` creates a fresh 60-min quiz on every run, so a demo never starts on an expired quiz.
+- **Quiz start.** The quiz window starts when the quiz is created (`startMs`). `deadlineMs = startMs + windowMs`. `windowMs` is set per quiz: default 10 min, at most 60 min.
 - **Elapsed time.** `e = max(0, answerMs − serveMs)`. If Redis `TIME` steps back between the serve and the answer, the raw difference is negative: the answer is scored with `e = 0` (full speed bonus), the counter `redis_clock_step_total` is incremented, and no error is returned.
 - **Late.** An answer is late when `e > T`. At exactly `e = T` it is on time.
 - **The deadline is checked on every write.** Join, serve and score each compare `TIME` with `deadlineMs` (and with `endedMs`, if the host ended the quiz) in the same script as the write. A write at `now ≥ deadlineMs` is refused with `QUIZ_ENDED` and writes nothing. Correctness never depends on a timer or a tick: a timer may *announce* the end sooner, but which writes count is decided by this check alone.
