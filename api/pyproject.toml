@@ -32,3 +32,52 @@ dev = [
 load = [
     "websockets>=17.1",
 ]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812", # conflicts with the formatter
+    "CPY001", # no per-file copyright headers
+    "D",      # docstrings are written where they help, not everywhere
+    "INP001", # tests/ and scripts/ are plain folders, not packages
+    "TC001",  # annotations are lazy on Python 3.14, so runtime imports cost nothing
+    "TC002",
+    "TC003",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["quiz", "check_internal"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004"]
+"../scripts/tests/**" = ["S101", "PLR2004"]
+"../scripts/*.py" = ["S603", "T201"]
+
+[tool.mypy]
+strict = true
+python_version = "3.14"
+mypy_path = ["src", "../scripts"]
+files = ["src", "tests", "../scripts"]
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests", "../scripts/tests"]
+pythonpath = ["../scripts"]
+addopts = ["--strict-markers", "--strict-config", "-ra"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+xfail_strict = true
+filterwarnings = ["error"]
+markers = [
+    "unit: fast tests of pure code (set by folder)",
+    "property: Hypothesis property tests (set by folder)",
+    "contract: wire-contract tests (set by folder)",
+    "integration: tests that need Redis; REDIS_URL or a container (set by folder)",
+    "acceptance: the locked acceptance tests (set by folder)",
+    "slow: tests that take more than a second",
+]
