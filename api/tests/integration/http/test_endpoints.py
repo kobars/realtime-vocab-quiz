@@ -85,20 +85,10 @@ async def test_quiz_reports_ended_after_the_deadline_with_nobody_connected(
     assert (await http.get("/quizzes/VOCAB-42")).json()["status"] == "ended"
 
 
-async def test_host_end_announces_once(http: httpx.AsyncClient) -> None:
-    await create(http)
-    for _ in range(2):
-        resp = await http.post("/admin/quizzes/VOCAB-42/end", headers=TOKEN)
-        assert resp.json() == {"quizId": "VOCAB-42", "status": "ended", "endSeq": 1}
-    assert (await http.get("/quizzes/VOCAB-42")).json()["status"] == "ended"
-    assert (await http.post("/admin/quizzes/NOPE-1/end", headers=TOKEN)).status_code == 404
-
-
 async def test_admin_needs_the_token(http: httpx.AsyncClient) -> None:
     for headers in ({}, {"X-Admin-Token": "wrong"}):
         made = await http.post("/admin/quizzes", json={"quizId": "VOCAB-42"}, headers=headers)
-        ended = await http.post("/admin/quizzes/VOCAB-42/end", headers=headers)
-        assert (made.status_code, ended.status_code) == (404, 404)
+        assert made.status_code == 404
 
 
 async def test_admin_routes_exist_only_with_admin_mock(now: list[int]) -> None:

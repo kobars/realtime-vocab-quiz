@@ -38,12 +38,6 @@ class CreateQuiz(BaseModel):
     windowMs: Annotated[int, Field(ge=1, le=LIMIT_MS)] = 600_000
 
 
-class Ended(BaseModel):
-    quizId: str
-    status: Literal["ended"]
-    endSeq: int | None
-
-
 class Status(BaseModel):
     status: Literal["ok", "ready", "unavailable"]
 

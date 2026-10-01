@@ -180,7 +180,7 @@ The HTTP endpoints (`/docs` serves the OpenAPI page). A store outage answers 503
 | `POST /sessions {displayName}` | MOCK: 201 `{userId, sessionToken}`; 422 for a bad name |
 | `POST /tickets`, header `Authorization: Bearer <sessionToken>` | MOCK: 201 `{ticket, expiresInMs}`; 401 for an unknown session |
 | `GET /quizzes/{quizId}` | `{quizId, title, questionCount, status, players}`; `status` is `ended` from the deadline alone. Every unknown ID gets the same 404 body |
-| `POST /admin/quizzes {quizId, timeLimitMs, windowMs}`; `POST /admin/quizzes/{quizId}/end` | MOCK admin: only with `ADMIN_MOCK=1` and the `X-Admin-Token` header, else 404. Create: 201, or 409 when it exists. End: marks, then announces the end (redis.md §3.1) |
+| `POST /admin/quizzes {quizId, timeLimitMs, windowMs}` | MOCK admin: only with `ADMIN_MOCK=1` and the `X-Admin-Token` header, else 404. 201, or 409 when the quiz exists |
 | `GET /healthz`; `GET /readyz` | Liveness; readiness: 503 when Redis is unreachable |
 
 ## 9. Limits
