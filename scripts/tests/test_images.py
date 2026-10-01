@@ -1,12 +1,15 @@
 # AI-ASSISTED: static guards on the Dockerfiles, the build context and the make build recipe.
 """The image rules that a build alone does not enforce: the locked install, the non-root user,
-the healthchecks, the WebSocket frame cap, the SPA fallback and a build context without local state.
+the healthchecks, the uvicorn transport flags, the SPA fallback and a build context without
+local state.
 
 The files are read as text, so the tests need no Docker daemon.
 """
 
 import json
 from pathlib import Path
+
+from uvicorn.main import main as uvicorn_cli
 
 from quiz.config import Settings
 
@@ -25,6 +28,12 @@ def _stages(dockerfile: Path) -> list[list[str]]:
         if stages and line and not line.startswith("#"):
             stages[-1].append(line)
     return stages
+
+
+def _api_cmd() -> list[str]:
+    _, runtime = _stages(ROOT / "api" / "Dockerfile")
+    cmd: list[str] = json.loads(next(line for line in runtime if line.startswith("CMD "))[3:])
+    return cmd
 
 
 def test_api_image_installs_locked_runtime_dependencies_only() -> None:
@@ -48,8 +57,7 @@ def test_api_runtime_holds_only_the_venv_and_the_source_and_runs_as_10001() -> N
 
 def test_api_image_caps_websocket_frames_just_above_the_gateway_limit() -> None:
     """uvicorn buffers a whole frame before the gateway sees it; its default cap is 16 MiB."""
-    _, runtime = _stages(ROOT / "api" / "Dockerfile")
-    cmd = json.loads(next(line for line in runtime if line.startswith("CMD "))[len("CMD") :])
+    cmd = _api_cmd()
     assert cmd[0] == "uvicorn"
     assert "--ws-max-size" in cmd
     cap = int(cmd[cmd.index("--ws-max-size") + 1])
@@ -82,3 +90,10 @@ def test_make_build_builds_both_images_from_the_repository_root() -> None:
     assert "not yet" not in recipe
     assert "docker build -f api/Dockerfile" in recipe
     assert "docker build -f web/Dockerfile" in recipe
+
+
+def test_api_image_leaves_x_forwarded_for_to_the_gateway_and_turns_deflate_off() -> None:
+    """uvicorn's own proxy headers trust loopback peers before the gateway's trusted proxies."""
+    params = uvicorn_cli.make_context("uvicorn", _api_cmd()[1:]).params
+    assert params["proxy_headers"] is False
+    assert params["ws_per_message_deflate"] is False
