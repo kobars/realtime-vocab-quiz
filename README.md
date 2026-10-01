@@ -33,10 +33,11 @@ make test-integration        # the tests that need Redis (set REDIS_URL to use y
 
 `make check` runs, in order: the internal-content guard
 (`scripts/check_internal.py`), ruff (lint and format), mypy (strict), pytest
-(without the `integration` and `acceptance` markers), ESLint, vue-tsc and
-Vitest. Every pull request runs the same gate in GitHub Actions
+(without the `integration` and `acceptance` markers), the client install from
+the lock file (`pnpm install --frozen-lockfile`), ESLint, vue-tsc and Vitest.
+Every pull request runs the same gate in GitHub Actions
 (`.github/workflows/ci.yml`), plus the Redis integration tests and the guard on
-the commit messages and the PR text.
+the commit messages and the PR text (run again when the PR text is edited).
 
 `make help` lists every target; a target whose work has not landed yet prints
 `not yet`.

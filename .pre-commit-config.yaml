@@ -7,7 +7,6 @@ repos:
         name: internal content
         entry: uv run --project api --locked python scripts/check_internal.py
         language: system
-        types: [text]
       - id: ruff-check
         name: ruff lint
         entry: bash -c 'cd api && uv run --locked ruff check --force-exclude "${@/#/../}"' --
