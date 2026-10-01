@@ -11,7 +11,9 @@ import uuid
 from fastapi import Response, WebSocket, WebSocketDisconnect
 
 from quiz.adapters.ws.limits import ConnectionCaps, RateLimiter, client_ip
-from quiz.adapters.ws.session import serve
+from quiz.adapters.ws.registry import Registry
+from quiz.adapters.ws.sender import Sender
+from quiz.adapters.ws.session import Deps, serve
 from quiz.app.service import Connection, QuizService
 from quiz.config import Settings
 from quiz.ports.clock import Clock
@@ -40,7 +42,9 @@ def path_only(record: logging.LogRecord) -> bool:
 
 class Gateway:
     def __init__(self, settings: Settings, tickets: TicketStore, service: QuizService) -> None:
-        self._settings, self._tickets, self._service = settings, tickets, service
+        self._settings, self._tickets = settings, tickets
+        self.registry = Registry()
+        self._deps = Deps(service, self.registry, settings.max_payload_bytes)
         self.caps = ConnectionCaps(settings.max_connections, settings.per_ip_conn_cap)
         self.clock: Clock = lambda: time.monotonic_ns() // 1_000_000  # paces the token buckets
         for name in UVICORN_LOGGERS:  # adding it twice is a no-op
@@ -64,15 +68,16 @@ class Gateway:
         if (status := self.caps.acquire(ip)) is not None:
             return await _refuse(ws, status, "connection cap reached")
         code = 1006  # the socket dropped without a close frame
+        conn = Connection(uuid.uuid4().hex, identity.user_id)
         try:
             await ws.accept(subprotocol=SUBPROTOCOL)
-            conn = Connection(uuid.uuid4().hex, identity.user_id)
-            rate, burst = settings.rate_limit_per_s, settings.rate_limit_burst
-            limiter = RateLimiter(rate, burst, self.clock)
-            code = await serve(ws, conn, self._service, limiter, settings.max_payload_bytes)
+            limiter = RateLimiter(settings.rate_limit_per_s, settings.rate_limit_burst, self.clock)
+            soft, hard = settings.send_buffer_soft_bytes, settings.send_buffer_hard_bytes
+            code = await serve(ws, conn, limiter, Sender(ws, soft, hard), self._deps)
         except WebSocketDisconnect as gone:
             code = gone.code
         finally:
+            self.registry.drop(conn)
             self.caps.release(ip)
             log.info("ws %s closed %d", path, code)
         return None
