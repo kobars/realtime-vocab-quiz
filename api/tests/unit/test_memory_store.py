@@ -11,15 +11,15 @@ async def one_question_quiz() -> tuple[MemoryStore, list[int]]:
     return store, now
 
 
-async def test_clock_step_back_returns_flag_outside_stored_reply() -> None:
+async def test_step_back_and_replay_flags_stay_outside_the_stored_reply() -> None:
     store, now = await one_question_quiz()
     await store.join("VOCAB-1", "a", "A", "c1")
     await store.serve_next("VOCAB-1", "a", 0, "c1")
     now[0] -= 50
     first = await store.apply_answer("VOCAB-1", "a", 0, 1, "s1", "c1")
-    assert (first.step_back, first.result.points) == (True, 150)
+    assert (first.step_back, first.replay, first.result.points) == (True, False, 150)
     replay = await store.apply_answer("VOCAB-1", "a", 0, 1, "s1", "c1")
-    assert (replay.step_back, replay.result) == (False, first.result)
+    assert (replay.step_back, replay.replay, replay.result) == (False, True, first.result)
 
 
 async def test_join_after_clock_step_back_clamps_reached_time() -> None:

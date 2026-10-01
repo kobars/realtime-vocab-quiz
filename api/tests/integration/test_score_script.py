@@ -95,10 +95,11 @@ async def test_clock_step_back_clamps_elapsed_and_flags_outside_the_stored_reply
     await redis_store.serve_next(quiz_id, "a", 0, "c1")
     await serve_at(redis_client, keys, 0, -5_000)  # TIME is now 5 s before the serve time
     first = await redis_store.apply_answer(quiz_id, "a", 0, 0, "s1", "c1")
-    assert (first.step_back, first.result.points, first.result.late) == (True, 150, False)
+    assert (first.step_back, first.replay, first.result.points) == (True, False, 150)
+    assert not first.result.late
     assert json.loads(str(await redis_client.hget(keys.answered, "a|0")))[2] == 0
     replay = await redis_store.apply_answer(quiz_id, "a", 0, 0, "s1", "c1")
-    assert (replay.step_back, replay.result) == (False, first.result)
+    assert (replay.step_back, replay.replay, replay.result) == (False, True, first.result)
 
 
 async def test_writes_after_the_deadline_write_nothing_and_a_replay_still_answers(
@@ -115,7 +116,7 @@ async def test_writes_after_the_deadline_write_nothing_and_a_replay_still_answer
             error = await refused(call)
             assert (error.code, error.end_seq) == (ErrorCode.QUIZ_ENDED, None)
     again = await redis_store.apply_answer(quiz_id, "a", 0, 0, "s1", "c1")
-    assert (again.result, again.step_back) == (first.result, False)
+    assert (again.result, again.step_back, again.replay) == (first.result, False, True)
     assert await data(redis_client, keys) == state
 
 

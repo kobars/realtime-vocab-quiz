@@ -66,6 +66,7 @@ class Finished:
 class Answered:
     result: AnswerScored  # a replay returns the stored result unchanged
     step_back: bool  # the clock stepped back since the serve; never stored
+    replay: bool  # the stored result of an earlier scoring of this submissionId
 
 
 @dataclass(frozen=True, slots=True)
