@@ -37,6 +37,7 @@ check: ## Run every check a change must pass
 	$(call step,eslint,pnpm -C web exec eslint --max-warnings 0 .)
 	$(call step,vue-tsc,pnpm -C web exec vue-tsc --noEmit)
 	$(call step,vitest,$(VITEST))
+	$(call step,web build,pnpm -C web build)
 acceptance: ## Run the acceptance tests
 	@echo "not yet"
 load: ## Run the load scenarios with the bot swarm
