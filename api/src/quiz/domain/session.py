@@ -150,7 +150,7 @@ def _serve_next(state: QuizState, command: ServeNext, now: int) -> Step:
         return Step(state, (), ev.PlayerFinished(user_id, player.standing.total))
     if i == player.cursor >= 0:  # a retry of the serve: the stored serve time
         return Step(state, (), _served(state, player, now))
-    if i != player.cursor + 1 or i > n:
+    if i != n and (i != player.cursor + 1 or player.finished):  # i = N: finish from any cursor
         raise DomainError(ErrorCode.INVALID_STATE, f"next {i} with cursor {player.cursor}")
     events: list[ev.Event] = []
     if player.cursor_open:
