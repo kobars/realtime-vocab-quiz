@@ -1,20 +1,22 @@
-# AI-ASSISTED: the coalescing tick and the relay on one node, on the memory and the Redis store.
+# AI-ASSISTED: the coalescing tick, the relay and the resubscribe on one node, on both stores.
 import asyncio
 import json
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from itertools import pairwise
-from typing import Any, cast
+from typing import Any, Self, cast
 
 import pytest
 
 from quiz.adapters.memory import MemoryStore
+from quiz.adapters.mock_questions import MockQuestionBank
 from quiz.adapters.redis import RedisStore
 from quiz.adapters.ws.registry import Registry
 from quiz.adapters.ws.sender import Sender
-from quiz.app.service import Connection
+from quiz.app.service import Connection, QuizService
 from quiz.domain.session import Question
 from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
@@ -50,6 +52,10 @@ def store(request: pytest.FixtureRequest) -> FeedStore:
     return redis_store
 
 
+def ticker_of(store: FeedStore, sink: Sink) -> Ticker:
+    return Ticker(store, sink, QuizService(store, MockQuestionBank({}), lambda: 0), "n1")
+
+
 def loops() -> int:
     return sum(
         getattr(t.get_coro(), "__qualname__", "") == "Ticker._run" for t in asyncio.all_tasks()
@@ -79,7 +85,7 @@ async def test_100_answers_in_1_s_make_at_most_6_frames_ending_on_the_standings(
     for user in users:
         await store.serve_next(quiz_id, user, 0, f"c-{user}")
     sink = Sink()
-    (ticker := Ticker(store, sink, "n1")).open(quiz_id)
+    (ticker := ticker_of(store, sink)).open(quiz_id)
     await asyncio.sleep(0.4)  # the joins' frame
     sink.frames.clear()
     start = time.monotonic()
@@ -125,7 +131,7 @@ async def test_the_tick_runs_only_while_the_quiz_has_local_sockets(
 ) -> None:
     quiz_id = await quiz_with(store, "a")
     sink, registry = Sink(), Registry(store, 0)  # no grace: a dropped player leaves at once
-    registry.watcher = Ticker(store, sink, "n1")
+    registry.watcher = ticker_of(store, sink)
     sender = cast("Sender", object())  # the registry only stores it here
     first, second = Connection("c1", "a", quiz_id), Connection("c2", "b", quiz_id)
     await asyncio.sleep(0.3)
@@ -163,7 +169,7 @@ async def test_players_outside_the_top_50_get_rank_updates(
 
     monkeypatch.setattr(store, "ranks_of", counted)
     sink = Sink("u000", "u120", "u150")
-    (ticker := Ticker(store, sink, "n1")).open(quiz_id)
+    (ticker := ticker_of(store, sink)).open(quiz_id)
     await asyncio.sleep(0.3)
     started = time.monotonic()
     for user in ("u150", "u160", "u170"):  # each shifts u120 down by one, a tick apart
@@ -187,7 +193,7 @@ async def test_quiz_ended_carries_each_players_own_rank_and_ends_the_loop(store:
     quiz_id = await quiz_with(store, "a", "b")
     await score(store, quiz_id, "b", 0)
     sink = Sink("a", "b", "c")
-    Ticker(store, sink, "n1").open(quiz_id)
+    ticker_of(store, sink).open(quiz_id)
     await asyncio.sleep(0.3)
     await store.end_by_host(quiz_id)
     await asyncio.sleep(0.3)
@@ -202,10 +208,51 @@ async def test_a_host_mark_is_announced_at_the_deadline(redis_store: RedisStore)
     quiz_id = await quiz_with(redis_store, "a", window_ms=600)
     await redis_store.end_quiz(quiz_id, "mark")  # a host end whose announcement was lost
     sink = Sink("a")
-    (ticker := Ticker(redis_store, sink, "n1")).open(quiz_id)
+    (ticker := ticker_of(redis_store, sink)).open(quiz_id)
     await asyncio.sleep(1.0)
     await ticker.stop()
     assert [update["type"] for _, update in sink.updates["a"]] == ["quiz_ended"]
+
+
+class Dropped:  # the feed of a subscription whose connection dropped
+    def __aiter__(self) -> Self:
+        return self
+
+    async def __anext__(self) -> str:
+        raise ConnectionError
+
+
+@pytest.mark.parametrize("failure", ["subscribe", "feed", "tick"])
+async def test_after_a_failure_the_loop_subscribes_again_and_sends_each_player_a_snapshot(
+    store: FeedStore, failure: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quiz_id = await quiz_with(store, "a")
+    subscribe, publish, subscribed = store.subscribe, store.publish_if_dirty, list[str]()
+
+    @asynccontextmanager
+    async def flaky(quiz_id: str) -> AsyncIterator[AsyncIterator[str]]:
+        subscribed.append(quiz_id)
+        if failure == "subscribe" and len(subscribed) == 1:
+            raise ConnectionError
+        async with subscribe(quiz_id) as messages:
+            yield Dropped() if failure == "feed" and len(subscribed) == 1 else messages
+
+    async def fails_first(quiz_id: str, node_id: str) -> Publish:
+        if failure == "tick" and len(subscribed) == 1:
+            raise RuntimeError
+        return await publish(quiz_id, node_id)
+
+    monkeypatch.setattr(store, "subscribe", flaky)
+    monkeypatch.setattr(store, "publish_if_dirty", fails_first)
+    sink = Sink("a")
+    (ticker := ticker_of(store, sink)).open(quiz_id)
+    await asyncio.sleep(0.6)  # the first backoff is at most 250 ms
+    await store.join(quiz_id, "b", "B", "c-b")
+    await asyncio.sleep(0.4)
+    await ticker.stop()
+    assert len(subscribed) == 2
+    assert [update["type"] for _, update in sink.updates["a"]] == ["snapshot"]
+    assert sink.frames[-1]["playerCount"] == 2  # relaying again
 
 
 class Reads:

@@ -208,12 +208,18 @@ class QuizService:
         if conn.last_resync_ms is not None and now - conn.last_resync_ms < RESYNC_INTERVAL_MS:
             raise Refused(m.ErrorCode.RATE_LIMITED, "at most one resync per second")
         conn.last_resync_ms = now
-        snap = await self.snapshot(quiz_id, conn.user_id)
+        return Outcome(await self.standing(quiz_id, conn.user_id))
+
+    async def standing(
+        self, quiz_id: str, user_id: str
+    ) -> tuple[m.Snapshot] | tuple[m.Snapshot, m.RankUpdate]:
+        """A snapshot, then ``rank_update`` when the player is outside its entries (§4)."""
+        snap = await self.snapshot(quiz_id, user_id)
         you, count = snap.you, snap.playerCount
         if you is None or you.rank <= len(snap.entries):  # the store's limits cut the entries
-            return Outcome((snap,))  # above full_list_max and outside the entries: rank_update (§4)
+            return (snap,)
         update = m.RankUpdate(atSeq=snap.atSeq, rank=you.rank, score=you.score, playerCount=count)
-        return Outcome((snap, update))
+        return (snap, update)
 
     async def _on_get_leaderboard(self, conn: Connection, msg: m.GetLeaderboard) -> m.ServerMessage:
         page = await self._store.standings_page(_bound(conn), msg.offset, msg.limit)

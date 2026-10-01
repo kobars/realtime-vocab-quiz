@@ -33,6 +33,7 @@ class Relay:
         self._sent: dict[str, tuple[int, int, int]] = {}  # user id → (atSeq, rank, score) it got
         self._player_count = 0
         self._seq = self._read_seq = -1  # the newest leaderboard relayed; the last shifted read
+        self._repaired = -1  # the newest seq of a repair snapshot: no leaderboard at or below it
 
     async def relay(self, message: str) -> bool:
         """Queue the frame on every local socket; True once it was the last one, ``quiz_ended``."""
@@ -41,6 +42,8 @@ class Relay:
         if frame["type"] == "quiz_ended":
             await self._ended(frame, data)
             return True
+        if frame["seq"] <= self._repaired:  # older than a snapshot sent: seq < lastSeq resyncs
+            return False
         self._sockets.broadcast(self._quiz_id, data, leaderboard=True)
         self._player_count, self._seq = frame["playerCount"], frame["seq"]
         local = self._sockets.players(self._quiz_id)
@@ -48,6 +51,10 @@ class Relay:
             if user_id in local:
                 self._send(user_id, rank, score, frame["seq"])
         return False
+
+    def repaired(self, seq: int) -> None:
+        """Skip the queued leaderboards that the snapshots sent after a resubscribe hold."""
+        self._repaired = seq
 
     async def shifted(self) -> None:
         """Send each local player outside the top its rank, if it moved since it last got one."""
