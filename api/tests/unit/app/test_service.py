@@ -1,16 +1,19 @@
 # AI-ASSISTED: use-case tests: protocol messages in, replies out, on the memory store and a clock.
 import logging
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, Literal
 
 import pytest
+from redis import exceptions as redis_errors
 
 from quiz.adapters.memory import MemoryStore
+from quiz.adapters.redis import RedisStore
 from quiz.app.service import Connection, QuizService
 from quiz.contracts import messages as m
 from quiz.domain import errors as domain
 from quiz.domain.session import Question
 from quiz.ports.questions import BankQuestion
-from quiz.ports.store import Snapshot
+from quiz.ports.store import End, Page, Ranks, Snapshot
 
 QUIZ, N = "VOCAB-1", 3
 E, SID = m.ErrorCode, "-0000-4000-8000-000000000000"
@@ -29,12 +32,20 @@ class Bank:
 
 class SpyStore(MemoryStore):
     def __init__(self) -> None:
-        self.now, self.snapshots = [1_000_000], 0
+        self.now, self.snapshots, self.pages, self.ends = [1_000_000], 0, 0, 0
         super().__init__(lambda: self.now[0])
 
     async def snapshot(self, quiz_id: str, user_id: str | None) -> Snapshot:
         self.snapshots += 1
         return await super().snapshot(quiz_id, user_id)
+
+    async def standings_page(self, quiz_id: str, offset: int, limit: int) -> Page:
+        self.pages += 1
+        return await super().standings_page(quiz_id, offset, limit)
+
+    async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> End:
+        self.ends += 1
+        return await super().end_quiz(quiz_id, reason)
 
 
 @pytest.fixture
@@ -178,3 +189,99 @@ async def test_store_faults_are_internal_with_a_log_reference_or_unavailable(
     assert (error.code, outcome.close_code, "boom" in error.message) == (E.INTERNAL, 1011, False)
     assert error.message.rsplit(" ", 1)[-1] in caplog.records[0].getMessage()
     assert await refused(service, conn, m.Next(questionIndex=0)) == (E.UNAVAILABLE, None)
+
+
+class DownRedis:  # loads scripts, then fails as redis-py fails when Redis is unreachable
+    async def script_load(self, script: str) -> str:
+        return str(hash(script))
+
+    async def evalsha(self, *_: object) -> None:
+        raise redis_errors.ConnectionError
+
+    async def get(self, *_: object) -> None:
+        raise redis_errors.TimeoutError
+
+
+async def test_redis_faults_are_unavailable_and_ping_answers_null() -> None:
+    store = RedisStore(DownRedis())  # type: ignore[arg-type]
+    await store.start()
+    service = QuizService(store, Bank(), lambda: 0)
+    conn = Connection("c-a", "a")
+    assert await refused(service, conn, m.Join(quizId=QUIZ, displayName="A")) == (
+        E.UNAVAILABLE,
+        None,
+    )
+    conn.quiz_id = QUIZ
+    assert await send(service, conn, m.Ping()) == [m.Pong(seq=None)]
+
+
+async def test_ping_reads_only_the_counter(service: QuizService, store: SpyStore) -> None:
+    conn = await joined(service)
+    assert await send(service, conn, m.Ping()) == [m.Pong(seq=0)]
+    assert store.pages == 0
+
+
+async def test_snapshot_never_mixes_stale_standings_with_a_fresh_own_row(
+    service: QuizService,
+) -> None:
+    a = await joined(service, "a")
+    await send(service, a, m.Resync(lastSeq=0))
+    b = await joined(service, "b")  # same tick: the seq stays 0
+    [snapshot] = await send(service, b, m.Resync(lastSeq=0))  # and no rank_update
+    assert (snapshot.playerCount, [e.userId for e in snapshot.entries]) == (2, ["a", "b"])
+    assert snapshot.you == m.You(rank=2, score=0)
+
+
+async def test_snapshot_rereads_both_parts_when_a_join_lands_between_reads(
+    service: QuizService, store: SpyStore
+) -> None:
+    await joined(service, "a")
+    ranks_of = store.ranks_of
+
+    async def join_first(quiz_id: str, users: Sequence[str]) -> Ranks:
+        await store.join(quiz_id, "b", "B", "c-b")
+        return await ranks_of(quiz_id, users)
+
+    store.ranks_of = join_first  # type: ignore[method-assign, assignment]
+    snapshot = await service.snapshot(QUIZ, "b")
+    assert (snapshot.playerCount, len(snapshot.entries), snapshot.you) == (
+        2,
+        2,
+        m.You(rank=2, score=0),
+    )
+
+
+async def test_joined_echoes_the_stored_name(service: QuizService) -> None:
+    await joined(service, "a")
+    rejoin = m.Join(quizId=QUIZ, displayName="Renamed")
+    [reply] = await send(service, Connection("c-new", "a"), rejoin)
+    assert reply.displayName == "A"
+
+
+async def test_dropped_cache_refetches_at_the_same_seq(
+    service: QuizService, store: SpyStore
+) -> None:
+    await joined(service)
+    await service.snapshot(QUIZ, "a")
+    await service.snapshot(QUIZ, "a")
+    assert store.snapshots == 1
+    service.drop_cache(QUIZ)
+    await service.snapshot(QUIZ, "a")
+    service.drop_cache()
+    await service.snapshot(QUIZ, "a")
+    assert store.snapshots == 3
+
+
+async def test_first_writes_after_the_deadline_announce_the_end(
+    service: QuizService, store: SpyStore
+) -> None:
+    conn = await joined(service)
+    await send(service, conn, m.Next(questionIndex=0))
+    store.now[0] += 60_000
+    assert await refused(service, conn, m.Next(questionIndex=1)) == (E.QUIZ_ENDED, None)
+    assert store.ends == 1
+    assert await refused(service, conn, answer(0)) == (E.QUIZ_ENDED, None)
+    assert store.ends == 2  # the memory store's refusals never carry end_seq
+    late = m.Join(quizId=QUIZ, displayName="B")
+    [snapshot, error] = await send(service, Connection("c-b", "b"), late)
+    assert (snapshot.status, error.code, store.ends) == ("ended", E.QUIZ_ENDED, 3)

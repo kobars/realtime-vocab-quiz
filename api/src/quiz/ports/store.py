@@ -30,6 +30,7 @@ class Joined:
     question_count: int
     time_limit_ms: int
     quiz_remaining_ms: int
+    display_name: str  # the stored name: a rejoin keeps the first join's name
     replaced_conn_id: str | None  # the older connection of this user, now replaced
 
 
@@ -133,6 +134,10 @@ class Store(Protocol):
     ) -> Answered: ...
 
     async def standings_page(self, quiz_id: str, offset: int, limit: int) -> Page: ...
+
+    async def read_seq(self, quiz_id: str) -> int | None:
+        """The quiz's ``seq`` counter, a plain read; None when the quiz is unknown."""
+        ...
 
     async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> Ranks:
         """The rank and score of each user, read at the same seq as ``at_seq``."""
