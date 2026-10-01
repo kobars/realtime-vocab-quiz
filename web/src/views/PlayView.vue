@@ -1,6 +1,6 @@
-<!-- AI-ASSISTED: the quiz screen after the join: header with progress, score and rank, the connection pill and error messages, then intro, question, feedback or results by the client phase, with the score count-up, the answer and rank announcements and the quiz time left on the intro (UI spec §2, §3.2–§3.4, §3.6, §3.7, §4.1, §6.3). -->
+<!-- AI-ASSISTED: the quiz screen after the join: header with progress, score and rank, the connection pill and error messages, then intro, question, feedback or results by the client phase, as Quiz and Leaderboard tabs on phones, with the score count-up, the answer and rank announcements and the quiz time left on the intro (UI spec §2, §3.2–§3.4, §3.6, §3.7, §4.1, §6.1, §6.3). -->
 <script setup lang="ts">
-import { useIntervalFn } from '@vueuse/core'
+import { useIntervalFn, useMediaQuery } from '@vueuse/core'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import LeaderboardPanel from '@/components/leaderboard/LeaderboardPanel.vue'
 import AnswerFeedback from '@/components/question/AnswerFeedback.vue'
@@ -80,6 +80,25 @@ const quizLeft = computed(() => {
   const seconds = Math.ceil(store.quizMsLeft(now.value) / 1_000)
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 })
+
+// Below Tailwind's `lg` breakpoint (1024 px) the quiz and the leaderboard are two tabs (UI spec §2). Both panels
+// stay mounted, so a hidden question keeps its countdown and its pending answer.
+const wide = useMediaQuery('(min-width: 64rem)')
+const TABS = ['quiz', 'leaderboard'] as const
+type Tab = (typeof TABS)[number]
+const tabLabels: Record<Tab, string> = { quiz: strings.quiz.tab, leaderboard: strings.leaderboard.title }
+const tab = ref<Tab>('quiz')
+// With two tabs both arrows go to the other one.
+const other = (current: Tab): Tab => (current === 'quiz' ? 'leaderboard' : 'quiz')
+const TAB_KEYS: Record<string, (current: Tab) => Tab> = { ArrowRight: other, ArrowLeft: other, Home: () => 'quiz', End: () => 'leaderboard' }
+function moveTab(event: KeyboardEvent): void {
+  const to = TAB_KEYS[event.key]
+  if (to === undefined) return
+  event.preventDefault()
+  tab.value = to(tab.value)
+  void nextTick(() => document.getElementById(`tab-${tab.value}`)?.focus())
+}
+const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labelledby': `tab-${name}` })
 </script>
 
 <template>
@@ -124,42 +143,75 @@ const quizLeft = computed(() => {
       v-else-if="store.blocked === null"
       class="grid gap-6 lg:grid-cols-[minmax(0,640px)_360px] lg:justify-between"
     >
-      <QuestionCard
-        v-if="store.phase === 'question' && store.question"
-        :question="store.question"
-      />
-      <AnswerFeedback
-        v-else-if="store.phase === 'feedback' && store.lastResult && store.question && store.quiz"
-        :result="store.lastResult"
-        :choices="store.question.choices"
-        :question-count="store.quiz.questionCount"
-      />
-      <section
-        v-else-if="intro && store.quiz"
-        class="flex flex-col items-start gap-3"
+      <div
+        v-if="!wide"
+        role="tablist"
+        class="flex gap-1 rounded-lg bg-muted p-1"
+        @keydown="moveTab"
       >
-        <p>{{ strings.quiz.intro(store.quiz.questionCount, store.quiz.timeLimitMs / 1_000) }}</p>
-        <p
-          data-test="quiz-left"
-          class="tabular-nums"
-        >
-          {{ strings.quiz.quizLeft(quizLeft) }}
-        </p>
-        <p class="text-muted-foreground">
-          {{ strings.quiz.rule }}
-        </p>
         <Button
-          ref="start"
-          data-test="start"
-          :aria-disabled="!online"
-          class="aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
-          @click="begin"
+          v-for="name in TABS"
+          :id="`tab-${name}`"
+          :key="name"
+          variant="ghost"
+          role="tab"
+          :data-tab="name"
+          :aria-selected="tab === name"
+          :aria-controls="`panel-${name}`"
+          :tabindex="tab === name ? 0 : -1"
+          class="flex-1 aria-selected:bg-card aria-selected:shadow-card"
+          @click="tab = name"
         >
-          {{ store.quiz.cursor < 0 ? strings.quiz.start : strings.quiz.continue }}
+          {{ tabLabels[name] }}
         </Button>
-      </section>
-      <div v-else />
-      <LeaderboardPanel />
+      </div>
+      <div
+        v-show="wide || tab === 'quiz'"
+        id="panel-quiz"
+        v-bind="panel('quiz')"
+      >
+        <QuestionCard
+          v-if="store.phase === 'question' && store.question"
+          :question="store.question"
+        />
+        <AnswerFeedback
+          v-else-if="store.phase === 'feedback' && store.lastResult && store.question && store.quiz"
+          :result="store.lastResult"
+          :choices="store.question.choices"
+          :question-count="store.quiz.questionCount"
+        />
+        <section
+          v-else-if="intro && store.quiz"
+          class="flex flex-col items-start gap-3"
+        >
+          <p>{{ strings.quiz.intro(store.quiz.questionCount, store.quiz.timeLimitMs / 1_000) }}</p>
+          <p
+            data-test="quiz-left"
+            class="tabular-nums"
+          >
+            {{ strings.quiz.quizLeft(quizLeft) }}
+          </p>
+          <p class="text-muted-foreground">
+            {{ strings.quiz.rule }}
+          </p>
+          <Button
+            ref="start"
+            data-test="start"
+            :aria-disabled="!online"
+            class="aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+            @click="begin"
+          >
+            {{ store.quiz.cursor < 0 ? strings.quiz.start : strings.quiz.continue }}
+          </Button>
+        </section>
+      </div>
+      <div
+        v-show="wide || tab === 'leaderboard'"
+        id="panel-leaderboard"
+        v-bind="panel('leaderboard')"
+      >
+        <LeaderboardPanel />
+      </div>
     </div>
   </div>
 </template>

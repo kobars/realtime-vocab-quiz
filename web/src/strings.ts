@@ -25,6 +25,7 @@ export const strings = {
   },
   quiz: {
     title: (quizId: string) => `Quiz ${quizId}`,
+    tab: 'Quiz',
     progress: (k: number, n: number) => `Question ${k} of ${n}`,
     score: (score: number) => `Score ${score}`,
     rank: (rank: number, players: number) => `#${rank} of ${players}`,
