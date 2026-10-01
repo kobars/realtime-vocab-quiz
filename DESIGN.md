@@ -69,7 +69,7 @@ answer log beyond AOF; a graceful drain when a node stops (clients reconnect and
 metrics or dashboard containers (the API serves `/metrics` only, §13); native apps;
 translations.
 
-## 3. Architecture (D-1)
+## 3. Architecture
 
 **Context.** The quiz service is the one component built for real. The identity provider and the
 content service are mocks behind ports, so a real one can replace each without touching the
@@ -141,7 +141,7 @@ own sockets. Redis is the only database: the mock identity keeps its sessions an
 there, so a ticket made on one node works on the other. The mock question bank is read from
 JSON files when a node starts.
 
-## 4. Components (D-2)
+## 4. Components
 
 The server is one Python package, `quiz` (`api/src/quiz/`), split into layers. The
 import-linter contracts in `api/pyproject.toml`, run by `make check`, enforce these rules: the
@@ -174,10 +174,10 @@ composition root alone wires them is a convention, not a check.
 
 <!-- AI-ASSISTED-END -->
 
-## 5. Data flow (D-3)
+## 5. Data flow
 TODO: the flow from joining a quiz to a leaderboard update.
 
-## 6. Technologies and justification (D-4)
+## 6. Technologies and justification
 
 <!-- AI-ASSISTED-BEGIN: drafted with Claude Code from docs/DECISIONS.md, api/pyproject.toml and web/package.json; the versions were read from api/uv.lock and web/pnpm-lock.yaml. -->
 
@@ -218,13 +218,13 @@ version pins next to them; a lock-file change updates this table.
 
 <!-- AI-ASSISTED-END -->
 
-## 7. Consistency contract (AC-4)
+## 7. Consistency contract
 TODO: the scoring and ordering guarantees, their mechanisms and the tests that prove them.
 
 ## 8. Non-functional requirements
 TODO: latency, throughput, availability and durability targets.
 
-## 9. Capacity estimate (F-1, F-2)
+## 9. Capacity estimate
 
 <!-- AI-ASSISTED-BEGIN: sections 9 and 10 drafted with Claude Code from api/src/quiz/config.py, the contracts, docs/spec/ and docs/DECISIONS.md; the frame sizes were computed by encoding sample frames in compact JSON. -->
 
@@ -334,7 +334,7 @@ TODO: the measured runs from `load/README.md` and `load/results/` (scenario, con
 msg/s, p50, p95 and p99 in ms, CPU %, RSS in MB, the machine used) and whether C5 (p99 below
 500 ms) was met.
 
-## 10. Scalability and trade-offs (F-1)
+## 10. Scalability and trade-offs
 
 **How it scales out today.** Any node can take any socket and score any answer, because every
 write is one Lua script in Redis and no node owns a quiz (ADR-006). Adding an API node adds
@@ -423,16 +423,16 @@ and each node would hold one `SSUBSCRIBE` connection per shard.
 
 <!-- AI-ASSISTED-END -->
 
-## 11. Reliability and failure modes (F-3)
+## 11. Reliability and failure modes
 TODO: the failure table (failure, detection, system behavior, user-visible effect, mitigation, proving test).
 
 ## 12. Security
 TODO: authentication, input limits, origin checks and abuse limits.
 
-## 13. Observability (F-5)
+## 13. Observability
 TODO: logs, metrics and how to diagnose a slow or stuck quiz.
 
-## 14. Implemented and mocked (I-1)
+## 14. Implemented and mocked
 
 <!-- AI-ASSISTED-BEGIN: drafted with Claude Code from the ADR index and the mock adapters' docstrings, checked by hand against the code. -->
 
@@ -463,7 +463,7 @@ it.
 
 <!-- AI-ASSISTED-END -->
 
-## 15. AI Collaboration in Design (D-5, S-6)
+## 15. AI Collaboration in Design
 
 <!-- AI-ASSISTED-BEGIN: drafted with Claude Code from the design-phase and spec-PR AI-LOG entries, checked by hand against the specs and the named tests, which were run. -->
 
@@ -553,7 +553,7 @@ commands and results are in each AI-LOG entry.
 
 <!-- AI-ASSISTED-END -->
 
-## 16. GenAI roadmap (X-8)
+## 16. GenAI roadmap
 
 <!-- AI-ASSISTED-BEGIN: drafted with Claude Code from the ports and the data the store already keeps, checked by hand against the architecture. -->
 
