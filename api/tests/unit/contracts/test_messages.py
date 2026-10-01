@@ -20,10 +20,7 @@ ENTRY = {"rank": 1, "userId": "u_1", "displayName": "Ana", "score": 150}
 CLIENT: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
     "join": ({"quizId": "VOCAB-42", "displayName": " Ana "}, {"quizId": "vocab-42"}),
     "next": ({"questionIndex": 10}, {"questionIndex": -1}),
-    "answer": (
-        {"questionIndex": 0, "choiceIndex": 3, "submissionId": SUB},
-        {"choiceIndex": 4},
-    ),
+    "answer": ({"questionIndex": 0, "choiceIndex": 3, "submissionId": SUB}, {"choiceIndex": 4}),
     "ping": ({}, {"seq": 1}),
     "resync": ({"lastSeq": 0}, {"lastSeq": "0"}),
     "get_leaderboard": ({"offset": 0, "limit": 200}, {"limit": 201}),
