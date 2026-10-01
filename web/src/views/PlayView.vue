@@ -1,7 +1,9 @@
-<!-- AI-ASSISTED: the quiz screen after the join: header with progress, score and rank, the connection pill and error messages, then intro, question or results by the client phase (UI spec §2, §3.2, §3.3, §3.6, §3.7). -->
+<!-- AI-ASSISTED: the quiz screen after the join: header with progress, score and rank, the connection pill and error messages, then intro, question, feedback or results by the client phase, with the score count-up and the answer announcement (UI spec §2, §3.2–§3.4, §3.6, §3.7, §6.3). -->
 <script setup lang="ts">
-import { computed, nextTick, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import LeaderboardPanel from '@/components/leaderboard/LeaderboardPanel.vue'
+import AnswerFeedback from '@/components/question/AnswerFeedback.vue'
+import { useCountUp } from '@/components/question/motion'
 import QuestionCard from '@/components/question/QuestionCard.vue'
 import ConnectionBanner from '@/components/status/ConnectionBanner.vue'
 import ErrorMessage from '@/components/status/ErrorMessage.vue'
@@ -13,11 +15,21 @@ import ResultsView from './ResultsView.vue'
 defineProps<{ quizId: string }>()
 
 const store = useQuizStore()
+const score = useCountUp(() => store.myScore)
 const start = useTemplateRef<{ $el: HTMLElement }>('start')
 const shownIndex = computed(() => {
   if (store.phase === 'question') return store.question?.questionIndex ?? null
   if (store.phase === 'feedback') return store.lastResult?.questionIndex ?? null
   return null
+})
+
+// The answer result and the new score, announced once each (UI spec §6.3).
+const announcement = ref('')
+watch(() => store.lastResult, (result) => {
+  if (result === null) return
+  const answer = store.question?.choices[result.correctChoiceIndex] ?? ''
+  const head = result.late ? strings.quiz.late : result.correct ? strings.quiz.announceCorrect(result.pointsAwarded) : strings.quiz.announceWrong(answer)
+  announcement.value = strings.quiz.announce(head, result.score)
 })
 
 const intro = computed(() => store.quiz !== null && (store.phase === 'intro' || store.phase === 'join'))
@@ -41,12 +53,20 @@ const replaced = computed(() => store.lastError?.code === 'SESSION_REPLACED')
         {{ strings.quiz.progress(shownIndex + 1, store.quiz.questionCount) }}
       </p>
       <p class="flex gap-3 font-semibold tabular-nums">
-        <span data-test="score">{{ strings.quiz.score(store.myScore) }}</span>
+        <span data-test="score">{{ strings.quiz.score(score) }}</span>
         <span v-if="store.myRank !== null">{{ strings.quiz.rank(store.myRank, store.playerCount) }}</span>
       </p>
       <ConnectionBanner />
     </header>
     <ErrorMessage />
+    <p
+      class="sr-only"
+      aria-live="polite"
+      aria-atomic="true"
+      data-test="announce"
+    >
+      {{ announcement }}
+    </p>
     <ResultsView v-if="store.phase === 'finished' || store.phase === 'results'" />
     <div
       v-else-if="!replaced"
@@ -55,6 +75,12 @@ const replaced = computed(() => store.lastError?.code === 'SESSION_REPLACED')
       <QuestionCard
         v-if="store.phase === 'question' && store.question"
         :question="store.question"
+      />
+      <AnswerFeedback
+        v-else-if="store.phase === 'feedback' && store.lastResult && store.question && store.quiz"
+        :result="store.lastResult"
+        :choices="store.question.choices"
+        :question-count="store.quiz.questionCount"
       />
       <section
         v-else-if="intro && store.quiz"

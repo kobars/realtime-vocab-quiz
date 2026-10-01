@@ -1,10 +1,10 @@
-// AI-ASSISTED: component tests for the intro and question screens (countdown, keys, locking), the connection pill and the error messages, driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement), the connection pill and the error messages, driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import type { ClientEvent } from '@/protocol/client'
-import type { Joined, Question, ServerMessage, Snapshot } from '@/protocol/types.generated'
+import type { AnswerResult, Joined, Question, ServerMessage, Snapshot } from '@/protocol/types.generated'
 import { configureQuizStore, type QuizClientPort, useQuizStore } from '@/stores/quiz'
 import PlayView from './PlayView.vue'
 
@@ -25,6 +25,8 @@ const snapshot = (score: number): Snapshot => ({ v: 1, type: 'snapshot', atSeq: 
   entries: [{ rank: 1, userId: 'u1', displayName: 'Ana', score }], you: { rank: 1, score } })
 const question = (questionIndex = 0, remainingMs = 20_000): Question => ({ v: 1, type: 'question', atSeq: 3, questionIndex, questionId: `q${questionIndex}`,
   prompt: 'bright', choices: ['dark', 'dim', 'shining', 'dull'], timeLimitMs: 20_000, remainingMs })
+const result = (choiceIndex: number, pointsAwarded: number, over: Partial<AnswerResult> = {}): AnswerResult => ({ v: 1, type: 'answer_result', atSeq: 4,
+  questionIndex: 0, submissionId: 's-1', choiceIndex, correctChoiceIndex: 2, correct: choiceIndex === 2, late: false, pointsAwarded, score: pointsAwarded, ...over })
 const choice = (w: VueWrapper, i: number) => w.get(`[data-choice="${i}"]`)
 const press = (key: string) => (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
 const frames = (ms: number) => vi.advanceTimersByTimeAsync(ms)
@@ -36,6 +38,11 @@ async function playing(...first: Partial<ServerMessage>[]) {
   wrappers.push(wrapper)
   await nextTick()
   return wrapper
+}
+
+function reducedMotion(): void {
+  vi.spyOn(window, 'matchMedia').mockImplementation((query: string) =>
+    ({ matches: query.includes('reduce'), media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }) as unknown as MediaQueryList)
 }
 
 beforeEach(() => {
@@ -104,7 +111,7 @@ it('while the socket is reconnecting a pill says so and the choices are locked; 
   expect(w.get('[data-test="connection"]').text()).toBe('Updating…')
   clock = 8_000
   await receive(snapshot(140), question(0, 12_000))
-  await frames(50)
+  await frames(700)
   expect(w.get('[data-test="connection"]').text()).toBe('')
   expect(w.get('[data-test="ring"]').text()).toBe('12')
   expect(w.get('[data-test="score"]').text()).toBe('Score 140')
@@ -141,4 +148,57 @@ it('SESSION_REPLACED: the card replaces the quiz, stays, takes the focus, and Us
   await w.get('[role="alert"] button').trigger('click')
   expect(port.start.mock.calls).toEqual([['VOCAB-42', 'Ana'], ['VOCAB-42', 'Ana']])
   expect(w.find('[role="alert"]').exists()).toBe(false)
+})
+
+it('feedback: correct, the points with the speed bonus and the total count up, an announcement, and Next question has the focus', async () => {
+  const w = await playing()
+  press('3')
+  await receive(result(2, 133))
+  expect(w.get('[data-test="points"]').text()).toBe('+0 points including a speed bonus of +33')
+  expect(w.get('[data-test="score"]').text()).toBe('Score 0')
+  await frames(300)
+  const midway = Number(w.get('[data-test="score"]').text().replace('Score ', ''))
+  expect(midway).toBeGreaterThan(0)
+  expect(midway).toBeLessThan(133)
+  await frames(400)
+  expect(w.get('[data-test="points"]').text()).toBe('+133 points including a speed bonus of +33')
+  expect(w.get('[data-test="score"]').text()).toBe('Score 133')
+  expect(choice(w, 2).text()).toContain('Correct')
+  expect(choice(w, 2).text()).not.toContain('Correct answer')
+  expect(w.get('[data-test="announce"]').attributes('aria-live')).toBe('polite')
+  expect(w.get('[data-test="announce"]').text()).toBe('Correct, plus 133 points. Score 133.')
+  expect(document.activeElement?.textContent?.trim()).toBe('Next question')
+  await w.get('button:focus').trigger('click')
+  expect(port.next.mock.calls).toEqual([[1]])
+})
+
+it('feedback: a wrong answer is marked Wrong, the correct choice reads Correct answer, and the announcement names it', async () => {
+  const w = await playing()
+  press('1')
+  await receive(result(0, 0))
+  expect(w.get('h2').text()).toBe('Wrong')
+  expect(choice(w, 0).text()).toContain('Wrong')
+  expect(choice(w, 2).text()).toContain('Correct answer')
+  expect(choice(w, 1).text()).toBe('dim')
+  expect(w.get('[data-test="announce"]').text()).toBe('Wrong, the answer was “shining”. Score 0.')
+})
+
+it('feedback: a late answer reads Too late: 0 points; the last question offers See my result', async () => {
+  const w = await playing(question(9))
+  press('3')
+  await receive(result(2, 0, { questionIndex: 9, late: true, score: 410 }))
+  expect(w.get('[data-test="points"]').text()).toBe('Too late: 0 points')
+  expect(w.get('[data-test="announce"]').text()).toBe('Too late: 0 points. Score 410.')
+  expect(document.activeElement?.textContent?.trim()).toBe('See my result')
+  await w.get('button:focus').trigger('click')
+  expect(port.next.mock.calls).toEqual([[10]])
+})
+
+it('reduced motion: the points and the total show their final value at once', async () => {
+  reducedMotion()
+  const w = await playing()
+  press('3')
+  await receive(result(2, 133))
+  expect(w.get('[data-test="points"]').text()).toBe('+133 points including a speed bonus of +33')
+  expect(w.get('[data-test="score"]').text()).toBe('Score 133')
 })
