@@ -2,15 +2,15 @@
   "quiz_id": "BIZ-20",
   "title": "Business English",
   "questions": [
-    {"id": "biz20-01", "word": "deadline", "choices": ["a dangerous line", "the latest time to finish", "a phone cable", "a final payment"], "answer": 1},
-    {"id": "biz20-02", "word": "revenue", "choices": ["money a business takes in", "a public road", "a second look", "a staff meeting"], "answer": 0},
-    {"id": "biz20-03", "word": "negotiate", "choices": ["to refuse to talk", "to cancel", "to discuss to reach an agreement", "to sign quickly"], "answer": 2},
-    {"id": "biz20-04", "word": "stakeholder", "choices": ["a fence post", "a cook", "a bank robber", "someone with an interest in a project"], "answer": 3},
-    {"id": "biz20-05", "word": "outsource", "choices": ["to hire an outside company for work", "to run out of stock", "to work outdoors", "to find the origin"], "answer": 0},
-    {"id": "biz20-06", "word": "invoice", "choices": ["a singing voice", "a bill for goods or services", "a job offer", "an invitation"], "answer": 1},
-    {"id": "biz20-07", "word": "agenda", "choices": ["a secret plan", "an old diary", "a list of items to discuss", "a travel agent"], "answer": 2},
-    {"id": "biz20-08", "word": "feasible", "choices": ["delicious", "illegal", "unclear", "possible to do"], "answer": 3},
-    {"id": "biz20-09", "word": "delegate", "choices": ["to give a task to someone else", "to delete", "to delay", "to argue"], "answer": 0},
-    {"id": "biz20-10", "word": "leverage", "choices": ["a type of drink", "using a resource for advantage", "a legal fine", "a monthly rent"], "answer": 1}
+    {"id": "biz20-01", "word": "deadline", "choices": ["a dangerous line", "a final payment", "a phone cable", "the latest time to finish"], "answer": 3},
+    {"id": "biz20-02", "word": "revenue", "choices": ["a public road", "money a business takes in", "a second look", "a staff meeting"], "answer": 1},
+    {"id": "biz20-03", "word": "negotiate", "choices": ["to refuse to talk", "to discuss to reach an agreement", "to cancel", "to sign quickly"], "answer": 1},
+    {"id": "biz20-04", "word": "stakeholder", "choices": ["someone with an interest in a project", "a cook", "a bank robber", "a fence post"], "answer": 0},
+    {"id": "biz20-05", "word": "outsource", "choices": ["to work outdoors", "to run out of stock", "to hire an outside company for work", "to find the origin"], "answer": 2},
+    {"id": "biz20-06", "word": "invoice", "choices": ["a singing voice", "an invitation", "a job offer", "a bill for goods or services"], "answer": 3},
+    {"id": "biz20-07", "word": "agenda", "choices": ["a list of items to discuss", "an old diary", "a secret plan", "a travel agent"], "answer": 0},
+    {"id": "biz20-08", "word": "feasible", "choices": ["delicious", "illegal", "possible to do", "unclear"], "answer": 2},
+    {"id": "biz20-09", "word": "delegate", "choices": ["to delete", "to give a task to someone else", "to delay", "to argue"], "answer": 1},
+    {"id": "biz20-10", "word": "leverage", "choices": ["a type of drink", "a monthly rent", "a legal fine", "using a resource for advantage"], "answer": 3}
   ]
 }

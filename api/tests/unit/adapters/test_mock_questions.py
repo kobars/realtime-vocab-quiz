@@ -1,6 +1,7 @@
 # AI-ASSISTED: the mock question bank: the seeded quizzes and the load-time validation.
 import copy
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,20 @@ async def test_seeded_bank_has_three_quizzes_of_ten() -> None:
         assert all(len(set(q.choices)) == 4 for q in questions)
 
 
+async def test_seeded_answer_positions_follow_no_pattern() -> None:
+    """Every player sees the same choice order and each answer is revealed, so the positions of
+    the correct choices must not let a player predict the later ones."""
+    bank = MockQuestionBank.load()
+    for quiz_id in bank.quiz_ids:
+        questions = await bank.questions(quiz_id)
+        assert questions is not None
+        answers = [q.correct_choice for q in questions]
+        assert set(answers) == {0, 1, 2, 3}, quiz_id
+        for period in range(1, 5):
+            repeats = sum(a == b for a, b in zip(answers, answers[period:], strict=False))
+            assert repeats <= (len(answers) - period) // 2, (quiz_id, period, answers)
+
+
 async def test_unknown_quiz_is_none() -> None:
     assert await MockQuestionBank.load().questions("NOPE-1") is None
 
@@ -68,6 +83,9 @@ def test_good_quiz_parses() -> None:
         ("questions.0.choices", ["a", "b", "c", ""]),  # no empty choice
         ("questions.0.answer", 4),  # answer index 0-3
         ("questions.0.answer", -1),
+        ("questions.0.answer", "2"),  # strict: no string, bool or float as the index
+        ("questions.0.answer", True),
+        ("questions.0.answer", 1.0),
         ("questions.0.word", ""),
         ("questions.0.extra", 1),  # unknown field
         ("questions", []),
@@ -88,4 +106,9 @@ def test_duplicate_quiz_ids_are_rejected(tmp_path: Path) -> None:
 def test_bad_file_is_named(tmp_path: Path) -> None:
     (tmp_path / "bad.json").write_text(json.dumps(broken("questions.0.id", "Q42")))
     with pytest.raises(ValueError, match=r"bad\.json"):
+        MockQuestionBank.load(tmp_path)
+
+
+def test_empty_folder_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match=re.escape(str(tmp_path))):
         MockQuestionBank.load(tmp_path)
