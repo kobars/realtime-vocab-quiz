@@ -1,0 +1,132 @@
+# AI-ASSISTED: the store port of docs/spec/redis.md §3; the memory and Redis stores implement it.
+"""The quiz store: every write that changes quiz state, behind one interface.
+
+The store reads its own clock and computes points itself: no method takes a time or
+points from the caller. Refusals raise ``DomainError`` and write nothing.
+"""
+
+from dataclasses import dataclass
+from typing import Literal, Protocol
+
+from quiz.domain.events import AnswerScored
+from quiz.domain.session import Question
+
+
+@dataclass(frozen=True, slots=True)
+class Created:
+    start_ms: int
+    deadline_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class Joined:
+    at_seq: int
+    cursor: int
+    cursor_open: bool
+    finished: bool
+    total: int
+    question_count: int
+    time_limit_ms: int
+    quiz_remaining_ms: int
+    replaced_conn_id: str | None  # the older connection of this user, now replaced
+
+
+@dataclass(frozen=True, slots=True)
+class Served:
+    at_seq: int
+    question_index: int
+    question_id: str
+    remaining_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class Finished:
+    at_seq: int
+    total: int
+    rank: int
+    player_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class Answered:
+    result: AnswerScored  # a replay returns the stored result unchanged
+    step_back: bool  # the clock stepped back since the serve; never stored
+
+
+@dataclass(frozen=True, slots=True)
+class Row:
+    rank: int
+    user_id: str
+    display_name: str
+    score: int
+
+
+@dataclass(frozen=True, slots=True)
+class Page:
+    at_seq: int
+    player_count: int
+    final: bool
+    rows: tuple[Row, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Snapshot:
+    at_seq: int
+    status: Literal["open", "ended"]
+    player_count: int
+    online_count: int
+    rows: tuple[Row, ...]  # every player up to 200, else the top 50
+    you: Row | None
+
+
+@dataclass(frozen=True, slots=True)
+class Publish:
+    status: Literal["published", "clean", "busy", "ended"]
+    seq: int | None = None  # published: the new seq; ended: the end seq, if announced
+    retry_ms: int = 0  # busy: how long the tick token still holds
+
+
+@dataclass(frozen=True, slots=True)
+class End:
+    status: Literal["marked", "ended", "not_due"]
+    seq: int | None = None  # ended: the seq of quiz_ended
+
+
+class Store(Protocol):
+    async def create_quiz(
+        self, quiz_id: str, questions: tuple[Question, ...], *, window_ms: int, time_limit_ms: int
+    ) -> Created: ...
+
+    async def join(self, quiz_id: str, user_id: str, display_name: str, conn_id: str) -> Joined: ...
+
+    async def leave(self, quiz_id: str, user_id: str, conn_id: str) -> bool:
+        """Remove the presence only if ``conn_id`` still holds it; False when stale."""
+        ...
+
+    async def serve_next(
+        self, quiz_id: str, user_id: str, question_index: int, conn_id: str
+    ) -> Served | Finished: ...
+
+    async def apply_answer(  # noqa: PLR0913, PLR0917 - the answer message's fields plus the fence
+        self,
+        quiz_id: str,
+        user_id: str,
+        question_index: int,
+        choice_index: int,
+        submission_id: str,
+        conn_id: str,
+    ) -> Answered: ...
+
+    async def standings_page(self, quiz_id: str, offset: int, limit: int) -> Page: ...
+
+    async def rank_of(self, quiz_id: str, user_id: str) -> Row | None: ...
+
+    async def snapshot(self, quiz_id: str, user_id: str | None) -> Snapshot: ...
+
+    async def publish_if_dirty(self, quiz_id: str, node_id: str) -> Publish:
+        """Broadcast one leaderboard frame if the standings changed and no tick holds."""
+        ...
+
+    async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> End:
+        """Announce the end once; a first host call only marks it (docs/spec/redis.md §3.1)."""
+        ...
