@@ -1,6 +1,7 @@
 -- AI-ASSISTED: helpers the loader puts in front of every quiz script (docs/spec/redis.md §1-§2).
--- The loader defines K (the KEYS index of each QuizKeys field), DATA_KEYS and the constants above
--- this file, from keys.py, so the KEYS order and the TTL exist once.
+-- The loader defines K (the KEYS index of each QuizKeys field), DATA_KEYS and QUIZ_TTL_MS above
+-- this file, from keys.py, so the KEYS order and the TTL exist once. The standings limits are
+-- settings: each script that needs them takes them through ARGV.
 
 -- The one server clock, in integer ms.
 local function now_ms()
@@ -53,9 +54,9 @@ local function standing_rows(first, last)
   return rows
 end
 
--- The last index a broadcast carries: every player up to FULL_LIST_MAX, else the top TOP_N.
-local function frame_last(count)
-  return (count <= FULL_LIST_MAX and FULL_LIST_MAX or TOP_N) - 1
+-- The last index a broadcast carries: every player up to full_list_max, else the top top_n.
+local function frame_last(count, top_n, full_list_max)
+  return (count <= full_list_max and full_list_max or top_n) - 1
 end
 
 -- A JSON array of each item (cjson writes an empty table as {}).

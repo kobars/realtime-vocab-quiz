@@ -7,8 +7,7 @@ from importlib.resources import files
 from redis.asyncio import Redis
 from redis.exceptions import NoScriptError
 
-from quiz.adapters.redis.keys import NO_QUIZ_TTL, QUIZ_TTL_MS, TICK_MS, QuizKeys
-from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
+from quiz.adapters.redis.keys import NO_QUIZ_TTL, QUIZ_TTL_MS, QuizKeys
 
 _LUA = files("quiz.adapters.redis") / "lua"
 # Every .lua file beside lib/ is one script, named after its file.
@@ -19,13 +18,13 @@ type Reply = list[str | int | None]
 
 
 def _constants() -> str:
-    """``K``, ``DATA_KEYS`` and the constants for Lua, from keys.py and the contracts."""
+    """``K``, ``DATA_KEYS`` and ``QUIZ_TTL_MS`` for Lua, from keys.py.
+
+    The standings limits are settings, not constants: the store passes them through ARGV."""
     index = {name: i for i, name in enumerate(QuizKeys._fields, 1)}
     k = ", ".join(f"{name} = {i}" for name, i in index.items())
     data = ", ".join(str(i) for name, i in index.items() if name not in NO_QUIZ_TTL)
-    names = "QUIZ_TTL_MS, TICK_MS, FULL_LIST_MAX, TOP_N"
-    values = f"{QUIZ_TTL_MS}, {TICK_MS}, {FULL_LIST_MAX}, {TOP_N}"
-    return f"local K = {{{k}}}\nlocal DATA_KEYS = {{{data}}}\nlocal {names} = {values}"
+    return f"local K = {{{k}}}\nlocal DATA_KEYS = {{{data}}}\nlocal QUIZ_TTL_MS = {QUIZ_TTL_MS}"
 
 
 def compose(body: str, libs: Iterable[str] = ()) -> str:
