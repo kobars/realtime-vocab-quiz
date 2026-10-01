@@ -7,8 +7,10 @@ These rules apply to every change, whether a person or a coding agent makes it.
 - One change = one branch = one PR of at most **400 changed lines**, not counting lock files
   (`uv.lock`, `pnpm-lock.yaml`) and generated files. Bigger work is split into several PRs.
 - Branch names are `<type>/<slug>`, for example `feat/redis-adapter` or `fix/answer-dedup`.
-- Each PR gets **one review round**. Confirmed findings are fixed in the same PR.
 - Rebase on `origin/main` and run `make check` before you push. `main` stays green.
+- A PR merges when CI and `make check` are green. After the merge it gets **one review round**:
+  two reviewers, whose findings are combined and each verified against the code. Confirmed
+  findings are fixed in a separate small fix PR; there is no second review round.
 
 ## Tests
 
