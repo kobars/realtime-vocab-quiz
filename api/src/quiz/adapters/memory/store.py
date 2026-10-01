@@ -6,16 +6,16 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
-from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
+from quiz.contracts.messages import FULL_LIST_MAX
 from quiz.domain import events as ev
 from quiz.domain import session as s
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.standings import standings
 from quiz.ports import store as port
 from quiz.ports.clock import Clock
-from quiz.ports.store import Answered, Created, Finished, Joined, Row, Served
+from quiz.ports.store import Answered, Created, Finished, Joined, Limits, Row, Served
 
-MAX_QUESTIONS, CHOICES, TICK_MS = 100, 4, 200
+MAX_QUESTIONS, CHOICES = 100, 4
 
 
 @dataclass(slots=True)
@@ -25,7 +25,7 @@ class _Quiz:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     names: dict[str, str] = field(default_factory=dict)
     present: dict[str, str] = field(default_factory=dict)  # user id -> connection id
-    tick_until_ms: int = 0  # the 200 ms tick token
+    tick_until_ms: int = 0  # the tick token, limits.tick_ms long
     end_seq: int | None = None  # the seq of quiz_ended, once announced
 
     def fence(self, user_id: str, conn_id: str) -> None:
@@ -43,8 +43,9 @@ class _Quiz:
 
 
 class MemoryStore:
-    def __init__(self, clock: Clock) -> None:
+    def __init__(self, clock: Clock, limits: Limits | None = None) -> None:
         self._clock = clock
+        self.limits = limits or Limits()
         self._quizzes: dict[str, _Quiz] = {}
 
     def _quiz(self, quiz_id: str) -> _Quiz:
@@ -180,7 +181,7 @@ class MemoryStore:
             status: Literal["open", "ended"] = (
                 "open" if quiz.state.is_open(self._clock()) else "ended"
             )
-            shown = rows if len(rows) <= FULL_LIST_MAX else rows[:TOP_N]
+            shown = rows if len(rows) <= self.limits.full_list_max else rows[: self.limits.top_n]
             online = len(quiz.present)
             return port.Snapshot(quiz.state.seq, status, len(rows), online, tuple(shown), you)
 
@@ -191,14 +192,14 @@ class MemoryStore:
             now = self._clock()
             if not quiz.state.is_open(now):
                 return port.Publish("ended", quiz.end_seq)
-            # a clock step-back never stretches the token past TICK_MS
-            quiz.tick_until_ms = min(quiz.tick_until_ms, now + TICK_MS)
+            tick_ms = self.limits.tick_ms  # a clock step-back never stretches the token past it
+            quiz.tick_until_ms = min(quiz.tick_until_ms, now + tick_ms)
             if now < quiz.tick_until_ms:
                 return port.Publish("busy", retry_ms=quiz.tick_until_ms - now)
             if not quiz.state.dirty:
                 return port.Publish("clean")
             quiz.state = s.transition(quiz.state, s.Tick(), now).state
-            quiz.tick_until_ms = now + TICK_MS
+            quiz.tick_until_ms = now + tick_ms
             return port.Publish("published", quiz.state.seq)
 
     async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> port.End:

@@ -22,7 +22,7 @@ def test_defaults_match_the_spec() -> None:
     assert (s.rate_limit_per_s, s.rate_limit_burst) == (20, 40)
     assert (s.per_ip_conn_cap, s.max_connections) == (50, 10_000)
     assert s.allowed_origins == ("http://localhost:8080", "http://127.0.0.1:8080")
-    assert s.trusted_proxies == (ip_network("172.16.0.0/12"),)
+    assert s.trusted_proxies == (ip_network("172.16.0.0/12"), ip_network("192.168.0.0/16"))
     assert s.node_id
     assert (s.admin_mock, s.admin_token) == (False, None)
 
@@ -61,3 +61,13 @@ def test_explicit_origins_replace_the_defaults(monkeypatch: pytest.MonkeyPatch) 
 def test_invalid_settings_are_refused(fields: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         Settings.model_validate(fields)
+
+
+@pytest.mark.parametrize("token", ["", "   "])
+def test_admin_mock_refuses_an_empty_token_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    monkeypatch.setenv("ADMIN_MOCK", "1")
+    monkeypatch.setenv("ADMIN_TOKEN", token)
+    with pytest.raises(ValidationError, match="ADMIN_TOKEN"):
+        Settings()
