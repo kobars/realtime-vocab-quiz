@@ -10,7 +10,7 @@ from typing import Literal
 
 from redis.asyncio import Redis
 
-from quiz.adapters.redis.keys import QUIZ_TTL_MS, quiz_keys
+from quiz.adapters.redis.keys import quiz_keys
 from quiz.adapters.redis.scripts import Reply, Scripts
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.session import Question
@@ -28,9 +28,9 @@ def _ok(name: str, reply: Reply) -> Reply:
 
 
 class RedisStore:
-    def __init__(self, client: Redis, *, prefix: str = "", ttl_ms: int = QUIZ_TTL_MS) -> None:
+    def __init__(self, client: Redis, *, prefix: str = "") -> None:
         self._scripts = Scripts(client)
-        self._prefix, self._ttl_ms = prefix, ttl_ms
+        self._prefix = prefix
 
     async def start(self) -> None:
         """Load the scripts; call once before the first command."""
@@ -38,7 +38,7 @@ class RedisStore:
 
     async def _run(self, name: str, quiz_id: str, *args: str | int) -> Reply:
         keys = quiz_keys(quiz_id, self._prefix)
-        return _ok(name, await self._scripts.call(name, keys, *args, self._ttl_ms))
+        return _ok(name, await self._scripts.call(name, keys, *args))
 
     async def create_quiz(
         self, quiz_id: str, questions: tuple[Question, ...], *, window_ms: int, time_limit_ms: int

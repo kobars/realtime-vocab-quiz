@@ -1,5 +1,5 @@
 -- AI-ASSISTED: create_quiz of docs/spec/redis.md §3: validate the shape, then write meta, key and seq.
--- ARGV: questionIds (JSON array), answer key (JSON array), timeLimitMs, windowMs, ttlMs.
+-- ARGV: questionIds (JSON array), answer key (JSON array of integers), timeLimitMs, windowMs.
 local MAX_MS, MAX_QUESTIONS = 3600000, 100
 
 local function int_in(value, low, high)
@@ -17,9 +17,11 @@ if not (ok_ids and ok_key and limit and window) or type(ids) ~= 'table'
     or type(answers) ~= 'table' or #ids < 1 or #ids > MAX_QUESTIONS or #answers ~= #ids then
   return {'INVALID_MESSAGE'}
 end
-local seen = {}
+local seen, choices = {}, {}
 for i = 1, #ids do
-  if type(ids[i]) ~= 'string' or seen[ids[i]] or not int_in(answers[i], 0, 3) then
+  -- A JSON number only: tonumber() alone would let "0x2" or " 1" through and store the string.
+  choices[i] = type(answers[i]) == 'number' and int_in(answers[i], 0, 3)
+  if type(ids[i]) ~= 'string' or seen[ids[i]] or not choices[i] then
     return {'INVALID_MESSAGE'}
   end
   seen[ids[i]] = true
@@ -29,8 +31,8 @@ local now = now_ms()
 redis.call('HSET', KEYS[K.meta], 'questionCount', #ids, 'timeLimitMs', limit,
   'windowMs', window, 'startMs', now, 'deadlineMs', now + window, 'questionIds', ARGV[1])
 for i = 1, #ids do
-  redis.call('HSET', KEYS[K.key], i - 1, answers[i])
+  redis.call('HSET', KEYS[K.key], i - 1, string.format('%d', choices[i]))
 end
 redis.call('SET', KEYS[K.seq], 0)
-refresh(ARGV[5])
+refresh()
 return {'ok', now, now + window}
