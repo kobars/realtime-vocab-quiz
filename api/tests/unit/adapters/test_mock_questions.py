@@ -1,6 +1,7 @@
 # AI-ASSISTED: the mock question bank: the seeded quizzes and the load-time validation.
 import copy
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -107,3 +108,7 @@ def test_bad_file_is_named(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match=r"bad\.json"):
         MockQuestionBank.load(tmp_path)
 
+
+def test_empty_folder_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match=re.escape(str(tmp_path))):
+        MockQuestionBank.load(tmp_path)
