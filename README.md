@@ -30,8 +30,15 @@ make check                   # every check a change must pass; stops at the firs
 make test                    # the server and client unit tests
 make test-integration        # the tests that need Redis (set REDIS_URL to use your own)
 make build                   # the API and web images, elsaquiz-api and elsaquiz-web (IMAGE_TAG=dev)
+make dev-api                 # one API node on 127.0.0.1:8001 (memory store) that allows the :5173 origins
 pnpm -C web dev              # client on :5173; /api/* (prefix dropped) and /ws go to 127.0.0.1:8001 or QUIZ_API_URL
 ```
+
+The API refuses a WebSocket upgrade from an origin it does not allow (HTTP 403).
+`ALLOWED_ORIGINS` (comma-separated) lists them; when it is empty, the API allows
+`http://localhost` and `http://127.0.0.1` on `QUIZ_PORT` (8080, the nginx entry).
+`make dev-api` sets it to the Vite dev server's origins; `DEV_API_PORT` and
+`DEV_ORIGINS` change the port and the list.
 
 `make check` runs, in order: the internal-content guard
 (`scripts/check_internal.py`), ruff (lint and format), mypy (strict), pytest
