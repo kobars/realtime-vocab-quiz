@@ -1,4 +1,4 @@
-// AI-ASSISTED: the client routes: join at `/`, the quiz at `/quiz/:quizId`, and a 404 page.
+// AI-ASSISTED: the client routes: join at `/`, the quiz at `/quiz/:quizId`, the share link and a 404 page.
 import { createRouter, createWebHistory, type RouteRecordRaw, type RouterHistory } from 'vue-router'
 
 export const routes: RouteRecordRaw[] = [
@@ -9,8 +9,8 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('@/views/QuizView.vue'),
     props: true,
   },
-  // Short share link.
-  { path: '/q/:quizId', redirect: (to) => ({ name: 'quiz', params: to.params }) },
+  // Short share link: the join screen with the quiz ID filled in.
+  { path: '/q/:quizId', redirect: (to) => ({ name: 'join', query: { quiz: to.params.quizId } }) },
   {
     path: '/:pathMatch(.*)*',
     name: 'not-found',

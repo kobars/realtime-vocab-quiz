@@ -22,7 +22,7 @@ describe('routes', () => {
   it.each([
     ['/', 'join', '/'],
     ['/quiz/VOCAB-42', 'quiz', '/quiz/VOCAB-42'],
-    ['/q/VOCAB-42', 'quiz', '/quiz/VOCAB-42'],
+    ['/q/VOCAB-42', 'join', '/?quiz=VOCAB-42'],
     ['/nope', 'not-found', '/nope'],
     ['/quiz', 'not-found', '/quiz'],
     ['/quiz/VOCAB-42/extra', 'not-found', '/quiz/VOCAB-42/extra'],
