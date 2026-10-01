@@ -28,7 +28,7 @@ Switching the look later means replacing the token values in one file (§7.3); n
 
 - **Phones (below 1024 px):** one column. A two-tab switch at the top, "Quiz" and "Leaderboard", with my rank and score always visible in the header, so the leaderboard tab is never needed to know where I stand.
 - **Desktops (1024 px and up):** two columns: the quiz on the left (at most 640 px wide), the live leaderboard on the right (360 px), both visible at once.
-- **Header (every quiz screen):** the quiz ID, the question counter ("Question 3 of 10"), my score, my rank ("#12 of 340"), and the connection pill (§3.7) when the connection is not live.
+- **Header (every quiz screen):** the quiz ID, the question counter ("Question 3 of 10"), my score, my rank ("#12 of 340"; its sources are in §3.5), and the connection pill (§3.7) while the connection is not `live`.
 - All copy lives in one strings module in `web/src/`, so a translation can be added later.
 
 ## 3. Screens
@@ -39,7 +39,7 @@ Switching the look later means replacing the token values in one file (§7.3); n
 - The quiz ID field upper-cases what is typed and accepts `^[A-Z0-9-]{3,16}$`. The display name is 1–32 characters after trim. Both are checked on blur and on submit; the message sits under the field, linked with `aria-describedby`.
 - A link `/?quiz=VOCAB-42` fills the quiz ID and puts the focus in the name field. The last display name is remembered in the tab (`sessionStorage`).
 - On submit: the button shows a spinner and "Joining…", the fields stay readable. The client creates the mock session once (`POST /sessions`), fetches a ticket, opens the socket and sends `join` (protocol §8). `joined` routes to `/quiz/:quizId`.
-- `QUIZ_NOT_FOUND` puts "No quiz with this ID" under the quiz ID field; the user may try again. `QUIZ_ENDED` on join routes to the results screen (§3.6).
+- `QUIZ_NOT_FOUND` puts "No quiz with this ID" under the quiz ID field; the user may try again. A join after the quiz ended gets the final `snapshot` first, then `QUIZ_ENDED` (protocol §7), and routes to the results screen at `/quiz/:quizId` (§3.6).
 
 ### 3.2 Intro
 
@@ -48,13 +48,14 @@ Shown after `joined` when `cursor = −1` (no question served yet).
 - The quiz ID, the number of questions (`questionCount`), the time per question (`timeLimitMs`), how much time the quiz has left (`quizRemainingMs`, counted down), and the scoring rule in one line: "Correct answers score 100–150 points, more when faster; wrong or late answers score 0."
 - The live leaderboard is already visible (desktop) or one tab away (phone), with the player count.
 - One primary button, "Start", which has the focus. It sends `next {questionIndex: 0}`; the question clock starts only now (domain §3.2).
+- After a rejoin with `cursor ≥ 0` and the question at `cursor` closed, the same screen shows "Continue" instead. It sends `next {questionIndex: cursor + 1}`; when `cursor = N − 1` that is `N`, which finishes the quiz (domain §5.1). It never sends `cursor` or 0, which would re-serve a closed question or get `INVALID_STATE`.
 
 ### 3.3 Question
 
 - The countdown ring (§5.3) with the whole seconds left in its center, the prompt as the screen's `<h2>`, and the four choices as a 2 × 2 grid (one column on narrow phones). Each choice is a button with its key hint ("1"–"4") on the left.
-- Choosing (click, tap or key 1–4) sends `answer` with a new `submissionId` made once per question and kept until the result arrives. The choices lock at once; the chosen one shows "Checking…" with a small spinner. There is no second choice and no undo.
+- Choosing (click, tap or key 1–4) sends `answer` with a new `submissionId` made once per question and kept until the result arrives. The choices lock at once; the chosen one shows "Checking…" with a small spinner. There is no second choice and no undo. If the reply is `ALREADY_ANSWERED` (the question was already closed, for example by a Skip that the server ran first, domain §5.2), no `answer_result` follows: the choices unlock, the spinner goes, and the client rejoins to read `cursor` and `score` (§4.3).
 - When the ring reaches 0 the choices stay enabled, and a note appears under them: "Time's up: an answer now scores 0." A secondary "Skip" button sends `next {questionIndex: i + 1}` (the question closes with 0 points).
-- While the connection is not live (§3.7), the choices are disabled with the note "Waiting for the connection…". The ring keeps running, because the server clock keeps running; after the reconnect, the re-served `question` resets it from its new `remainingMs`.
+- While the connection is `connecting`, `joining` or `reconnecting` (§3.7), the choices are disabled with the note "Waiting for the connection…". The ring keeps running, because the server clock keeps running; after the reconnect, the re-served `question` resets it from its new `remainingMs`.
 
 ### 3.4 Answer feedback
 
@@ -70,7 +71,8 @@ Shown on `answer_result`.
 A panel on every quiz screen (intro, question, feedback, finished).
 
 - **Rows:** rank, display name, score (tabular numerals, right-aligned). At most 50 rows are rendered: the top 50 of the latest `leaderboard` or `snapshot` (frames up to 200 players carry everyone; the client still renders 50).
-- **My row:** highlighted with the accent tint and "(you)". If I am not in the top 50, a pinned row under the list shows my rank and score: from the frame's `entries` up to 200 players, else from the latest `rank_update`.
+- **My row:** highlighted with the `--highlight` tint and "(you)". If I am not in the top 50, a pinned row under the list shows my rank and score.
+- **Where my rank and score come from** (the pinned row and the header): each `snapshot.you` and `quiz_ended.you` sets them, because no `rank_update` follows a join or a reconnect while the standings stay the same (protocol §4). After that, a `leaderboard` frame updates them from its `entries` up to 200 players; above 200, each `rank_update` does.
 - **Header:** "340 players · 312 online" (`playerCount`, `onlineCount`).
 - Rows are keyed by `userId`, so a rank change moves the row instead of re-drawing it (§5.1). Ties cannot happen: ranks are unique.
 - The list itself is not a live region (§6.3); my rank and score are.
@@ -90,8 +92,8 @@ Two kinds, by how much they interrupt:
   | Pill | When |
   |---|---|
   | "Connecting…" | First open, before `joined` |
-  | "Reconnecting… (attempt 3)" | After a close that reconnects (1006, 1009, 1011, 1012, 1013), during the backoff and the new open |
-  | "Server busy, retrying" | After `UNAVAILABLE` or 1013 (wait 5 s plus the backoff) |
+  | "Reconnecting… (attempt 3)" | After a close that reconnects (1006, 1009, 1011, 1012, 1013) or a failed open, during the backoff and the new open |
+  | "Server busy, retrying" | After `UNAVAILABLE`: the failed request is sent again after the backoff (an `answer` with the same `submissionId`, a `next` with the same index), until a reply arrives. After 1013: wait 5 s plus the backoff, then reconnect |
   | "Updating…" | Between `resync` and `snapshot`; the leaderboard stays visible at full opacity, with a small spinner in its header |
 
 - **Blocking (only the user can act):** a centered card that replaces the quiz column; the leaderboard is hidden.
@@ -100,8 +102,10 @@ Two kinds, by how much they interrupt:
   |---|---|---|
   | "This quiz is open in another tab" | `SESSION_REPLACED`, close 4001 | "Use this tab" (a new ticket and `join`; the other tab then gets this card) |
   | "A new version is available" | `UNSUPPORTED_VERSION` | "Reload" |
-  | "Can't connect to this quiz" | `FORBIDDEN`, close 1008 | "Reload", and a link back to `/` |
+  | "Can't connect to this quiz" | Close 1008 (policy violation) | "Reload", and a link back to `/` |
   | "Still can't connect" | 10 reconnect attempts in a row without a `joined` | "Try again" (resets the attempts) |
+
+  A refused upgrade never reaches the client as a message. A wrong `Origin` (HTTP 403, `FORBIDDEN`), a bad ticket (401, `UNAUTHORIZED`) and a full node or IP cap (503, 429) all look like close 1006 to a browser (protocol §7). The client treats each as a failed open: a new ticket and a reconnect with backoff, which ends at "Still can't connect" after 10 attempts.
 
 ## 4. State chart
 
@@ -114,21 +118,29 @@ stateDiagram-v2
     [*] --> idle
     idle --> connecting: Join pressed
     connecting --> joining: socket open (quiz.v1)
+    connecting --> reconnecting: open fails (a refused upgrade, too) or 5 s timeout
     joining --> resyncing: joined, then send resync
+    joining --> live: snapshot (ended), then QUIZ_ENDED
+    joining --> idle: QUIZ_NOT_FOUND
     resyncing --> live: snapshot
     live --> resyncing: seq gap, pong.seq ≠ lastSeq, seq < lastSeq
-    live --> reconnecting: close 1006 / 1009 / 1011 / 1012 / 1013, or 50 s silence
-    connecting --> reconnecting: open fails or 5 s timeout
-    joining --> reconnecting: close that reconnects
-    resyncing --> reconnecting: close that reconnects
+    live --> joining: NOT_JOINED, QUESTION_NOT_OPEN, INVALID_STATE, ALREADY_ANSWERED
+    resyncing --> joining: NOT_JOINED, QUESTION_NOT_OPEN, INVALID_STATE, ALREADY_ANSWERED
+    joining --> reconnecting: close that reconnects, or 50 s silence
+    resyncing --> reconnecting: close that reconnects, or 50 s silence
+    live --> reconnecting: close that reconnects, or 50 s silence
+    joining --> blocked: close 4001 / 1008, UNSUPPORTED_VERSION
+    resyncing --> blocked: close 4001 / 1008, UNSUPPORTED_VERSION
+    live --> blocked: close 4001 / 1008, UNSUPPORTED_VERSION
     reconnecting --> connecting: backoff elapsed, new ticket
     reconnecting --> blocked: 10 attempts without joined
-    live --> blocked: close 4001 / 1008, FORBIDDEN, UNSUPPORTED_VERSION
     live --> closed: user leaves (client closes 1000)
     blocked --> connecting: user acts (§3.7)
 ```
 
-`connecting`, `joining`, `resyncing` and `reconnecting` show the calm pill; `blocked` shows the card; `live` shows nothing. Requests made while the connection is not `live` are not queued, except one pending `answer`, which is resent with the same `submissionId` after the reconnect (the server replays the same result).
+A close that reconnects is 1006 (also a failed open), 1009, 1011, 1012 or 1013. The connected states are `joining`, `resyncing` and `live`: the socket is open in each, so every edge for a close, an error or silence starts from all three.
+
+`connecting`, `joining`, `resyncing` and `reconnecting` show the calm pill; `blocked` shows the card; `live` shows nothing. `resyncing` is a healthy socket: protocol §3 buffers only broadcasts until the `snapshot`, so requests (Start, Continue, an answer, Next, Skip, "Show all players") are sent at once, and the choices stay enabled. Requests made while the connection is `connecting`, `joining` or `reconnecting` are not queued, except one pending `answer`, which is resent with the same `submissionId` once the connection is `live` again (the server replays the same result).
 
 ### 4.2 Phase
 
@@ -137,9 +149,9 @@ stateDiagram-v2
     [*] --> join
     join --> intro: joined, cursor = −1
     join --> question: joined, cursorOpen → next(cursor) → question
-    join --> intro: joined, cursor ≥ 0, not open (button reads "Continue")
+    join --> intro: joined, cursor ≥ 0, not open (button reads "Continue", sends next(cursor + 1))
     join --> finished: joined, finished
-    join --> results: QUIZ_ENDED, then snapshot (ended)
+    join --> results: snapshot (ended), then QUIZ_ENDED
     intro --> question: Start → question
     question --> feedback: answer_result
     question --> question: Skip → question
@@ -164,25 +176,24 @@ After a reconnect, the new `joined` keeps the current screen when it agrees with
 | `finished` | → finished | — | Provisional rank |
 | `leaderboard` | — | — | Rows move (FLIP); counts update; applied by the `seq` rules of protocol §3 |
 | `rank_update` | — | — | Pinned "my row" updates |
-| `snapshot` | → results if `status: "ended"` | `resyncing` → `live` | Standings replaced without animation |
+| `snapshot` | → results if `status: "ended"` | `resyncing` → `live`; in `joining` it answers a join after the end and the connection waits for the `QUIZ_ENDED` that follows | Standings replaced without animation; my rank and score from `you` |
 | `leaderboard_page` | — | — | Rows appended to "Show all players" |
-| `quiz_ended` | → results (from any phase) | — | Podium; the pill and any pending request are dropped |
-| `pong` | — | → `resyncing` if `seq` differs from `lastSeq` | None |
+| `quiz_ended` | → results (from any phase) | — | Podium; my final rank from `you`; the pill and any pending request are dropped |
+| `pong` | — | `live` → `resyncing` if `seq` differs from `lastSeq` | None |
 | `INVALID_MESSAGE`, `UNSUPPORTED_TYPE` | — | — | None (logged to the console; a client bug) |
 | `UNSUPPORTED_VERSION` | — | → `blocked` | "A new version is available" |
 | `MESSAGE_TOO_LARGE` | — | → `reconnecting` (close 1009) | Calm pill |
-| `UNAUTHORIZED` | — | → `reconnecting` with a new ticket | Calm pill |
-| `FORBIDDEN` | — | → `blocked` | "Can't connect to this quiz" |
-| `QUIZ_NOT_FOUND` | stays join | → `idle` | Message under the quiz ID field |
-| `NOT_JOINED` | — | → `joining` | None; `join`, then the request again |
-| `QUESTION_NOT_OPEN`, `INVALID_STATE` | — | → `joining` | None; rejoin reads `cursor` and §4.2 picks the screen |
-| `ALREADY_ANSWERED` | stays | — | None; the first result stands |
-| `QUIZ_ENDED` | → results | — | Podium after the `snapshot` |
+| `UNAUTHORIZED`, `FORBIDDEN`, HTTP 503 or 429 | — | `connecting` → `reconnecting` with a new ticket | Calm pill. Never a message: a refused upgrade looks like close 1006 (§3.7) |
+| `QUIZ_NOT_FOUND` | stays join | `joining` → `idle` | Message under the quiz ID field |
+| `NOT_JOINED` | — | `resyncing`, `live` → `joining` | None; `join`, then the request again |
+| `QUESTION_NOT_OPEN`, `INVALID_STATE` | — | `resyncing`, `live` → `joining` | None; rejoin reads `cursor` and §4.2 picks the screen |
+| `ALREADY_ANSWERED` | per §4.2 after the rejoin | `resyncing`, `live` → `joining` | The choices unlock and the spinner goes; the first result stands, and the rejoin reads `cursor` and `score` |
+| `QUIZ_ENDED` | → results | `joining` → `live` after a join (the socket may still send `get_leaderboard` and `resync`); otherwise it stays | Podium from the final `snapshot` that came before it (on a join) or from the `quiz_ended` broadcast (on a write) |
 | `RATE_LIMITED` | — | — | None; the request is retried after 1 s |
 | `SESSION_REPLACED` | — | → `blocked` | "This quiz is open in another tab" |
-| `UNAVAILABLE` | — | stays, or → `reconnecting` after 1013 | "Server busy, retrying" |
+| `UNAVAILABLE` | — | stays; with close 1013 → `reconnecting` | "Server busy, retrying"; the request is retried after the backoff, an `answer` with the same `submissionId` |
 | `INTERNAL` | — | → `reconnecting` (close 1011) | Calm pill |
-| Close 1000 | — | → `closed` | None (the user left) |
+| Close 1000 | — | `live` → `closed` | None (the user left) |
 | Close 1006, 1009, 1011, 1012 | — | → `reconnecting` | Calm pill |
 | Close 1013 | — | → `reconnecting`, 5 s plus the backoff | "Server busy, retrying" |
 | Close 1008 | — | → `blocked` | "Can't connect to this quiz" |
@@ -195,8 +206,8 @@ Every animation uses the motion tokens (§7.2) and follows one rule: **motion sh
 ### 5.1 Rank changes (FLIP)
 
 - Leaderboard rows animate position changes with FLIP: record each row's position, apply the new order, invert with a transform, then play to zero. Vue's `<TransitionGroup>` move class does exactly this; it runs on `transform` only, so it never triggers layout.
-- Duration `--motion-slow` (320 ms), easing `--ease-standard`. A row that enters fades in over `--motion-base`; a row that leaves fades out over `--motion-fast`.
-- My own row, when it moves up, gets a 1 s accent-tint fade on top of the move. Rows that move down get no extra effect.
+- Duration `--motion-base` (200 ms), easing `--ease-standard`: no longer than the 200 ms tick, so a move ends before the next frame can start another. A row that enters fades in over `--motion-base`; a row that leaves fades out over `--motion-fast`.
+- My own row, when it moves up, gets a 1 s `--highlight` tint fade on top of the move. Rows that move down get no extra effect.
 - A frame applied as a full replacement (`snapshot`, `rebase: true`) or more than 20 rows moving at once skips FLIP and swaps the list in one step.
 
 ### 5.2 Scores count up
@@ -272,7 +283,7 @@ Contrast ratios are computed with the WCAG 2.2 relative-luminance formula, again
 | Readability | Text 17.1:1, muted 7.2:1; system font renders sharp everywhere | Text 16.4:1, muted 7.1:1; serif headings are charming but slower to scan under time pressure | Text 15.5:1, muted 8.2:1; light-on-dark text blooms in bright rooms and on projectors |
 | AA contrast (lowest text pair on the page) | success 4.79:1, warning 4.80:1: all pass | warning 4.61:1: passes with little margin | all pass (lowest: danger 6.2:1 on cards), but the control outline `#6B7799` is 3.85:1 on cards |
 | Visible focus | indigo ring 7.55:1, a hue unlike success and danger | teal ring 5.12:1, close in hue to success green | pale yellow ring 15.2:1, strong |
-| Calm motion | short, no overshoot | slow; the 400 ms FLIP lags behind 200 ms frames | spring overshoot makes rank moves look jumpy |
+| Calm motion | short, no overshoot; the 200 ms FLIP ends before the next 200 ms frame | slow; even its 250 ms base step outlasts the 200 ms frames, so moves pile up | spring overshoot makes rank moves look jumpy |
 
 A wins on the criteria that matter during play (feedback colors, focus during feedback, calm leaderboard). C stays documented as a dark theme that can be added later by swapping tokens.
 
@@ -282,13 +293,18 @@ A wins on the criteria that matter during play (feedback colors, focus during fe
 |---|---|---|---|
 | `--background` | `#F8FAFC` | Page | — |
 | `--card` | `#FFFFFF` | Panels, choices, cards | — |
+| `--card-foreground` | `#0F172A` | Text on cards | 17.9:1 on card |
+| `--popover` / `--popover-foreground` | `#FFFFFF` / `#0F172A` | Menus, tooltips | 17.9:1 |
 | `--foreground` | `#0F172A` | Body text, headings | 17.1:1 on page |
-| `--muted-foreground` | `#475569` | Secondary text, hints | 7.2:1 on page |
+| `--muted-foreground` | `#475569` | Secondary text, hints | 7.2:1 on page, 6.9:1 on muted |
+| `--muted` | `#F1F5F9` | Tab list, quiet fills | — |
+| `--secondary` / `--secondary-foreground` | `#F1F5F9` / `#0F172A` | Secondary buttons ("Skip") | 16.3:1 |
 | `--border` | `#E2E8F0` | Dividers (decorative) | — |
 | `--input` | `#64748B` | Outlines of choices and inputs | 4.55:1 on page, 4.76:1 on card |
 | `--primary` | `#4338CA` | Primary button, ring stroke, my row's marker | 7.55:1 on page |
 | `--primary-foreground` | `#FFFFFF` | Text on primary | 7.90:1 |
-| `--accent` | `#EEF2FF` | My row's tint | text on it 16.0:1 |
+| `--accent` / `--accent-foreground` | `#F1F5F9` / `#0F172A` | Hover and highlighted items of ghost and outline buttons and menus (shadcn-vue's use) | 16.3:1 |
+| `--highlight` | `#EEF2FF` | My row's tint, its 1 s fade (§5.1) | text on it 16.0:1; `--primary` on it 7.07:1 |
 | `--ring` | `#4338CA` | Focus ring, 2 px, offset 2 px | 7.55:1 on page |
 | `--success` | `#15803D` | Correct mark, "+points" | 4.79:1 on page; white on it 5.02:1 |
 | `--success-soft` | `#F0FDF4` | Correct choice fill | `#166534` on it 6.81:1 |
@@ -299,12 +315,12 @@ A wins on the criteria that matter during play (feedback colors, focus during fe
 | Type scale | 14 / 16 / 20 / 24 / 32 px, line height 1.5 (body) and 1.2 (headings) | Hint / body / choice / prompt / podium | — |
 | `--radius` | `0.625rem` (10 px) | Cards, buttons, choices; pills are fully round | — |
 | `--shadow-card` | `0 1px 2px rgb(15 23 42 / 0.06), 0 4px 12px rgb(15 23 42 / 0.06)` | Cards only | — |
-| `--motion-fast` / `--motion-base` / `--motion-slow` | `120ms` / `200ms` / `320ms` | Leave / enter, hover / FLIP | — |
+| `--motion-fast` / `--motion-base` / `--motion-slow` | `120ms` / `200ms` / `320ms` | Leave, hover / enter, FLIP / the "Show all players" panel | — |
 | `--motion-count` | `600ms` | Count-up | — |
 | `--ease-standard` | `cubic-bezier(0.2, 0, 0, 1)` | Every transition | — |
 
 ### 7.3 Where the tokens live
 
-- One file, `web/src/styles/tokens.css`, defines the tokens as CSS custom properties on `:root`, with the names that shadcn-vue components already read (`--background`, `--foreground`, `--card`, `--primary`, `--primary-foreground`, `--muted-foreground`, `--accent`, `--border`, `--input`, `--ring`, `--destructive`, `--radius`) plus `--success`, `--warning`, the soft fills, the shadow and the motion tokens.
+- One file, `web/src/styles/tokens.css`, defines the tokens as CSS custom properties on `:root`, with the full set of names that shadcn-vue components read (`--background`, `--foreground`, `--card`, `--card-foreground`, `--popover`, `--popover-foreground`, `--primary`, `--primary-foreground`, `--secondary`, `--secondary-foreground`, `--muted`, `--muted-foreground`, `--accent`, `--accent-foreground`, `--destructive`, `--border`, `--input`, `--ring`, `--radius`; the chart and sidebar tokens are unused) plus `--highlight`, `--success`, `--warning`, the soft fills, the shadow and the motion tokens. `--accent` keeps shadcn-vue's meaning (the hover background), so my row has its own `--highlight` and buttons never hover in the my-row tint.
 - Tailwind maps its theme colors, radius and durations to these properties, so components use classes such as `bg-card`, `text-success` and `duration-slow`, never a raw hex value or millisecond count.
 - The same file holds the one `@media (prefers-reduced-motion: reduce)` block that sets every motion token to `0ms` (§5.4).
