@@ -10,8 +10,8 @@ export const LIVENESS_TIMEOUT_MS = 50_000
 export const RETRY_AFTER_MS = 1_000
 /** A failed or slow open, a failed ticket request and a silent link all count as this close code. */
 const DEAD_LINK = 1006
-/** Answer errors that mean "not done, send it again"; every other answer error settles the answer. */
-const RETRY_ANSWER_ON: readonly ErrorCode[] = ['RATE_LIMITED', 'UNAVAILABLE']
+/** Answer errors that mean "not done": the answer stays unsettled. Every other answer error settles it. */
+const RETRY_ANSWER_ON: readonly ErrorCode[] = ['RATE_LIMITED', 'UNAVAILABLE', 'NOT_JOINED']
 
 /** The part of the browser WebSocket that the client uses. */
 export interface QuizSocket {
@@ -61,8 +61,10 @@ export class QuizClient {
   private readonly unsettled = new Map<string, Answer>()
   /** The `submissionId`s sent on the current socket and not answered yet, oldest first. */
   private inFlight: string[] = []
-  /** True once the current socket got `joined`: answers go out at once instead of waiting. */
+  /** True once the current socket got `joined`, and false again after `NOT_JOINED`: answers go out only while true. */
   private joined = false
+  /** `UNAVAILABLE` retries so far, by `submissionId`: the backoff attempt of the next one. */
+  private readonly unavailable = new Map<string, number>()
   /** Timers of the current connection; a disconnect cancels them all. */
   private readonly timers = new Set<Timer>()
   private liveness: Timer | undefined
@@ -89,6 +91,7 @@ export class QuizClient {
     this.displayName = displayName
     this.stopped = false
     this.unsettled.clear()
+    this.unavailable.clear()
     void this.connect()
   }
 
@@ -98,12 +101,13 @@ export class QuizClient {
 
   /**
    * Answers question `questionIndex` with one new `submissionId`, which it returns. The client sends that same
-   * answer until the server settles it: again after each reconnect, and 1 s after `RATE_LIMITED` or `UNAVAILABLE`.
+   * answer until the server settles it: again after each `joined`, 1 s after `RATE_LIMITED` and after the backoff
+   * after `UNAVAILABLE`.
    */
   answer(questionIndex: number, choiceIndex: number): string {
     const submissionId = crypto.randomUUID()
     this.unsettled.set(submissionId, { v: 1, type: 'answer', questionIndex, choiceIndex, submissionId })
-    if (this.joined) this.sendAnswer(submissionId)
+    this.sendAnswer(submissionId)
     return submissionId
   }
 
@@ -157,7 +161,7 @@ export class QuizClient {
         }
         break
       case 'answer_result':
-        this.unsettled.delete(message.submissionId)
+        this.settle(message.submissionId)
         this.inFlight = this.inFlight.filter((id) => id !== message.submissionId)
         break
       case 'leaderboard':
@@ -175,6 +179,7 @@ export class QuizClient {
         return this.run(this.tracker.pong(message.seq))
       case 'error':
         if (message.requestType === 'resync') this.resyncFailed(message.code)
+        if (message.code === 'RATE_LIMITED' && message.requestType === null) this.resendInFlight()
         if (message.requestType === 'answer') this.answerFailed(message.code)
         break
     }
@@ -207,19 +212,53 @@ export class QuizClient {
     else this.after(resync.delayMs, send)
   }
 
+  /** Sends an unsettled answer while joined; otherwise the next `joined` sends it. */
   private sendAnswer(submissionId: string): void {
     const answer = this.unsettled.get(submissionId)
-    if (answer === undefined) return
+    if (answer === undefined || !this.joined) return
     this.inFlight.push(submissionId)
     this.send(answer)
+  }
+
+  private settle(submissionId: string): void {
+    this.unsettled.delete(submissionId)
+    this.unavailable.delete(submissionId)
   }
 
   /** An answer error carries no `submissionId`: the server replies in order, so it belongs to the oldest in flight. */
   private answerFailed(code: ErrorCode): void {
     const submissionId = this.inFlight.shift()
     if (submissionId === undefined) return
-    if (RETRY_ANSWER_ON.includes(code)) this.after(RETRY_AFTER_MS, () => this.sendAnswer(submissionId))
-    else this.unsettled.delete(submissionId)
+    if (!RETRY_ANSWER_ON.includes(code)) return this.settle(submissionId)
+    if (code === 'NOT_JOINED') return this.joinAgain()
+    let wait = RETRY_AFTER_MS
+    if (code === 'UNAVAILABLE') {
+      const attempt = this.unavailable.get(submissionId) ?? 0
+      this.unavailable.set(submissionId, attempt + 1)
+      wait = backoffDelay(attempt, this.o.random)
+    }
+    this.after(wait, () => this.sendAnswer(submissionId))
+  }
+
+  /**
+   * The server lost this player's join (protocol spec §7: `join`, then repeat the request). Answers wait, and the
+   * next `joined` resends every unsettled one.
+   */
+  private joinAgain(): void {
+    if (!this.joined) return
+    this.joined = false
+    this.send({ v: 1, type: 'join', quizId: this.quizId, displayName: this.displayName })
+  }
+
+  /**
+   * A `RATE_LIMITED` without a `requestType` (the token bucket drops a frame before parsing it) may have dropped any
+   * answer in flight. Resends them all after 1 s with the same `submissionId`s, which is safe because answers are
+   * idempotent, and forgets the list, so that a later error is not matched to an answer that got no reply.
+   */
+  private resendInFlight(): void {
+    const resend = this.inFlight
+    this.inFlight = []
+    if (resend.length > 0) this.after(RETRY_AFTER_MS, () => resend.forEach((id) => this.sendAnswer(id)))
   }
 
   /** Sends on an open socket; otherwise drops the message (a reconnect resends answers, `joined` re-drives `next`). */

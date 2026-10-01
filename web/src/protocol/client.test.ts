@@ -346,15 +346,79 @@ it('resends unsettled answers with the same submissionId after each reconnect, u
   expect(answers(third)).toEqual([])
 })
 
-it.each(['RATE_LIMITED', 'UNAVAILABLE'])('sends the same answer again 1 s after %s', async (code) => {
+it('sends the same answer again 1 s after RATE_LIMITED', async () => {
   uuids('s-1')
   const client = start()
   const socket = await joinedSocket()
   client.answer(0, 2)
-  socket.receive(answerError(code))
+  socket.receive(answerError('RATE_LIMITED'))
   await wait(999)
   expect(answers(socket)).toHaveLength(1)
   await wait(1)
+  expect(answers(socket)).toEqual([answerMsg('s-1'), answerMsg('s-1')])
+})
+
+it('sends the same answer again after a full-jitter backoff that grows with each UNAVAILABLE', async () => {
+  uuids('s-1')
+  const client = start(() => 0.5)
+  const socket = await joinedSocket()
+  client.answer(0, 2)
+  // Waits of floor(0.5 × 250 × 2^attempt): 125, 250 and 500 ms.
+  for (const delay of [125, 250, 500]) {
+    const sent = answers(socket).length
+    socket.receive(answerError('UNAVAILABLE'))
+    await wait(delay - 1)
+    expect(answers(socket)).toHaveLength(sent)
+    await wait(1)
+    expect(answers(socket)).toHaveLength(sent + 1)
+  }
+  expect(answers(socket).every((message) => message.submissionId === 's-1')).toBe(true)
+})
+
+const rateLimited = { type: 'error', code: 'RATE_LIMITED', requestType: null } as Partial<ServerMessage>
+
+it('resends every answer in flight 1 s after a RATE_LIMITED that names no request', async () => {
+  uuids('s-1', 's-2')
+  const client = start()
+  const socket = await joinedSocket()
+  client.answer(0, 2)
+  client.answer(1, 3)
+  socket.receive(rateLimited)
+  await wait(999)
+  expect(answers(socket)).toHaveLength(2)
+  await wait(1)
+  expect(answers(socket).map((message) => message.submissionId)).toEqual(['s-1', 's-2', 's-1', 's-2'])
+})
+
+it('settles only its own answer with a final error that follows a RATE_LIMITED that names no request', async () => {
+  uuids('s-1', 's-2')
+  const client = start()
+  const socket = await joinedSocket()
+  client.answer(0, 2)
+  client.answer(1, 3)
+  // s-1 was dropped, so the next reply is for s-2: it settles nothing, since the list no longer says whose it is.
+  socket.receive(rateLimited)
+  socket.receive(answerError('ALREADY_ANSWERED'))
+  await wait(1_000)
+  // The resends go out as s-1, s-2: the next final error is s-1's and settles s-1 only.
+  socket.receive(answerError('ALREADY_ANSWERED'))
+  socket.drop()
+  const next = await connected()
+  next.receive(joined())
+  expect(answers(next)).toEqual([answerMsg('s-2', 1, 3)])
+})
+
+it('keeps an answer after NOT_JOINED, joins again and resends it after the next joined', async () => {
+  uuids('s-1')
+  const client = start()
+  const socket = await joinedSocket()
+  client.answer(0, 2)
+  socket.receive(answerError('NOT_JOINED'))
+  expect(socket.types()).toEqual(['join', 'resync', 'answer', 'join'])
+  await wait(5_000)
+  expect(answers(socket)).toHaveLength(1)
+  socket.receive(joined())
+  expect(socket.types().slice(4)).toEqual(['resync', 'answer'])
   expect(answers(socket)).toEqual([answerMsg('s-1'), answerMsg('s-1')])
 })
 
@@ -375,7 +439,7 @@ it('matches an answer error to the oldest answer in flight on that socket', asyn
   expect(answers(next)).toEqual([answerMsg('s-1')])
 })
 
-it.each(['ALREADY_ANSWERED', 'QUESTION_NOT_OPEN', 'INVALID_MESSAGE', 'QUIZ_ENDED', 'NOT_JOINED'])(
+it.each(['ALREADY_ANSWERED', 'QUESTION_NOT_OPEN', 'INVALID_MESSAGE', 'QUIZ_ENDED'])(
   'drops an answer after the final error %s',
   async (code) => {
     uuids('s-1')
