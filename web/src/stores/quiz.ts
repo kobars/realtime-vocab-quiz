@@ -182,7 +182,7 @@ export const useQuizStore = defineStore('quiz', () => {
     } else if (code === 'QUIZ_ENDED') {
       if (s.connection === 'connecting') s.connection = 'joined'
       end()
-    } else if (code === 'UNSUPPORTED_VERSION') client.value?.stop()
+    } else if (code === 'UNSUPPORTED_VERSION' || code === 'SESSION_REPLACED') client.value?.stop()
     else if (REJOIN_ON.includes(code) && !s.ended) client.value?.rejoin()
   }
 
