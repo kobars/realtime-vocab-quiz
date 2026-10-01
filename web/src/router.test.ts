@@ -1,5 +1,6 @@
 // AI-ASSISTED: route table and app-shell tests.
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { describe, expect, it } from 'vitest'
 import { createMemoryHistory } from 'vue-router'
 import App from './App.vue'
@@ -13,7 +14,7 @@ async function at(path: string) {
 }
 
 async function mountAt(path: string) {
-  const wrapper = mount(App, { global: { plugins: [await at(path)] } })
+  const wrapper = mount(App, { global: { plugins: [createPinia(), await at(path)] } })
   await flushPromises()
   return wrapper
 }

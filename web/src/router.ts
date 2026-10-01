@@ -6,7 +6,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/quiz/:quizId',
     name: 'quiz',
-    component: () => import('@/views/QuizView.vue'),
+    component: () => import('@/views/PlayView.vue'),
     props: true,
   },
   // Short share link: the join screen with the quiz ID filled in.
