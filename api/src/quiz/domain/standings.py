@@ -12,7 +12,8 @@ from dataclasses import dataclass, replace
 
 TOTAL_BITS = 30
 REACHED_BITS = 22
-MAX_TOTAL = 1 << TOTAL_BITS
+TOTAL_LIMIT = 1 << TOTAL_BITS  # exclusive: 0 <= total < 2^30 (docs/spec/redis.md §4)
+MAX_TOTAL = TOTAL_LIMIT - 1
 MAX_REACHED_REL_MS = (1 << REACHED_BITS) - 1
 
 
@@ -51,13 +52,14 @@ def encode_sort_score(total: int, reached_rel_ms: int) -> int:
     if not 0 <= total <= MAX_TOTAL or not 0 <= reached_rel_ms <= MAX_REACHED_REL_MS:
         msg = f"total {total} or reached_rel_ms {reached_rel_ms} out of range"
         raise ValueError(msg)
-    return ((MAX_TOTAL - total) << REACHED_BITS) + reached_rel_ms
+    return ((TOTAL_LIMIT - total) << REACHED_BITS) + reached_rel_ms
 
 
 def decode_sort_score(score: int) -> tuple[int, int]:
     """Return ``(total, reached_rel_ms)`` from a sorted-set score."""
-    if not 0 <= score <= encode_sort_score(0, MAX_REACHED_REL_MS):
+    lowest = encode_sort_score(MAX_TOTAL, 0)
+    if not lowest <= score <= encode_sort_score(0, MAX_REACHED_REL_MS):
         msg = f"sort score {score} out of range"
         raise ValueError(msg)
     inverted_total, reached_rel_ms = divmod(score, 1 << REACHED_BITS)
-    return MAX_TOTAL - inverted_total, reached_rel_ms
+    return TOTAL_LIMIT - inverted_total, reached_rel_ms
