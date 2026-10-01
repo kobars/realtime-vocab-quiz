@@ -1,0 +1,16 @@
+// AI-ASSISTED: ESLint flat config: typescript-eslint strict and eslint-plugin-vue recommended.
+import js from '@eslint/js'
+import pluginVue from 'eslint-plugin-vue'
+import { defineConfig, globalIgnores } from 'eslint/config'
+import tseslint from 'typescript-eslint'
+
+export default defineConfig(
+  globalIgnores(['dist/', 'coverage/', 'src/contracts/generated/']),
+  js.configs.recommended,
+  tseslint.configs.strict,
+  pluginVue.configs['flat/recommended'],
+  {
+    files: ['**/*.vue'],
+    languageOptions: { parserOptions: { parser: tseslint.parser } },
+  },
+)
