@@ -27,6 +27,8 @@ This document is the wire contract between the server, the Vue client, the load 
 | `remainingMs`, `timeLimitMs`, `quizRemainingMs` | integer ≥ 0, milliseconds |
 | `entries` | array of `{rank, userId, displayName, score}`, ordered by rank |
 
+Every integer field is at most 2^53 (9,007,199,254,740,992), so a client that reads JSON numbers as doubles reads it exactly; a larger value is `INVALID_MESSAGE`.
+
 ## 2. Message catalog
 
 ### 2.1 Client → server
