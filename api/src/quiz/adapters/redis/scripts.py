@@ -10,7 +10,7 @@ from redis.exceptions import NoScriptError
 from quiz.adapters.redis.keys import NO_QUIZ_TTL, QUIZ_TTL_MS, QuizKeys
 
 _LUA = files("quiz.adapters.redis") / "lua"
-SCRIPTS = ("create_quiz", "join")
+SCRIPTS = ("create_quiz", "join", "serve_question", "score_answer")
 SCORING_LIBS: dict[str, tuple[str, ...]] = {"score_answer": ("points",)}
 
 type Reply = list[str | int | None]
