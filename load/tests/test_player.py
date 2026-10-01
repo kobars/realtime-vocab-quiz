@@ -255,7 +255,8 @@ def test_a_re_served_question_keeps_the_think_time_or_resends_untimed(
     assert (p.outbox, p.timed, p.rec.counts["answer_missing"]) == (first, False, 1)
 
 
-def test_no_new_answer_goes_out_after_the_deadline() -> None:
+def test_no_new_answer_goes_out_after_the_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    think_exactly(monkeypatch)
     p = player(deadline=100)
     question(p, 0, 99.5, think_s=2)
     p.due(101.9)
