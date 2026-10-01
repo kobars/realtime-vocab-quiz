@@ -1,10 +1,17 @@
-# AI-ASSISTED: checks on the pre-commit hooks and the CI workflow triggers.
+# AI-ASSISTED: checks on the pre-commit hooks, make check and the CI workflow triggers.
 """Tests for the repository's hook and workflow configuration.
 
-The files are read as text, so the tests need no YAML library.
+The workflows and the Makefile are read as text; the hook test uses pre-commit's own
+config loader and file filter.
 """
 
 from pathlib import Path
+
+import pytest
+from pre_commit.clientlib import load_config
+from pre_commit.commands.run import Classifier
+from pre_commit.hook import Hook
+from pre_commit.prefix import Prefix
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -48,10 +55,19 @@ def _run_commands(path: Path) -> list[str]:
     return [line.removeprefix("run:").strip() for line in lines if line.startswith("run:")]
 
 
-def test_internal_hook_scans_every_staged_file() -> None:
-    hook = _block(ROOT / ".pre-commit-config.yaml", "- id: check-internal", "- id:")
-    filters = ("types:", "types_or:", "files:", "exclude:", "exclude_types:")
-    assert [line for line in hook if line.startswith(filters)] == []
+def test_internal_hook_scans_every_staged_file_and_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # pre-commit's own loader and file filter, so its default `types: [file]` applies.
+    config = load_config(str(ROOT / ".pre-commit-config.yaml"))
+    (spec,) = [h for repo in config["repos"] for h in repo["hooks"] if h["id"] == "check-internal"]
+    hook = Hook.create(str(ROOT), Prefix(str(ROOT)), spec)
+    monkeypatch.chdir(tmp_path)
+    Path("notes.md").write_text("text\n", encoding="utf-8")
+    Path(".hidden").write_text("text\n", encoding="utf-8")
+    Path("link").symlink_to("notes.md")
+    names = ["notes.md", ".hidden", "link"]
+    assert sorted(Classifier(names).filenames_for_hook(hook)) == sorted(names)
 
 
 def test_ci_runs_again_when_the_pull_request_text_is_edited() -> None:
@@ -84,3 +100,10 @@ def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
     # Image scans fail on CRITICAL and HIGH findings that have a fix, for both images.
     assert workflow.count("ignore-unfixed: true") == workflow.count("image-ref:") == 2
     assert workflow.count("severity: CRITICAL,HIGH") == 2
+
+
+def test_make_check_runs_every_pre_commit_hook_on_every_file() -> None:
+    recipe = _block(
+        ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
+    )
+    assert any("pre-commit run --all-files" in line for line in recipe)
