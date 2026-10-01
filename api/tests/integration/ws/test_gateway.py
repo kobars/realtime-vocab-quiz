@@ -134,9 +134,12 @@ def test_the_identity_comes_from_the_ticket_only() -> None:
             assert ws.receive_json()["userId"] == user_id
 
 
-def test_a_frame_above_16_kib_gets_message_too_large_then_close_1009() -> None:
+def test_a_frame_of_max_payload_passes_and_one_byte_more_gets_close_1009() -> None:
+    max_payload = Settings().max_payload_bytes
     with client_of() as client, connect(client, ticket(client)) as ws:
-        ws.send_text('{"v":1,"type":"ping","pad":"' + "x" * 16_384 + '"}')
+        ws.send_text(PING.ljust(max_payload))  # JSON allows the trailing spaces
+        assert ws.receive_json()["type"] == "pong"
+        ws.send_text(PING.ljust(max_payload + 1))
         seen, code = until_close(ws)
     assert ([f["code"] for f in seen], code) == (["MESSAGE_TOO_LARGE"], 1009)
 
