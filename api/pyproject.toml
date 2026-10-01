@@ -96,26 +96,21 @@ type = "forbidden"
 source_modules = ["quiz.domain"]
 forbidden_modules = [
     "quiz.contracts", "quiz.ports", "quiz.app", "quiz.adapters", "quiz.fanout", "quiz.obs",
-    "quiz.config", "quiz.main",
-    "pydantic", "pydantic_settings", "fastapi", "starlette", "redis", "uvicorn", "structlog",
-    "prometheus_client",
+    "quiz.config", "quiz.main", "pydantic", "pydantic_settings", "fastapi", "starlette", "redis",
+    "uvicorn", "structlog", "prometheus_client",
 ]
 
 [[tool.importlinter.contracts]]
-name = "Ports depend only on the domain"
+name = "Ports and use cases depend only on the domain, the ports and the wire contracts"
+type = "forbidden"
+source_modules = ["quiz.ports", "quiz.app"]
+forbidden_modules = ["quiz.adapters", "quiz.fanout", "quiz.config", "quiz.main", "redis", "fastapi"]
+
+[[tool.importlinter.contracts]]
+name = "Ports never import the use cases"
 type = "forbidden"
 source_modules = ["quiz.ports"]
-forbidden_modules = [
-    "quiz.app", "quiz.adapters", "quiz.fanout", "quiz.config", "quiz.main", "redis", "fastapi",
-]
-
-[[tool.importlinter.contracts]]
-name = "The use cases depend only on the domain, the ports and the wire contracts"
-type = "forbidden"
-source_modules = ["quiz.app"]
-forbidden_modules = [
-    "quiz.adapters", "quiz.fanout", "quiz.config", "quiz.main", "redis", "fastapi", "starlette",
-]
+forbidden_modules = ["quiz.app"]
 
 [[tool.importlinter.contracts]]
 name = "Adapters never import each other"

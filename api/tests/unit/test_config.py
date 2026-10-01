@@ -6,18 +6,11 @@ from pydantic import ValidationError
 
 from quiz.config import Settings
 
-ENV_NAMES = (
-    *("STORE", "REDIS_URL", "NODE_ID", "TICK_MS", "TOP_N", "FULL_LIST_MAX", "MAX_PAYLOAD_BYTES"),
-    *("HEARTBEAT_MS", "SEND_BUFFER_SOFT_BYTES", "SEND_BUFFER_HARD_BYTES", "GRACE_MS"),
-    *("RATE_LIMIT_PER_S", "RATE_LIMIT_BURST", "ALLOWED_ORIGINS", "QUIZ_PORT", "PER_IP_CONN_CAP"),
-    *("MAX_CONNECTIONS", "TRUSTED_PROXIES", "ADMIN_MOCK", "ADMIN_TOKEN"),
-)
-
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ENV_NAMES:
-        monkeypatch.delenv(name, raising=False)
+    for name in Settings.model_fields:
+        monkeypatch.delenv(name.upper(), raising=False)
 
 
 def test_defaults_match_the_spec() -> None:
