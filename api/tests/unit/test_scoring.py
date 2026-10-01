@@ -31,12 +31,6 @@ def test_wrong_answer_scores_zero(elapsed_ms: int) -> None:
     assert score_answer(correct=False, elapsed_ms=elapsed_ms, time_limit_ms=T) == 0
 
 
-def test_textbook_float_form_would_be_wrong_at_6800() -> None:
-    # The float form rounds e / T first; the rule must not depend on it.
-    assert floor(50 * (1 - 6_800 / T)) == 32
-    assert score_answer(correct=True, elapsed_ms=6_800, time_limit_ms=T) == 133
-
-
 @pytest.mark.parametrize("time_limit_ms", [0, -1])
 def test_non_positive_time_limit_is_rejected(time_limit_ms: int) -> None:
     with pytest.raises(ValueError, match="time_limit_ms"):

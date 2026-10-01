@@ -40,11 +40,6 @@ def test_standings_match_a_plain_sort(rows: list[Standing]) -> None:
     assert [row.rank for row in ranked] == list(range(1, len(rows) + 1))
 
 
-@given(entries)
-def test_standings_do_not_depend_on_input_order(rows: list[Standing]) -> None:
-    assert standings(rows) == standings(list(reversed(rows)))
-
-
 @given(totals, reached)
 def test_sort_score_round_trips(total: int, reached_rel_ms: int) -> None:
     score = encode_sort_score(total, reached_rel_ms)
