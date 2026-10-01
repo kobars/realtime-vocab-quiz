@@ -38,7 +38,7 @@ describe('connectTicket', () => {
     expect(JSON.parse(sessionStorage.getItem(IDENTITY_KEY) ?? '')).toEqual({ userId: 'u1', sessionToken: 'token-1' })
   })
 
-  it.each(['not json', '{"userId": 7}', 'null'])('replaces a broken stored identity %j', async (stored) => {
+  it.each(['not json', '{"userId": 7}', 'null', '{"userId": "", "sessionToken": "tok"}'])('replaces a broken stored identity %j', async (stored) => {
     sessionStorage.setItem(IDENTITY_KEY, stored)
     expect((await connectTicket(fakeApi(), 'Ana')).identity.userId).toBe('u1')
   })
@@ -83,5 +83,14 @@ describe('httpAuthApi', () => {
     await expect(api.createTicket('s1')).rejects.toThrow('503')
     fetchFn.mockResolvedValueOnce(reply(500, {}))
     await expect(api.createSession('Ana')).rejects.toThrow('500')
+  })
+
+  it('rejects a reply without the expected fields', async () => {
+    const fetchFn = vi.fn<typeof fetch>()
+    const api = httpAuthApi('/api', fetchFn)
+    fetchFn.mockResolvedValueOnce(reply(201, { userId: 'u1' }))
+    await expect(api.createSession('Ana')).rejects.toThrow('no userId and sessionToken')
+    fetchFn.mockResolvedValueOnce(reply(201, { expiresInMs: 30_000 }))
+    await expect(api.createTicket('s1')).rejects.toThrow('no ticket')
   })
 })

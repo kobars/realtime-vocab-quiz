@@ -14,12 +14,16 @@ export interface AuthApi {
 
 export const IDENTITY_KEY = 'quiz.identity'
 
+function toIdentity(value: unknown): Identity | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { userId, sessionToken } = value as Record<string, unknown>
+  const valid = typeof userId === 'string' && userId !== '' && typeof sessionToken === 'string' && sessionToken !== ''
+  return valid ? { userId, sessionToken } : null
+}
+
 function readIdentity(storage: Storage): Identity | null {
   try {
-    const value: unknown = JSON.parse(storage.getItem(IDENTITY_KEY) ?? 'null')
-    if (typeof value !== 'object' || value === null) return null
-    const { userId, sessionToken } = value as Record<string, unknown>
-    return typeof userId === 'string' && typeof sessionToken === 'string' ? { userId, sessionToken } : null
+    return toIdentity(JSON.parse(storage.getItem(IDENTITY_KEY) ?? 'null'))
   } catch {
     return null
   }
@@ -59,8 +63,9 @@ export function httpAuthApi(base = '/api', fetchFn: typeof fetch = (...args) => 
         body: JSON.stringify({ displayName }),
       })
       if (!response.ok) throw new Error(`POST ${base}/sessions failed: ${response.status}`)
-      const { userId, sessionToken } = (await response.json()) as Identity
-      return { userId, sessionToken }
+      const identity = toIdentity(await response.json())
+      if (identity === null) throw new Error(`POST ${base}/sessions returned no userId and sessionToken`)
+      return identity
     },
     async createTicket(sessionToken) {
       const response = await fetchFn(`${base}/tickets`, {
@@ -69,7 +74,9 @@ export function httpAuthApi(base = '/api', fetchFn: typeof fetch = (...args) => 
       })
       if (response.status === 401) return null
       if (!response.ok) throw new Error(`POST ${base}/tickets failed: ${response.status}`)
-      return ((await response.json()) as { ticket: string }).ticket
+      const { ticket } = (await response.json()) as { ticket?: unknown }
+      if (typeof ticket !== 'string' || ticket === '') throw new Error(`POST ${base}/tickets returned no ticket`)
+      return ticket
     },
   }
 }
