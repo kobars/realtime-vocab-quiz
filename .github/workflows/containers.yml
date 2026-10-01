@@ -3,13 +3,16 @@ name: containers
 
 on:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: containers-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  # A new push to a PR replaces its older run; runs on main always finish.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   config:
@@ -57,3 +60,14 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
           skip-setup-trivy: true
+
+  # The ruleset requires this job only; a job joins the gate by being listed in needs.
+  containers-required:
+    if: always()
+    needs: [config, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # A skipped job passes, so a job that runs only on some events never blocks a merge.
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

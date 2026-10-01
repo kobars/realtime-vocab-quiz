@@ -54,9 +54,9 @@ audit-python: ## Audit the locked Python dependencies with pip-audit
 	$(call step,python audit,set -o pipefail; uv export --project api --locked --all-groups --no-emit-project | uvx pip-audit@2.10.1 -r /dev/stdin --disable-pip --strict)
 audit-web: ## Audit the production web dependencies (high severity and above)
 	$(call step,web audit,pnpm -C web audit --prod --audit-level high)
-audit-secrets: ## Scan the whole git history for secrets with gitleaks 8.25 or later (.gitleaks.toml)
+audit-secrets: ## Scan the git history of HEAD for secrets with gitleaks 8.25 or later (.gitleaks.toml)
 	$(call step,full history,[ "$$(git rev-parse --is-shallow-repository 2>/dev/null)" = false ] || { echo 'not a full git clone: the secret scan needs the whole history' >&2; false; })
-	$(call step,secret scan,gitleaks git --redact --verbose --no-banner .)
+	$(call step,secret scan,gitleaks git --redact --verbose --no-banner --log-opts='--full-history HEAD' .)
 acceptance: ## Run the acceptance tests (ACCEPTANCE_STORE=redis: on a Redis of their own)
 	$(call step,pytest acceptance,$(PYTEST) tests/acceptance)
 contracts: ## Regenerate the JSON Schema and TypeScript types

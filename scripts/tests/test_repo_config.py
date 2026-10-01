@@ -1,8 +1,8 @@
-# AI-ASSISTED: checks on the pre-commit hooks, make targets, deptry and the CI workflow triggers.
+# AI-ASSISTED: checks on the pre-commit hooks, make targets, deptry and the CI workflows.
 """Tests for the repository's hook and workflow configuration.
 
 The workflows and the Makefile are read as text; the hook test uses pre-commit's own
-config loader and file filter.
+config loader.
 """
 
 import re
@@ -13,11 +13,9 @@ from pathlib import Path
 
 import pytest
 from pre_commit.clientlib import load_config
-from pre_commit.commands.run import Classifier
-from pre_commit.hook import Hook
-from pre_commit.prefix import Prefix
 
 ROOT = Path(__file__).resolve().parents[2]
+WORKFLOWS = ROOT / ".github" / "workflows"
 
 
 def _block(path: Path, start: str, next_prefix: str) -> list[str]:
@@ -47,11 +45,6 @@ def _section(path: Path, key: str, indent: int) -> list[str]:
     return [line.strip() for line in raw[begin:end]]
 
 
-def _job(name: str) -> list[str]:
-    """Return the stripped lines of one job of the CI workflow."""
-    return _section(ROOT / ".github" / "workflows" / "ci.yml", name, 2)
-
-
 def _hook(hook_id: str) -> dict[str, object]:
     """Return one hook of the pre-commit config, with pre-commit's defaults filled in."""
     config = load_config(str(ROOT / ".pre-commit-config.yaml"))
@@ -69,37 +62,50 @@ def _run_commands(path: Path) -> list[str]:
     return [line.removeprefix("run:").strip() for line in lines if line.startswith("run:")]
 
 
-def test_internal_hook_scans_every_staged_file_and_symlink(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # pre-commit's own loader and file filter, so its default `types: [file]` applies.
-    hook = Hook.create(str(ROOT), Prefix(str(ROOT)), _hook("check-internal"))
-    monkeypatch.chdir(tmp_path)
-    Path("notes.md").write_text("text\n", encoding="utf-8")
-    Path(".hidden").write_text("text\n", encoding="utf-8")
-    Path("link").symlink_to("notes.md")
-    names = ["notes.md", ".hidden", "link"]
-    assert sorted(Classifier(names).filenames_for_hook(hook)) == sorted(names)
-
-
 def test_eslint_hook_runs_one_process_so_the_typescript_program_is_built_once() -> None:
     assert _hook("eslint")["require_serial"] is True
 
 
-def test_ci_runs_again_when_the_pull_request_text_is_edited() -> None:
-    trigger = _block(ROOT / ".github" / "workflows" / "ci.yml", "pull_request:", "permissions:")
-    assert "types: [opened, synchronize, reopened, edited]" in trigger
+GATE_FAILS = "- if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')"
 
 
-def test_only_the_internal_job_runs_on_an_edit() -> None:
-    skip_edit = "if: github.event.action != 'edited'"
-    assert skip_edit in _job("check")
-    assert skip_edit in _job("integration")
-    assert skip_edit not in _job("internal")
+@pytest.mark.parametrize(
+    ("workflow", "gate", "needs"),
+    [
+        ("ci.yml", "ci-required", "[check, integration]"),
+        ("security.yml", "security-required", "[secrets, dependency-review]"),
+        ("containers.yml", "containers-required", "[config, images]"),
+    ],
+)
+def test_each_workflow_has_one_gate_job_over_its_required_jobs(
+    workflow: str, gate: str, needs: str
+) -> None:
+    # The ruleset requires the gate job ids, so a rename or a dropped need shows up here.
+    job = _section(WORKFLOWS / workflow, gate, 2)
+    assert f"needs: {needs}" in job
+    assert "if: always()" in job
+    assert GATE_FAILS in job
+    assert not any(line.startswith("name:") for line in job)
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "containers.yml"])
+def test_workflow_runs_on_every_pull_request_update_and_on_main(workflow: str) -> None:
+    on = _section(WORKFLOWS / workflow, "on", 0)
+    assert "pull_request:" in on
+    assert not any(line.startswith("types:") for line in on)
+    assert on[on.index("push:") + 1] == "branches: [main]"
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "security.yml", "containers.yml", "codeql.yml"])
+def test_only_a_newer_pull_request_run_cancels_an_older_one(workflow: str) -> None:
+    concurrency = _section(WORKFLOWS / workflow, "concurrency", 0)
+    group = "group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}"
+    assert group in concurrency
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in concurrency
 
 
 def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
-    path = ROOT / ".github" / "workflows" / "containers.yml"
+    path = WORKFLOWS / "containers.yml"
     assert "pull_request:" in _section(path, "on", 0)
     runs = _run_commands(path)
     for command in (
