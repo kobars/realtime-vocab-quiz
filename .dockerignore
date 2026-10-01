@@ -1,0 +1,22 @@
+# AI-ASSISTED: keeps the image build context to the sources; both images build from the repo root.
+**/.git
+.github
+.worktrees
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.hypothesis
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/coverage
+**/.coverage*
+**/htmlcov
+**/.env
+**/.DS_Store
+api/tests
+docs
+load
