@@ -1,4 +1,5 @@
 # AI-ASSISTED: use-case tests: protocol messages in, replies out, on the memory store and a clock.
+import asyncio
 import logging
 from collections.abc import Sequence
 from typing import Any, Literal
@@ -152,6 +153,23 @@ async def test_snapshot_caches_the_shared_part_per_seq(
     assert (store.snapshots, third.atSeq, third.entries[0].score) == (2, 1, 150)
     store.now[0] += 60_000  # the deadline passes before quiz_ended is announced
     assert (await service.snapshot(QUIZ, "a")).status == "ended"
+    assert store.pages == 0  # the ranks read carries the cache key: no page read
+
+
+async def test_concurrent_cold_snapshots_share_one_refill(
+    service: QuizService, store: SpyStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await joined(service)
+    read = store.snapshot
+
+    async def slow(quiz_id: str, user_id: str | None) -> Snapshot:
+        await asyncio.sleep(0)  # the other snapshots miss the cache meanwhile
+        return await read(quiz_id, user_id)
+
+    monkeypatch.setattr(store, "snapshot", slow)
+    replies = await asyncio.gather(*(service.snapshot(QUIZ, "a") for _ in range(10)))
+    assert store.snapshots == 1
+    assert all(reply == replies[0] for reply in replies)
 
 
 async def test_resync_adds_rank_update_outside_the_shown_entries(service: QuizService) -> None:

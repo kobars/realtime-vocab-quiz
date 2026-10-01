@@ -64,6 +64,9 @@ class MemoryStore:
             raise DomainError(ErrorCode.QUIZ_NOT_FOUND, f"no quiz {quiz_id}")
         return quiz
 
+    def _status(self, quiz: _Quiz) -> Literal["open", "ended"]:
+        return "open" if quiz.state.is_open(self._clock()) else "ended"
+
     def _shown(self, rows: list[Row]) -> list[Row]:
         """A frame's entries: every row up to ``full_list_max`` players, else the top N."""
         return rows if len(rows) <= self.limits.full_list_max else rows[: self.limits.top_n]
@@ -184,7 +187,7 @@ class MemoryStore:
         async with quiz.lock:
             rows = {row.user_id: row for row in quiz.rows()}
             asked = {user_id: rows.get(user_id) for user_id in user_ids}
-            return port.Ranks(quiz.state.seq, len(rows), asked)
+            return port.Ranks(quiz.state.seq, self._status(quiz), len(rows), asked)
 
     async def standings_page(self, quiz_id: str, offset: int, limit: int) -> port.Page:
         if offset < 0 or not 1 <= limit <= FULL_LIST_MAX:
@@ -200,9 +203,7 @@ class MemoryStore:
         async with quiz.lock:
             rows = quiz.rows()
             you = next((row for row in rows if row.user_id == user_id), None)
-            status: Literal["open", "ended"] = (
-                "open" if quiz.state.is_open(self._clock()) else "ended"
-            )
+            status = self._status(quiz)
             shown = self._shown(rows)
             online = len(quiz.present)
             return port.Snapshot(quiz.state.seq, status, len(rows), online, tuple(shown), you)

@@ -27,6 +27,7 @@ from quiz.ports.store import Created, Joined, Limits
 
 WAITAOF_TIMEOUT_MS = 2000  # the host end waits this long for the mark's fsync (redis.md §3.1)
 SUBSCRIBE_TIMEOUT_S = 5  # subscribe() waits this long for Redis to confirm the subscription
+RANKS_ONLY = -1  # read_standings' limit for the asked users' rows alone
 
 
 def _ok(name: str, reply: Reply) -> Reply:
@@ -136,7 +137,10 @@ class RedisStore:
     async def _read(
         self, quiz_id: str, offset: int, limit: int, user_ids: Sequence[str] = ()
     ) -> tuple[port.Snapshot, dict[str, port.Row | None]]:
-        """The standings at one seq (``limit`` 0: the broadcast rows) and each asked user's row."""
+        """The standings at one seq and each asked user's row.
+
+        ``limit`` 0 reads the broadcast rows, ``RANKS_ONLY`` no rows.
+        """
         top_n, full = self.limits.top_n, self.limits.full_list_max
         reply = await self._run("read_standings", quiz_id, offset, limit, top_n, full, *user_ids)
         seq, count, online, status = reply[1:5]
@@ -163,8 +167,8 @@ class RedisStore:
         return None if seq is None else int(seq)
 
     async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> port.Ranks:
-        snap, asked = await self._read(quiz_id, 0, 0, user_ids)
-        return port.Ranks(snap.at_seq, snap.player_count, asked)
+        snap, asked = await self._read(quiz_id, 0, RANKS_ONLY, user_ids)
+        return port.Ranks(snap.at_seq, snap.status, snap.player_count, asked)
 
     async def snapshot(self, quiz_id: str, user_id: str | None) -> port.Snapshot:
         snap, asked = await self._read(quiz_id, 0, 0, () if user_id is None else (user_id,))
