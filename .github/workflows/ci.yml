@@ -36,9 +36,8 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
+      # make check includes the contract drift step.
       - run: make check
-      - name: Contract drift
-        run: make contracts && git diff --exit-code
 
   integration:
     if: github.event.action != 'edited'
