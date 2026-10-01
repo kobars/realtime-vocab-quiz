@@ -9,13 +9,15 @@ need no redis import to tell an unreachable store from a fault.
 import json
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from typing import Literal
+from dataclasses import replace
+from typing import Literal, cast
 
 from redis import exceptions as redis_errors
 from redis.asyncio import Redis
 
 from quiz.adapters.redis.keys import quiz_keys
 from quiz.adapters.redis.scripts import Reply, Scripts
+from quiz.contracts.messages import FULL_LIST_MAX
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.events import AnswerScored
 from quiz.domain.session import Question
@@ -24,12 +26,13 @@ from quiz.ports.store import Created, Joined, Limits
 
 
 def _ok(name: str, reply: Reply) -> Reply:
-    """Raise a non-``ok`` status as ``DomainError``; ``QUIZ_ENDED`` carries ``endSeq`` or None."""
-    if reply[0] != "ok":
+    """Raise an error code as ``DomainError`` (``QUIZ_ENDED`` carries ``endSeq``); others pass."""
+    try:
         code = ErrorCode(str(reply[0]))
-        end = reply[1] if code is ErrorCode.QUIZ_ENDED and len(reply) > 1 else None
-        raise DomainError(code, f"{name} refused", end_seq=None if end is None else int(end))
-    return reply
+    except ValueError:
+        return reply
+    end = reply[1] if code is ErrorCode.QUIZ_ENDED and len(reply) > 1 else None
+    raise DomainError(code, f"{name} refused", end_seq=None if end is None else int(end))
 
 
 @contextmanager
@@ -89,7 +92,7 @@ class RedisStore:
         )
 
     async def leave(self, quiz_id: str, user_id: str, conn_id: str) -> bool:
-        raise NotImplementedError
+        return (await self._run("leave", quiz_id, user_id, conn_id))[0] == "ok"
 
     async def serve_next(
         self, quiz_id: str, user_id: str, question_index: int, conn_id: str
@@ -117,8 +120,28 @@ class RedisStore:
         result = AnswerScored(user_id, i, submission_id, choice, key, *flags, points, total, seq)
         return port.Answered(result, bool(back))
 
+    async def _read(
+        self, quiz_id: str, offset: int, limit: int, user_ids: Sequence[str] = ()
+    ) -> tuple[port.Snapshot, dict[str, port.Row | None]]:
+        """The standings at one seq (``limit`` 0: the broadcast rows) and each asked user's row."""
+        reply = await self._run("read_standings", quiz_id, offset, limit, *user_ids)
+        seq, count, online, status = reply[1:5]
+        rows = cast("list[list[str]]", reply[5])
+        asked = cast("list[list[str] | None]", reply[6])
+        table = tuple(port.Row(int(rank), uid, name, int(total)) for rank, uid, name, total in rows)
+        state = cast("Literal['open', 'ended']", status)
+        snap = port.Snapshot(int(seq or 0), state, int(count or 0), int(online or 0), table, None)
+        return snap, {
+            uid: None if hit is None else port.Row(int(hit[0]), uid, hit[1], int(hit[2]))
+            for uid, hit in zip(user_ids, asked, strict=True)
+        }
+
     async def standings_page(self, quiz_id: str, offset: int, limit: int) -> port.Page:
-        raise NotImplementedError
+        if offset < 0 or not 1 <= limit <= FULL_LIST_MAX:
+            msg = f"page offset {offset}, limit {limit}"
+            raise DomainError(ErrorCode.INVALID_MESSAGE, msg)
+        snap, _ = await self._read(quiz_id, offset, limit)
+        return port.Page(snap.at_seq, snap.player_count, snap.status == "ended", snap.rows)
 
     async def read_seq(self, quiz_id: str) -> int | None:
         with _reachable():
@@ -126,16 +149,35 @@ class RedisStore:
         return None if seq is None else int(seq)
 
     async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> port.Ranks:
-        raise NotImplementedError
+        snap, asked = await self._read(quiz_id, 0, 0, user_ids)
+        return port.Ranks(snap.at_seq, snap.player_count, asked)
 
     async def snapshot(self, quiz_id: str, user_id: str | None) -> port.Snapshot:
-        raise NotImplementedError
+        snap, asked = await self._read(quiz_id, 0, 0, () if user_id is None else (user_id,))
+        return replace(snap, you=None if user_id is None else asked[user_id])
 
     async def publish_if_dirty(self, quiz_id: str, node_id: str) -> port.Publish:
-        raise NotImplementedError
+        reply = await self._run("publish_leaderboard", quiz_id, node_id)
+        value = reply[1] if len(reply) > 1 else None
+        match reply[0]:
+            case "published" | "ended" as status:
+                return port.Publish(status, None if value is None else int(value))
+            case "busy":
+                return port.Publish("busy", retry_ms=int(value or 0))
+            case "clean":
+                return port.Publish("clean")
+            case status:
+                raise ValueError(status)
 
     async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> port.End:
-        raise NotImplementedError
+        reply = await self._run("end_quiz", quiz_id, reason)
+        match reply[0]:
+            case "ended":
+                return port.End("ended", int(reply[1] or 0))
+            case "marked" | "not_due" as status:
+                return port.End(status)
+            case status:
+                raise ValueError(status)
 
     async def renew_presence(
         self, quiz_id: str, stale_ms: int, pairs: Sequence[tuple[str, str]]

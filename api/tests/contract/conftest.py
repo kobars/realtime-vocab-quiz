@@ -30,22 +30,6 @@ async def real_advance(ms: int) -> None:
     await asyncio.sleep(ms / 1000)
 
 
-# The tests the Redis store passes so far; the rest need scripts that later changes add.
-REDIS_READY = frozenset(
-    {
-        "test_unknown_quiz_is_not_found",
-        "test_invalid_quiz_shape_is_rejected",
-        "test_create_twice_is_invalid_state",
-        "test_read_seq_is_the_counter_or_none",
-        "test_new_connection_replaces_and_fences_the_old",
-        "test_wrong_and_late_score_zero",
-        "test_submission_reused_for_other_question",
-        "test_serve_retry_order_and_finish",
-        "test_finished_player_gets_only_the_retry_rows",
-    }
-)
-
-
 @pytest.fixture(
     params=[
         pytest.param("memory", id="memory"),
@@ -55,9 +39,6 @@ REDIS_READY = frozenset(
 def harness(request: pytest.FixtureRequest) -> Harness:
     if request.param == "memory":
         return memory_harness()
-    if request.node.originalname not in REDIS_READY:
-        reason = "the Redis script for this command is not written yet"
-        request.applymarker(pytest.mark.xfail(raises=NotImplementedError, reason=reason))
     store: Store = request.getfixturevalue("redis_store")
     return store, real_advance
 
