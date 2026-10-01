@@ -11,6 +11,10 @@ if meta[2] or now_ms() >= tonumber(meta[1]) then
 end
 local ttl = redis.call('PTTL', KEYS[K.tick])
 if ttl ~= -2 then
+  if ttl == -1 or ttl > tick_ms then  -- expiry is wall-clock: a clock step back stretches it
+    redis.call('PEXPIRE', KEYS[K.tick], tick_ms)
+    ttl = tick_ms
+  end
   return {'busy', math.max(ttl, 1)}
 end
 if redis.call('DEL', KEYS[K.dirty]) == 0 then
