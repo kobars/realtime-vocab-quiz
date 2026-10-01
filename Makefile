@@ -34,6 +34,7 @@ check: ## Run every check a change must pass
 	$(call step,mypy,cd api && uv run --locked mypy)
 	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance")
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
+	$(call step,contracts drift,uv run --project api --locked python scripts/gen_contracts.py --check)
 	$(call step,eslint,pnpm -C web exec eslint --max-warnings 0 .)
 	$(call step,vue-tsc,pnpm -C web exec vue-tsc --noEmit)
 	$(call step,vitest,$(VITEST))
