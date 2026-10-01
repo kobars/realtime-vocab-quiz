@@ -21,8 +21,7 @@ def client_of(peer: str = "testclient", **settings: Any) -> TestClient:  # noqa:
     return TestClient(create_app(Settings(**settings)), client=(peer, 40_000))
 
 
-def session(client: TestClient, name: str = "Ann") -> tuple[str, str]:
-    """Return (userId, ticket) of a new mock session."""
+def session(client: TestClient, name: str = "Ann") -> tuple[str, str]:  # (userId, ticket)
     tickets = services_of(client.app).tickets  # type: ignore[arg-type]
     identity, token = client.portal.call(tickets.create_session, name)  # type: ignore[union-attr]
     issued = client.portal.call(tickets.issue_ticket, token)  # type: ignore[union-attr]
