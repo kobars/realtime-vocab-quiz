@@ -17,7 +17,8 @@ const text = computed(() => {
     case 'closed':
       // 1000 is a normal close: the quiz ended or the player left.
       return store.closeCode === 1000 ? '' : strings.connection.closed
-    default:
+    case 'idle':
+    case 'joined':
       return ''
   }
 })

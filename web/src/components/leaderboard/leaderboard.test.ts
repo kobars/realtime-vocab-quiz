@@ -18,7 +18,7 @@ const top = (n: number, from = 1) => Array.from({ length: n }, (_, i) => row(fro
 const me = (rank: number, score: number): Entry => ({ rank, userId: 'u1', displayName: 'Ana', score })
 
 async function receive(...messages: Partial<ServerMessage>[]) {
-  for (const message of messages) emit({ v: 1, ...message } as ServerMessage)
+  for (const message of messages) emit({ v: 1, ...message } as ClientEvent)
   await nextTick()
 }
 const board = (seq: number, entries: Entry[], playerCount = 300) =>

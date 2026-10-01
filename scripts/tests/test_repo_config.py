@@ -1,10 +1,14 @@
-# AI-ASSISTED: checks on the pre-commit hooks, make check and the CI workflow triggers.
+# AI-ASSISTED: checks on the pre-commit hooks, make check, deptry and the CI workflow triggers.
 """Tests for the repository's hook and workflow configuration.
 
 The workflows and the Makefile are read as text; the hook test uses pre-commit's own
 config loader and file filter.
 """
 
+import re
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -48,6 +52,16 @@ def _job(name: str) -> list[str]:
     return _section(ROOT / ".github" / "workflows" / "ci.yml", name, 2)
 
 
+def _hook(hook_id: str) -> dict[str, object]:
+    """Return one hook of the pre-commit config, with pre-commit's defaults filled in."""
+    config = load_config(str(ROOT / ".pre-commit-config.yaml"))
+    specs: list[dict[str, object]] = [
+        h for repo in config["repos"] for h in repo["hooks"] if h["id"] == hook_id
+    ]
+    (spec,) = specs
+    return spec
+
+
 def _run_commands(path: Path) -> list[str]:
     """Return the command of every one-line ``run:`` step of a workflow."""
     text = path.read_text(encoding="utf-8")
@@ -59,15 +73,17 @@ def test_internal_hook_scans_every_staged_file_and_symlink(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # pre-commit's own loader and file filter, so its default `types: [file]` applies.
-    config = load_config(str(ROOT / ".pre-commit-config.yaml"))
-    (spec,) = [h for repo in config["repos"] for h in repo["hooks"] if h["id"] == "check-internal"]
-    hook = Hook.create(str(ROOT), Prefix(str(ROOT)), spec)
+    hook = Hook.create(str(ROOT), Prefix(str(ROOT)), _hook("check-internal"))
     monkeypatch.chdir(tmp_path)
     Path("notes.md").write_text("text\n", encoding="utf-8")
     Path(".hidden").write_text("text\n", encoding="utf-8")
     Path("link").symlink_to("notes.md")
     names = ["notes.md", ".hidden", "link"]
     assert sorted(Classifier(names).filenames_for_hook(hook)) == sorted(names)
+
+
+def test_eslint_hook_runs_one_process_so_the_typescript_program_is_built_once() -> None:
+    assert _hook("eslint")["require_serial"] is True
 
 
 def test_ci_runs_again_when_the_pull_request_text_is_edited() -> None:
@@ -107,3 +123,75 @@ def test_make_check_runs_every_pre_commit_hook_on_every_file() -> None:
         ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
     )
     assert any("pre-commit run --all-files" in line for line in recipe)
+
+
+def _deptry_tools() -> tuple[list[str], list[str]]:
+    """Return the roots and the flags of the Makefile's DEPTRY_TOOLS step."""
+    line = next(
+        line
+        for line in (ROOT / "Makefile").read_text(encoding="utf-8").splitlines()
+        if line.startswith("DEPTRY_TOOLS = ")
+    )
+    args = shlex.split(line.split(" deptry ", 1)[1])
+    first_flag = next(i for i, arg in enumerate(args) if arg.startswith("-"))
+    return args[:first_flag], args[first_flag:]
+
+
+def _deptry(*args: str, cwd: Path = ROOT / "api") -> subprocess.CompletedProcess[str]:
+    """Run deptry in ``cwd``; in api/ it reads api/pyproject.toml, as make check does."""
+    return subprocess.run(
+        [sys.executable, "-m", "deptry", *args, "--no-ansi"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_make_check_runs_the_dependency_check_on_every_python_root() -> None:
+    recipe = _block(
+        ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
+    )
+    assert any("uv run --locked deptry src" in line for line in recipe)
+    assert any("$(DEPTRY_TOOLS)" in line for line in recipe)
+    roots, _ = _deptry_tools()
+    assert roots == ["tests", "../scripts", "../load"]
+
+
+def test_tool_dependency_check_fails_on_missing_and_transitive_imports(tmp_path: Path) -> None:
+    # A folder named tests is skipped by deptry's default exclude; the step must still scan it.
+    probe = tmp_path / "tests" / "test_probe.py"
+    probe.parent.mkdir()
+    probe.write_text("import httpcore\nimport no_such_package\nimport pydantic_core\n")
+    _, flags = _deptry_tools()
+    config = str(ROOT / "api" / "pyproject.toml")
+    result = _deptry("tests", *flags, "--config", config, cwd=tmp_path)
+    assert result.returncode == 1
+    assert "DEP001 'no_such_package' imported but missing" in result.stderr
+    assert "DEP003 'httpcore' imported but it is a transitive dependency" in result.stderr
+    assert "pydantic_core" not in result.stderr
+
+
+def test_dependency_check_fails_when_src_imports_pydantic_core(tmp_path: Path) -> None:
+    # Only the tools step allows pydantic_core; the service code must not import it.
+    probe = tmp_path / "src" / "quiz" / "probe.py"
+    probe.parent.mkdir(parents=True)
+    probe.write_text("import pydantic_core\n")
+    result = _deptry(str(tmp_path / "src"))
+    assert result.returncode == 1
+    assert "DEP003 'pydantic_core' imported but it is a transitive dependency" in result.stderr
+
+
+def test_dependency_check_fails_when_a_direct_import_is_undeclared(tmp_path: Path) -> None:
+    # src imports starlette directly; without its own entry it only arrives through fastapi.
+    config, removed = re.subn(
+        r'^\s*"starlette[^"]*",\n',
+        "",
+        (ROOT / "api" / "pyproject.toml").read_text(encoding="utf-8"),
+        flags=re.MULTILINE,
+    )
+    assert removed == 1
+    (tmp_path / "pyproject.toml").write_text(config, encoding="utf-8")
+    result = _deptry("src", "--config", str(tmp_path / "pyproject.toml"))
+    assert result.returncode == 1
+    assert "DEP003 'starlette' imported but it is a transitive dependency" in result.stderr

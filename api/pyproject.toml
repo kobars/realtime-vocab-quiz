@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
     "redis[hiredis]>=8.1.0",
+    "starlette>=1.7.0",
     "structlog>=26.1.0",
     "uvicorn[standard]>=0.54.0",
 ]
@@ -20,6 +21,8 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "anyio>=4.15.1",
+    "deptry>=0.25.1",
     "httpx>=0.28.1",
     "httpx2>=2.13.1",
     "hypothesis>=6.168.3",
@@ -64,6 +67,10 @@ known-first-party = ["quiz", "check_internal", "bots", "latency", "player"]
 "../load/*.py" = ["T201"]
 "../load/tests/**" = ["S101", "PLR2004"]
 
+# make check runs deptry on src, and on tests, ../scripts and ../load with the Makefile's extra flags.
+[tool.deptry]
+known_first_party = ["quiz"]
+
 [tool.mypy]
 strict = true
 python_version = "3.14"
@@ -72,6 +79,10 @@ files = ["src", "tests", "../scripts", "../load"]
 # Test folders have no __init__.py: name modules by path so same-named test files can coexist.
 explicit_package_bases = true
 warn_unreachable = true
+enable_error_code = [
+    "ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined",
+    "explicit-override", "unused-awaitable", "mutable-override", "deprecated",
+]
 
 # pre-commit ships no py.typed; its sources are typed, so read them instead of skipping them.
 [[tool.mypy.overrides]]
