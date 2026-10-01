@@ -1,4 +1,4 @@
-# AI-ASSISTED: security gate: a secret scan of the whole history, dependency review and the dependency audits.
+# AI-ASSISTED: security gate: a secret scan of the history of HEAD, dependency review and the dependency audits.
 name: security
 
 on:
