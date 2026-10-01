@@ -1,5 +1,5 @@
 // AI-ASSISTED: QuizClient owns the socket: connect with a fresh ticket, reconnect through Backoff, SeqTracker wiring, liveness and answer retries (protocol spec §2.1, §3, §7, §9).
-import { Backoff, OPEN_TIMEOUT_MS } from './backoff'
+import { Backoff, backoffDelay, OPEN_TIMEOUT_MS } from './backoff'
 import { type AuthApi, connectTicket } from './identity'
 import { SeqTracker, type SeqStep } from './seq'
 import type { Answer, ClientMessage, ErrorCode, ServerMessage } from './types.generated'
@@ -46,11 +46,17 @@ export class QuizClient {
   private readonly backoff: Backoff
   private readonly tracker: SeqTracker
   private socket: QuizSocket | null = null
+  /** True once the current socket opened: before that, `send` would throw, so messages are dropped. */
+  private open = false
   private stopped = true
+  /** Bumped by start and stop, so a connect that awaited its ticket across them does nothing. */
+  private generation = 0
   private quizId = ''
   private displayName = ''
-  /** The `lastSeq` of the last resync sent, repeated when the server rate-limits it. */
+  /** The `lastSeq` of the last resync sent, repeated when the server rate-limits it or is unavailable. */
   private lastResync = 0
+  /** `UNAVAILABLE` replies to resyncs since the last snapshot: the backoff attempt of the next retry. */
+  private resyncFailures = 0
   /** Answers the server has not settled yet, by `submissionId`, oldest first; kept across reconnects. */
   private readonly unsettled = new Map<string, Answer>()
   /** The `submissionId`s sent on the current socket and not answered yet, oldest first. */
@@ -63,20 +69,22 @@ export class QuizClient {
   private ping: ReturnType<typeof setInterval> | undefined
 
   constructor(options: QuizClientOptions) {
-    const scheme = globalThis.location?.protocol === 'https:' ? 'wss' : 'ws'
     this.o = {
-      url: `${scheme}://${globalThis.location?.host}/ws`,
-      socketFactory: (url, protocol) => new WebSocket(url, protocol),
-      storage: sessionStorage,
-      random: Math.random,
-      now: () => performance.now(),
       ...options,
+      url: options.url ?? defaultUrl(),
+      socketFactory: options.socketFactory ?? ((url, protocol) => new WebSocket(url, protocol)),
+      storage: options.storage ?? sessionStorage,
+      random: options.random ?? Math.random,
+      now: options.now ?? (() => performance.now()),
     }
     this.backoff = new Backoff(this.o.random)
     this.tracker = new SeqTracker(this.o.random)
   }
 
   start(quizId: string, displayName: string): void {
+    this.socket?.close(1000)
+    this.disconnect()
+    this.generation += 1
     this.quizId = quizId
     this.displayName = displayName
     this.stopped = false
@@ -102,25 +110,29 @@ export class QuizClient {
   /** The user left: close with 1000 and never reconnect. */
   stop(): void {
     this.stopped = true
+    this.generation += 1
     this.socket?.close(1000)
     this.disconnect()
     this.emit({ type: 'status', status: 'closed', code: 1000 })
   }
 
   private async connect(): Promise<void> {
+    const generation = this.generation
     this.emit({ type: 'status', status: 'connecting', code: null })
     let ticket: string
     try {
       ;({ ticket } = await connectTicket(this.o.api, this.displayName, this.o.storage))
     } catch {
-      return this.closed(DEAD_LINK)
+      if (generation === this.generation) this.closed(DEAD_LINK)
+      return
     }
-    if (this.stopped) return
+    if (this.stopped || generation !== this.generation) return
     const socket = this.o.socketFactory(`${this.o.url}?ticket=${encodeURIComponent(ticket)}`, SUBPROTOCOL)
     this.socket = socket
     const openTimer = this.after(OPEN_TIMEOUT_MS, () => this.kill(socket))
     socket.onopen = () => {
       clearTimeout(openTimer)
+      this.open = true
       this.emit({ type: 'status', status: 'open', code: null })
       this.ping = setInterval(() => this.send({ v: 1, type: 'ping' }), PING_INTERVAL_MS)
       this.alive(socket)
@@ -138,7 +150,7 @@ export class QuizClient {
       case 'joined':
         // The resync goes out before the UI hears of the join.
         this.backoff.joined(this.o.now())
-        this.run(this.tracker.joined(message.atSeq))
+        this.run(this.tracker.joined())
         if (!this.joined) {
           this.joined = true
           for (const submissionId of this.unsettled.keys()) this.sendAnswer(submissionId)
@@ -151,25 +163,41 @@ export class QuizClient {
       case 'leaderboard':
       case 'quiz_ended':
         return this.run(this.tracker.broadcast(message))
-      case 'snapshot':
-        this.emit(message)
-        return this.run(this.tracker.snapshot(message.atSeq))
+      case 'snapshot': {
+        // A snapshot read before the end that arrives after quiz_ended changes nothing, so the UI never sees it.
+        const stale = this.tracker.readBeforeEnd(message.atSeq, message.status)
+        const step = this.tracker.snapshot(message.atSeq, message.status)
+        this.resyncFailures = 0
+        if (!stale) this.emit(message)
+        return this.run(step)
+      }
       case 'pong':
         return this.run(this.tracker.pong(message.seq))
       case 'error':
-        if (message.code === 'RATE_LIMITED' && message.requestType === 'resync') {
-          const lastSeq = this.lastResync
-          this.after(RETRY_AFTER_MS, () => this.send({ v: 1, type: 'resync', lastSeq }))
-        }
+        if (message.requestType === 'resync') this.resyncFailed(message.code)
         if (message.requestType === 'answer') this.answerFailed(message.code)
         break
     }
     this.emit(message)
   }
 
-  /** Applies the released broadcasts in order and sends the tracker's resync, now or after its delay. */
-  private run({ apply, resync }: SeqStep): void {
+  /** Repeats the last resync: 1 s after `RATE_LIMITED`, after a backoff wait after `UNAVAILABLE` (spec §7). */
+  private resyncFailed(code: ErrorCode): void {
+    let wait: number
+    if (code === 'RATE_LIMITED') wait = RETRY_AFTER_MS
+    else if (code === 'UNAVAILABLE') wait = backoffDelay(this.resyncFailures++, this.o.random)
+    else return
+    const lastSeq = this.lastResync
+    this.after(wait, () => this.send({ v: 1, type: 'resync', lastSeq }))
+  }
+
+  /**
+   * Applies the released broadcasts in order, sends the tracker's resync now or after its delay, and runs the
+   * pong check it asks for.
+   */
+  private run({ apply, resync, check }: SeqStep): void {
     for (const frame of apply) this.emit(frame)
+    if (check !== null) this.after(check.delayMs, () => this.run(this.tracker.pongCheck(check.pongSeq)))
     if (resync === null) return
     const send = () => {
       this.lastResync = resync.lastSeq
@@ -194,8 +222,9 @@ export class QuizClient {
     else this.unsettled.delete(submissionId)
   }
 
+  /** Sends on an open socket; otherwise drops the message (a reconnect resends answers, `joined` re-drives `next`). */
   private send(message: ClientMessage): void {
-    this.socket?.send(JSON.stringify(message))
+    if (this.open) this.socket?.send(JSON.stringify(message))
   }
 
   /** Restarts the 50 s liveness timer: no inbound message by then closes the link. */
@@ -228,7 +257,9 @@ export class QuizClient {
   private disconnect(): void {
     if (this.socket !== null) this.socket.onopen = this.socket.onmessage = this.socket.onclose = null
     this.socket = null
+    this.open = false
     this.joined = false
+    this.resyncFailures = 0
     this.inFlight = []
     for (const timer of this.timers) clearTimeout(timer)
     this.timers.clear()
@@ -244,4 +275,10 @@ export class QuizClient {
   private emit(event: ClientEvent): void {
     this.o.onEvent(event)
   }
+}
+
+/** `ws(s)://<this host>/ws`, read only when no url is given. */
+function defaultUrl(): string {
+  const scheme = globalThis.location?.protocol === 'https:' ? 'wss' : 'ws'
+  return `${scheme}://${globalThis.location?.host}/ws`
 }

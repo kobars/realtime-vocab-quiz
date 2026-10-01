@@ -37,13 +37,13 @@ export class SeqTracker {
     return this.last
   }
 
-  /** `joined` on a new connection: send exactly one resync with the last seq applied, then reset to `atSeq`. */
-  joined(atSeq: number): SeqStep {
-    const lastSeq = this.last
-    this.last = atSeq
+  /**
+   * `joined` on a new connection: send exactly one resync with the last seq applied. L stays: `joined.atSeq`
+   * never moves it, only the snapshot does.
+   */
+  joined(): SeqStep {
     this.buffer = []
-    this.resyncing = true
-    return { ...nothing(), resync: { lastSeq, delayMs: 0 } }
+    return this.startResync(0)
   }
 
   broadcast(frame: Broadcast): SeqStep {
@@ -93,8 +93,7 @@ export class SeqTracker {
    */
   snapshot(atSeq: number, status?: Snapshot['status']): SeqStep {
     this.resyncing = false
-    const readBeforeEnd = status === 'open' || (status === undefined && atSeq < (this.finalSeq ?? 0))
-    if (this.finalSeq !== null && readBeforeEnd) {
+    if (this.readBeforeEnd(atSeq, status)) {
       this.buffer = []
       return nothing()
     }
@@ -108,6 +107,12 @@ export class SeqTracker {
       step.resync ??= next.resync
     }
     return step
+  }
+
+  /** True when `quiz_ended` was applied and this snapshot was read before it, so `snapshot` ignores it. */
+  readBeforeEnd(atSeq: number, status?: Snapshot['status']): boolean {
+    if (this.finalSeq === null) return false
+    return status === 'open' || (status === undefined && atSeq < this.finalSeq)
   }
 
   private startResync(delayMs: number): SeqStep {
