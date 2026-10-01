@@ -10,7 +10,7 @@ Order: client messages, broadcasts (carry ``seq``), unicasts (carry ``atSeq``), 
 """
 
 from enum import StrEnum
-from typing import Annotated, Literal, TypeAliasType, get_args
+from typing import Annotated, Literal, TypeAliasType, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
@@ -208,7 +208,8 @@ class Pong(_Message):
 
 class ProtocolError(_Message):
     type: Literal["error"] = "error"
-    code: ErrorCode
+    # Lax so decoded JSON (a plain str) validates like raw JSON; unknown codes still fail.
+    code: Annotated[ErrorCode, Field(strict=False)]
     message: str
     requestType: str | None
 
@@ -235,7 +236,10 @@ type ServerMessage = Annotated[
 
 def message_types(union: TypeAliasType) -> frozenset[str]:
     """Return the ``type`` values of the models in a message union."""
-    models: tuple[type[_Message], ...] = get_args(get_args(union.__value__)[0])
+    value = union.__value__
+    if get_origin(value) is Annotated:
+        value = get_args(value)[0]
+    models: tuple[type[_Message], ...] = get_args(value)
     return frozenset(model.model_fields["type"].default for model in models)
 
 
