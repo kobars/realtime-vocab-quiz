@@ -15,9 +15,9 @@ help: ## List the targets
 build: ## Build the API and web images
 	@echo "not yet"
 up: ## Start the development Redis
-	@echo "not yet"
+	docker compose up -d --wait redis
 down: ## Stop the development Redis
-	@echo "not yet"
+	docker compose down
 demo: ## Run the full stack with seed data and bots
 	@echo "not yet"
 demo-stop: ## Stop the demo stack
@@ -26,7 +26,7 @@ test: ## Run unit, property and contract tests (no Redis)
 	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance")
 	$(call step,vitest,$(VITEST))
 test-integration: ## Run the tests that need Redis (REDIS_URL or a container per run)
-	$(call step,pytest integration,$(PYTEST) tests/integration -m integration; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ])
+	$(call step,pytest integration,$(PYTEST) tests/integration tests/contract -m integration; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ])
 check: ## Run every check a change must pass
 	$(call step,internal content,uv run --project api --locked python scripts/check_internal.py)
 	$(call step,ruff lint,cd api && uv run --locked ruff check . ../scripts)
