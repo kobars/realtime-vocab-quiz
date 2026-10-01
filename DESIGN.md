@@ -31,9 +31,10 @@ are mocks behind ports, and quiz admin is a mock host action (§14).
 
 **Requirements.** Players join by quiz ID, scores update in real time and the leaderboard
 updates promptly; nothing says who opens and closes questions. We read "real-time" as live
-scores and one shared live board, and let each player set their own pace. A host-led quiz would need one owner per quiz to open and close questions on time, with a
-failover story; the self-paced model needs no owner, because no rule depends on a timer
-(ADR-002, ADR-006). Host-led stays future work.
+scores and one shared live board, and let each player set their own pace. A host-led quiz
+would need one owner per quiz to open and close questions on time, with a failover story;
+the self-paced model needs no owner, because no rule depends on a timer (ADR-002, ADR-006).
+Host-led stays future work.
 
 **Assumptions.**
 
@@ -48,7 +49,8 @@ failover story; the self-paced model needs no owner, because no rule depends on 
 | Latency (our target) | C5: p99 below 500 ms from "answer accepted" to "leaderboard delivered", measured by the load bots |
 
 There is no load number in the requirements; our targets are the rows above, run on one and on
-two nodes and reported in §9. Two nodes are our choice: they make the scale-out claims of §10 real.
+two nodes and reported in §9. Two nodes are our choice: they make the scale-out claims of §10
+real.
 
 **How the design meets each acceptance criterion.**
 
@@ -194,7 +196,8 @@ column points to the full reasoning in [docs/DECISIONS.md](docs/DECISIONS.md).
 | Packaging and running | Docker Compose: Redis, two API nodes, nginx and the built client | Kubernetes (kind or minikube); processes started by hand | One command brings the whole stack up the same way on any machine with Docker; the tests start their own Redis container on a free port | One host: no autoscaling, rolling deploy or node spread; production would need an orchestrator | — |
 | Build and test tooling | uv and pnpm with committed lock files; pytest, pytest-asyncio and Hypothesis; Vitest | pip or Poetry; npm; unittest | Fast, reproducible installs from the lock files in CI and locally; property tests for the rules that must hold for every input | Two toolchains (Python and Node) to install; the lock files are regenerated, never merged by hand | — |
 
-Exact versions: `api/uv.lock` and `web/pnpm-lock.yaml`.
+Exact versions: `api/uv.lock` and `web/pnpm-lock.yaml`; runtimes in `.python-version`,
+`.nvmrc`, `web/package.json` (`packageManager`) and `compose.yaml`.
 
 <!-- AI-ASSISTED-END -->
 
