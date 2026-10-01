@@ -5,9 +5,10 @@ client gets a node's messages in the order the node produced them (docs/spec/pro
 The buffer counts the bytes not yet written, the frame in flight included. Above the soft limit
 a ``leaderboard`` takes the place of every ``leaderboard`` queued after the last other message,
 and goes out with ``rebase: true``; every other message is a barrier and is never dropped.
-Above the hard limit the queue makes way for ``error UNAVAILABLE`` and close 1013. A socket
-that does not take its queue and the close frame within ``flush_s`` of a close is given up, so
-its handler returns and the server drops the transport."""
+Above the hard limit the queue makes way for ``error UNAVAILABLE`` and close 1013. The queue
+gets ``flush_s`` after a close, and the close frame ``CLOSE_S`` more of its own. A socket that
+does not take them in that time is given up: its handler returns and uvicorn closes the
+transport gracefully, so the connection ends once its buffer flushes or the peer is gone."""
 
 import asyncio
 from collections import deque
@@ -21,6 +22,7 @@ from quiz.contracts.codec import encode
 
 CLOSE_OVERLOAD = 1013
 FLUSH_S = 5.0
+CLOSE_S = 1.0
 # Our encoder writes compact JSON, and a quote inside a string value is escaped: this key with
 # its value occurs once per frame.
 _NOT_REBASED, _REBASED = b'"rebase":false', b'"rebase":true'
@@ -95,10 +97,11 @@ class Sender:
             return
         finally:
             self._deadline = None  # a finished timeout cannot be rescheduled by a later close()
-        # The close frame also waits for a writable transport, so the same deadline bounds it:
-        # once that has passed, a close that cannot finish at once is given up.
+        # The close frame also waits for a writable transport, so it has a bound of its own
+        # that a drain ending at the deadline has not used up.
+        close_by = max(self._close_by or 0.0, asyncio.get_running_loop().time()) + CLOSE_S
         with suppress(Exception):  # TimeoutError, or the socket dropped meanwhile
-            async with asyncio.timeout_at(self._close_by):
+            async with asyncio.timeout_at(close_by):
                 await self._ws.close(self.close_code or 1000)
 
     async def _write(self) -> None:

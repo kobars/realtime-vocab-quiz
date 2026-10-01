@@ -486,7 +486,7 @@ class Stalled(Talking):  # a transport that is not writable: the close frame nev
 
 
 @pytest.mark.parametrize("drained", [True, False])
-async def test_a_close_that_stalls_still_ends_the_handler_within_flush_s(*, drained: bool) -> None:
+async def test_a_close_that_stalls_is_given_up_and_the_handler_ends(*, drained: bool) -> None:
     sock = Stalled()
     sender = sender_of(sock, 0.1)
     if not drained:
@@ -494,7 +494,23 @@ async def test_a_close_that_stalls_still_ends_the_handler_within_flush_s(*, drai
     sender.close(1013)
     deps = Deps(cast("QuizService", Service()), Registry(cast("Store", None), 10_000), 16 * KIB)
     handler = serve(cast("WebSocket", sock), Connection("c0", "u0"), limiter(), sender, deps)
-    assert await asyncio.wait_for(handler, 1) == 1013
+    assert await asyncio.wait_for(handler, 2) == 1013
+
+
+class Lagging(Socket):  # its close frame goes out a little after the drain
+    async def close(self, code: int) -> None:
+        await asyncio.sleep(0.07)
+        await super().close(code)
+
+
+async def test_a_close_frame_that_ends_just_after_the_deadline_is_still_sent() -> None:
+    sock = Lagging(reading=False)
+    sender = sender_of(sock, 0.2)
+    sender.send(page())
+    sender.close(4001)
+    asyncio.get_running_loop().call_later(0.18, sock.reading.set)  # the drain ends just in time
+    await asyncio.wait_for(sender.task, 2)
+    assert (len(sock.frames), sock.closed) == (1, 4001)
 
 
 async def test_a_present_socket_that_joins_again_after_the_end_still_leaves() -> None:
