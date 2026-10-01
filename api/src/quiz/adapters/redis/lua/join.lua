@@ -1,5 +1,5 @@
 -- AI-ASSISTED: join of docs/spec/redis.md §3: first-join player state, presence, dirty, replacement.
--- ARGV: uid, displayName, connId, ttlMs. Never increments seq and never publishes on events:
+-- ARGV: uid, displayName, connId. Never increments seq and never publishes on events:
 -- the next leaderboard frame carries the new player.
 local uid, name, conn = ARGV[1], ARGV[2], ARGV[3]
 local meta = redis.call('HMGET', KEYS[K.meta], 'startMs', 'deadlineMs', 'endedMs', 'endSeq',
@@ -29,7 +29,7 @@ if replaced then
   redis.call('PUBLISH', KEYS[K.control],
     cjson.encode({type = 'session_replaced', uid = uid, connId = replaced}))
 end
-refresh(ARGV[4])
+refresh()
 
 local serve = cjson.decode(redis.call('HGET', KEYS[K.serve], uid))
 local cursor, finished = serve[1], serve[3]
