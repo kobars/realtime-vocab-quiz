@@ -40,6 +40,7 @@ def test_two_api_nodes_with_distinct_ids_share_one_redis_and_trust_only_the_stac
     assert [env["NODE_ID"] for env in nodes] == ["api-1", "api-2"]
     assert nodes[0] | {"NODE_ID": None} == nodes[1] | {"NODE_ID": None}
     assert nodes[0]["ADMIN_TOKEN"].startswith("${ADMIN_TOKEN:?")
+    assert nodes[0]["PER_IP_CONN_CAP"] is None  # passed through from .env, unset by default
     assert "${REDIS_PASSWORD:?" in nodes[0]["REDIS_URL"]
     (subnet,) = COMPOSE["networks"]["stack"]["ipam"]["config"]
     assert nodes[0]["TRUSTED_PROXIES"] == subnet["subnet"]
@@ -58,8 +59,27 @@ def test_the_edge_holds_thousands_of_sockets_and_outlives_the_heartbeat() -> Non
     assert _directive("worker_connections") == ["16384"]
     (timeout,) = _directive("proxy_read_timeout")
     assert int(timeout.removesuffix("s")) * 1000 > Settings.model_fields["heartbeat_ms"].default
-    assert _directive("proxy_next_upstream") == ["error timeout http_503"]
     assert _directive("proxy_set_header X-Forwarded-For") == ["$remote_addr"]
+
+
+def test_a_refused_upgrade_is_not_replayed_and_a_503_takes_no_node_out() -> None:
+    """The node redeems the single-use ticket before its caps answer 503."""
+    (ws,) = re.findall(r"location = /ws \{(.*?)\n        \}", NGINX, re.DOTALL)
+    assert _directive("proxy_next_upstream") == ["error timeout http_503", "error timeout"]
+    assert "proxy_next_upstream error timeout;" in ws
+    assert _directive("server api-[12]:8000") == ["resolve max_fails=0"] * 2
+
+
+def test_the_identity_rate_limit_lets_a_load_run_join() -> None:
+    """Every client shares one address at the edge: 5,000 sockets, a session and a ticket each."""
+    (rate,) = re.findall(r"zone=identity:10m rate=(\d+)r/s", NGINX)
+    for burst in re.findall(r"limit_req zone=identity burst=(\d+) nodelay", NGINX):
+        assert int(burst) + 10 * int(rate) >= 2 * 5_000
+
+
+def test_a_node_redirect_stays_under_the_api_prefix_and_port() -> None:
+    assert _directive("proxy_set_header Host") == ["$http_host"]
+    assert _directive("proxy_redirect") == ["http://$http_host/ /api/"]
 
 
 def test_the_example_env_leaves_both_secrets_empty() -> None:
@@ -72,4 +92,4 @@ def test_the_example_env_leaves_both_secrets_empty() -> None:
 def test_make_down_stops_every_profile() -> None:
     """``docker compose down`` without a profile leaves profiled services running."""
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    assert "\n\t$(COMPOSE) --profile '*' down\n" in makefile
+    assert "\n\t$(COMPOSE_NO_SECRETS) --profile '*' down\n" in makefile
