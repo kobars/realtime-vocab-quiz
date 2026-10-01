@@ -16,16 +16,18 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from http import HTTPStatus
-from typing import Annotated
+from ipaddress import IPv4Network, IPv6Network
+from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, FastAPI, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import RequestResponseEndpoint
 
 from quiz.adapters.http import models as h
+from quiz.adapters.ws.limits import AddressRateLimiter, connection_ip
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.session import Question
 from quiz.obs import metrics
@@ -46,6 +48,8 @@ class HttpDeps:
     bank: QuestionBank
     ready: Callable[[], Awaitable[bool]]  # the store answers
     ticket_ttl_ms: int
+    identity_limit: AddressRateLimiter  # POST /sessions and POST /tickets, per client address
+    trusted_proxies: tuple[IPv4Network | IPv6Network, ...] = ()  # whose X-Forwarded-For counts
     admin_token: str | None = None  # None: no admin routes
     outages: tuple[type[Exception], ...] = (ConnectionError, TimeoutError)  # -> 503
 
@@ -70,18 +74,34 @@ async def _info(deps: HttpDeps, quiz_id: str) -> h.QuizInfo:
     )
 
 
+def _limited(deps: HttpDeps) -> Callable[[Request], Awaitable[None]]:
+    """Count the request against its client address: 429 above the limit."""
+
+    async def limited(request: Request) -> None:
+        if not deps.identity_limit.allow(connection_ip(request, deps.trusted_proxies)):
+            raise HTTPException(429, "too many requests from this address")
+
+    return limited
+
+
 def _public(deps: HttpDeps) -> APIRouter:
     api = APIRouter()
     text = {"content": {"text/plain": {"example": "# TYPE ws_connections gauge\n"}}}
+    limit = [Depends(_limited(deps))]
+    refused: dict[int | str, dict[str, Any]] = {429: {"model": h.Problem}}
 
-    @api.post("/sessions", status_code=201, tags=["MOCK identity"])
+    @api.post(
+        "/sessions", status_code=201, tags=["MOCK identity"], dependencies=limit, responses=refused
+    )
     async def create_session(body: h.SessionIn) -> h.SessionOut:
         """MOCK: create an anonymous user and its session token (kept in the browser tab)."""
         identity, token = await deps.tickets.create_session(body.displayName)
         return h.SessionOut(userId=identity.user_id, sessionToken=token)
 
+    unknown = refused | {401: {"model": h.Problem}}
+
     @api.post(
-        "/tickets", status_code=201, tags=["MOCK identity"], responses={401: {"model": h.Problem}}
+        "/tickets", status_code=201, tags=["MOCK identity"], dependencies=limit, responses=unknown
     )
     async def create_ticket(
         authorization: Annotated[str, Header(examples=["Bearer mF3x…"])] = "",

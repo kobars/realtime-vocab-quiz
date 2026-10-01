@@ -84,7 +84,8 @@ def test_x_forwarded_for_counts_real_clients_only_behind_the_trusted_proxy() -> 
     def via(ip: str) -> dict[str, str]:
         return {**ORIGIN, "x-forwarded-for": f"6.6.6.6, {ip}"}  # nginx appends its peer
 
-    with client_of("172.18.0.2", per_ip_conn_cap=1) as nginx:  # inside the compose network
+    compose = {"trusted_proxies": "172.18.0.0/16", "per_ip_conn_cap": 1}
+    with client_of("172.18.0.2", **compose) as nginx:  # nginx inside the compose network
         with connect(nginx, ticket(nginx), headers=via("1.1.1.1")):
             assert refused(nginx, ticket(nginx), headers=via("1.1.1.1")) == 429
             with connect(nginx, ticket(nginx), headers=via("2.2.2.2")):

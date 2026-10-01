@@ -8,7 +8,7 @@ from quiz.adapters.mock_auth import MemoryTicketStore, RedisTicketStore
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.ports.tickets import Identity, TicketStore
 
-SESSION_MS, TICKET_MS = 86_400_000, 30_000
+SESSION_MS, TICKET_MS = 7_200_000, 30_000  # two hours: twice the longest quiz window
 
 
 class FakeRedis:
@@ -161,7 +161,7 @@ async def test_redis_variant_uses_set_ex_and_getdel() -> None:
     assert ticket is not None
     await store.redeem(ticket)
     commands = [(cmd, ex) for cmd, _, ex in redis.calls]
-    assert commands == [("SET", 86_400), ("GET", None), ("SET", 30), ("GETDEL", None)]
+    assert commands == [("SET", 7_200), ("GET", None), ("SET", 30), ("GETDEL", None)]
     names = [name for _, name, _ in redis.calls]
     assert not [name for name in names if token in name or ticket in name]  # digests only
 
