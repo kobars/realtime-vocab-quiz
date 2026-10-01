@@ -1,20 +1,24 @@
-# AI-ASSISTED: the composition root: settings in, the store, mocks and use cases wired, app out.
+# AI-ASSISTED: the composition root: settings in, adapters, use cases and HTTP wired, app out.
 """``create_app()`` is the one place that picks adapters and hands them their dependencies.
 Start hooks run in order; stop hooks run in reverse, also after a failed start, and a failing
 stop hook never skips the others. ``quiz.main:app`` is built once, on first access, so importing
 ``create_app`` builds nothing."""
 
+import asyncio
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cache
 
 from fastapi import FastAPI
+from redis import exceptions as redis_errors
 from redis.asyncio import Redis
 
+from quiz.adapters.http import HttpDeps, install
 from quiz.adapters.memory import MemoryStore
 from quiz.adapters.mock_auth import MemoryTicketStore, RedisTicketStore
+from quiz.adapters.mock_auth.tokens import TICKET_TTL_S
 from quiz.adapters.mock_questions import MockQuestionBank
 from quiz.adapters.redis import RedisStore
 from quiz.adapters.ws.endpoint import Gateway
@@ -26,6 +30,10 @@ from quiz.ports.store import Limits, Store
 from quiz.ports.tickets import TicketStore
 
 Hook = Callable[[], Awaitable[None]]
+Probe = Callable[[], Awaitable[bool]]
+READY_TIMEOUT_S = 1.0
+# The errors that mean the store is unreachable: HTTP 503.
+OUTAGES = (ConnectionError, TimeoutError, redis_errors.ConnectionError, redis_errors.TimeoutError)
 
 
 def wall_clock_ms() -> int:
@@ -35,6 +43,20 @@ def wall_clock_ms() -> int:
 def monotonic_ms() -> int:
     """Paces the resync limit: a wall-clock step never refuses or allows resyncs."""
     return time.monotonic_ns() // 1_000_000
+
+
+async def always_ready() -> bool:
+    return True
+
+
+def redis_probe(client: Redis) -> Probe:
+    async def ping() -> bool:
+        try:
+            return bool(await asyncio.wait_for(client.ping(), READY_TIMEOUT_S))
+        except redis_errors.RedisError, OSError, TimeoutError:
+            return False
+
+    return ping
 
 
 @dataclass(slots=True)
@@ -47,6 +69,7 @@ class Services:
     service: QuizService
     startup: list[Hook] = field(default_factory=list)
     shutdown: list[Hook] = field(default_factory=list)
+    ready: Probe = always_ready
 
 
 def services_of(app: FastAPI) -> Services:
@@ -68,8 +91,10 @@ def _wire(settings: Settings, clock: Clock | None) -> Services:
     client = Redis.from_url(settings.redis_url, decode_responses=True)  # connects on first use
     redis, tickets = RedisStore(client, limits=limits), RedisTicketStore(client)
     service = QuizService(redis, bank, monotonic_ms)
+    start: list[Hook] = [redis.start]
     stop: list[Hook] = [client.aclose]
-    return Services(settings, wall_clock_ms, redis, tickets, bank, service, [redis.start], stop)
+    probe = redis_probe(client)
+    return Services(settings, wall_clock_ms, redis, tickets, bank, service, start, stop, probe)
 
 
 async def _stop_all(hooks: Sequence[Hook], pending: BaseException | None) -> None:
@@ -108,12 +133,10 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
     app.state.services = services
     app.state.gateway = gateway = Gateway(services.settings, services.tickets, services.service)
     app.add_api_websocket_route("/ws", gateway.endpoint)
-
-    @app.get("/healthz")
-    async def healthz() -> dict[str, str]:
-        """Liveness: the process answers HTTP."""
-        return {"status": "ok"}
-
+    s, ttl_ms = services.settings, TICKET_TTL_S * 1000
+    token = s.admin_token.get_secret_value() if s.admin_mock and s.admin_token else None
+    deps = HttpDeps(services.store, services.tickets, services.bank, services.ready, ttl_ms)
+    install(app, replace(deps, admin_token=token, outages=OUTAGES))
     return app
 
 

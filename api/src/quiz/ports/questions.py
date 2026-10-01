@@ -15,3 +15,7 @@ class QuestionBank(Protocol):
     async def questions(self, quiz_id: str) -> tuple[BankQuestion, ...] | None:
         """Return the questions of a quiz in serve order, or None for an unknown quiz."""
         ...
+
+    async def title(self, quiz_id: str) -> str | None:
+        """Return the quiz's display title, or None for an unknown quiz."""
+        ...

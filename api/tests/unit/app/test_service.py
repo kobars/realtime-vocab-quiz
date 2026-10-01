@@ -29,6 +29,9 @@ class Bank:
         del quiz_id
         return tuple(BankQuestion(f"q{i}", f"word {i}?", ("a", "b", "c", "d"), 1) for i in range(N))
 
+    async def title(self, quiz_id: str) -> str | None:
+        return quiz_id
+
 
 class SpyStore(MemoryStore):
     def __init__(self) -> None:

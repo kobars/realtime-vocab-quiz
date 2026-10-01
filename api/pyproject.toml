@@ -121,7 +121,7 @@ name = "Adapters never import each other"
 type = "independence"
 modules = [
     "quiz.adapters.memory", "quiz.adapters.redis", "quiz.adapters.mock_auth",
-    "quiz.adapters.mock_questions",
+    "quiz.adapters.mock_questions", "quiz.adapters.http",
 ]
 
 [[tool.importlinter.contracts]]
