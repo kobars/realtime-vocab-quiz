@@ -1,4 +1,4 @@
-// AI-ASSISTED: tests for the landing and join screen: validation, the share link and the join outcomes.
+// AI-ASSISTED: tests for the landing and join screen: validation, the share link, the preview and the join outcomes.
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -11,11 +11,15 @@ import { strings } from '@/strings'
 
 let emit: (event: ClientEvent) => void
 let start: ReturnType<typeof vi.fn>
+let preview: { status: number; body: unknown }
+const open = { title: 'Everyday words', questionCount: 10, status: 'open', players: 3 }
 
 beforeEach(() => {
   setActivePinia(createPinia())
   sessionStorage.clear()
   start = vi.fn()
+  preview = { status: 200, body: open }
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(preview.body), { status: preview.status })))
   configureQuizStore({
     createClient: (onEvent) => {
       emit = onEvent
@@ -24,7 +28,10 @@ beforeEach(() => {
   })
 })
 
-afterEach(() => void (document.body.innerHTML = ''))
+afterEach(() => {
+  vi.unstubAllGlobals()
+  document.body.innerHTML = ''
+})
 
 async function screen(path = '/') {
   const router = createAppRouter(createMemoryHistory())
@@ -40,7 +47,7 @@ async function screen(path = '/') {
     await flushPromises()
   }
   const button = () => wrapper.get('button[type=submit]').text()
-  return { router, id, name, describedBy, submit, button }
+  return { wrapper, router, id, name, describedBy, submit, button }
 }
 
 describe('validation', () => {
@@ -80,6 +87,32 @@ describe('validation', () => {
     expect(router.currentRoute.value.name).toBe('join')
     expect(id.element.value).toBe('VOCAB-42')
     expect(document.activeElement).toBe(name.element)
+  })
+})
+
+describe('preview', () => {
+  it('shows the quiz from GET /quizzes/{id}', async () => {
+    const { wrapper } = await screen('/q/VOCAB-42')
+    expect(wrapper.text()).toContain(open.title)
+    expect(wrapper.text()).toContain(strings.join.preview.players(3))
+    expect(fetch).toHaveBeenCalledWith('/api/quizzes/VOCAB-42')
+  })
+
+  it('shows "no quiz" under the field when the preview finds none, and does not join', async () => {
+    preview = { status: 404, body: {} }
+    const { id, name, describedBy, submit } = await screen()
+    await id.setValue('NOPE-1')
+    await name.setValue('Ana')
+    await submit()
+    expect(describedBy(id)).toContain(strings.join.notFound)
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it('says when the quiz has ended and offers its results', async () => {
+    preview = { status: 200, body: { ...open, status: 'ended' } }
+    const { wrapper, button } = await screen('/q/VOCAB-42')
+    expect(wrapper.text()).toContain(strings.join.ended)
+    expect(button()).toBe(strings.join.submitEnded)
   })
 })
 
