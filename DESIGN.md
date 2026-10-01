@@ -254,10 +254,149 @@ and one host action.
 <!-- AI-ASSISTED-END -->
 
 ## 15. AI Collaboration in Design (D-5, S-6)
-TODO: how AI tools were used in the design, what they got wrong, and how the output was verified.
+
+<!-- AI-ASSISTED-BEGIN: drafted with Claude Code from the design-phase and spec-PR AI-LOG entries, checked by hand against the specs and the named tests, which were run. -->
+
+I designed this system with AI, and I treated every AI output as a draft to be checked. One
+model drafted, a different model reviewed, and nothing counted as fixed until a spec section
+stated the fix and a test pinned it. The full record is in the AI-LOG entries (below).
+
+**Tools and models.**
+
+| Tool | Model | Role in the design |
+|---|---|---|
+| Claude Code | claude-opus-5-5 | Drafted the architecture, the protocol, the Redis data model and scripts, the UI spec, the test strategy and the ADRs |
+| Codex CLI | `gpt-6-astra`, high reasoning, read-only sandbox | Independent reviewer of the design drafts, and of every PR after its merge |
+| A second Claude Code agent | claude-opus-5-5, fresh context, read-only | Independent reviewer of the design drafts, with no access to how they were written |
+| Claude Code `/code-review` | claude-opus-5-5, high | Reviewer of every PR after its merge, next to Codex |
+
+**Design tasks and the nature of each interaction.**
+
+| Task | How I worked with the AI |
+|---|---|
+| Architecture and data flow (§3, §4) | I gave Claude Code the README and the fixed choices (self-paced quiz, one Redis, two API nodes); it drafted the diagrams and the component table, which I checked against the code layout and the import-linter contracts |
+| Domain rules (`docs/spec/domain.md`, ADR-002) | Drafted from my list of rules and scoring examples; I recomputed every scoring example with the formula |
+| Protocol (`docs/spec/protocol.md`, ADR-003, ADR-004) | Drafted from the message names, the `seq` rules and the limits; I traced the ordering of frames on one socket by hand |
+| Redis store (`docs/spec/redis.md`, ADR-005 to ADR-008) | Claude Code designed the key schema, the script contracts and the tick without an owner; I checked each script against the `seq` rule |
+| UI (`docs/spec/ui.md`) | Drafted the state chart and the tokens; contrast ratios were computed by a script, not estimated |
+| Design review | One neutral prompt to Codex and to a second Claude agent, run in parallel and read-only; I checked each claim against the draft text before adopting it |
+
+**What the design review found.** Both reviewers read the drafts before any spec was merged.
+Four of the defects below were found by both reviewers independently, which made them the first
+to fix. Each now has a spec section and a test (`docs/ai-log/design-phase.md` lists them all):
+
+| Defect in the AI draft | What changed | Pinned by |
+|---|---|---|
+| A reconnect created a new player: tickets came from the display name and were single use | A session token per tab gets a fresh ticket for the same user before every connect (protocol §8) | `api/tests/unit/adapters/test_mock_auth.py`, `web/src/protocol/identity.test.ts` |
+| A retried `next` could skip a question or restart its 20 s timer | `next` and `answer` carry the question index; the serve time is stored once (domain §5.1) | `api/tests/unit/test_session.py`, `api/tests/integration/test_serve_script.py` |
+| Only the tick checked the deadline, and ticks stop on a node without sockets | Every write script checks the deadline on Redis `TIME` (Redis §3) | `api/tests/integration/test_score_script.py`, `api/tests/contract/test_store_contract.py` |
+| The packed sorted-set score overflows after about 69.9 min; 0-point answers moved the tie-break | The window is at most 60 min; `reachedRelMs` moves only on points (domain §6) | `api/tests/integration/test_create_quiz.py`, `api/tests/unit/test_standings.py` |
+| Each join broadcast to everyone: about 12.5 million sends for 5,000 joins | A join only sets `dirty`; the next coalesced frame carries the count (ADR-004) | `api/tests/integration/test_join_script.py` |
+
+**What the reviews of the spec PRs found.** After each spec PR merged, `/code-review` (high) and
+Codex reviewed it; I combined the two lists, verified each finding against the text, and fixed
+the confirmed defects in a follow-up PR:
+
+| Spec PR | Confirmed defects (examples) | Fix PR and test |
+|---|---|---|
+| #3 domain | The `next` table had no order and two rows overlapped at the last question | #34; `api/tests/unit/test_session.py` |
+| #5 protocol | A newer frame conflated ahead of a queued `pong` looked like a store restart; `pong.seq` came from a node cache; a late `snapshot` could undo `quiz_ended`; a failed `join` bound the socket | #26, #30; `scripts/tests/test_protocol_spec.py` |
+| #7 UI | The connection chart had no edges into `blocked` from `joining` or `resyncing`, and none out of `joining` after the end | #18; `scripts/tests/test_ui_spec.py` |
+| #9 Redis | `create_quiz` accepted `T = 0` (the points formula divides by `T`); presence was never cleared after a node crash; a finished player could be served again | #16; `api/tests/integration/test_create_quiz.py`, `api/tests/integration/test_serve_script.py` |
+
+Claude Code also caught some of its own mistakes while drafting. In the Redis spec it first
+planned to end the quiz inside the write script that hit the deadline, which would have made
+the scoring script increment `seq`; it caught this against the `seq` rule and changed it before
+writing the script table (PR #9).
+
+**Suggestions I rejected, and why.**
+
+- **Remove the snapshot cache** (Codex, design review). The concern was real: answers do not
+  move `seq`, so a cached per-player snapshot could be stale. Removing the cache was more than
+  needed. Standings at one `seq` never change, so I kept the cache for the shared standings
+  only and read the player's own row fresh (`api/tests/unit/app/test_service.py`,
+  `test_snapshot_never_mixes_stale_standings_with_a_fresh_own_row`).
+- **Finish a player only from the last question** (the review of PR #3). The review read the
+  session core as strict, but a PR merged after the review made it finish from any cursor, with
+  tests. Following the review would have changed working, tested behavior, so the spec follows
+  the code (`test_next_n_finishes_from_any_cursor`).
+- **Keep a lower `pong.seq` as a restart signal** (Claude Code, PR #26). Tracing the order of
+  events showed that the counter read and the pub/sub relay use different Redis connections, so
+  a frame can overtake a `pong` that read an older counter; the rule would have fired false
+  resyncs. A restart is detected from `seq < lastSeq` on a broadcast instead.
+
+**How I verified.** (1) A neutral review prompt that held none of my own suspicions, so the
+reviewers could not just agree with me. (2) Two reviewers from two vendors, run independently;
+agreement between them raised a finding's priority. (3) Every claim checked against the draft
+before it was adopted; one Codex claim (the store tests must run on both stores) was already in
+the draft. (4) Every fix stated in a spec section that names the test that proves it. (5) The
+tests run: `make test-integration` and the unit suites in `make check` pass on `main`; the exact
+commands and results are in each AI-LOG entry.
+
+**AI-LOG entries for the design.** `docs/ai-log/design-phase.md`; the spec PRs
+`docs/ai-log/PR-3.md`, `PR-5.md`, `PR-7.md`, `PR-9.md`; and their fix PRs `PR-16.md`,
+`PR-18.md`, `PR-26.md`, `PR-30.md`, `PR-34.md`. Every later PR has its own entry in
+`docs/ai-log/`.
+
+<!-- AI-ASSISTED-END -->
 
 ## 16. GenAI roadmap (V-11)
-TODO: where generative AI could improve the product next.
+
+<!-- AI-ASSISTED-BEGIN: drafted with Claude Code from the ports and the data the store already keeps, checked by hand against the architecture. -->
+
+**One rule for all of it: generative AI stays off the real-time path.** Scoring must stay exact,
+cheap and repeatable (AC-4), and the tick has a 200 ms budget. So a model never decides points
+during a quiz and never runs inside a Lua script or a socket handler. It runs before the quiz
+(content), between quizzes (difficulty) or in its own service with its own latency budget
+(speech). Each feature enters through a port that already exists or a new one beside it, so
+the quiz core does not change.
+
+| Feature | Where it fits | Main risks | How to measure it |
+|---|---|---|---|
+| Question generation with evals | An offline pipeline writes vocabulary items into the content service behind the `QuestionBank` port | Wrong answer keys, ambiguous distractors, items at the wrong level, unsafe or biased content | An eval suite gates every batch; live item statistics after release |
+| Adaptive difficulty | Picks the next quiz's difficulty band for a player or a group, between quizzes | Unfair standings if players in one quiz get different questions; a cold start with no history | Calibration of the predicted against the real correct rate; completion and return rates |
+| Pronunciation feedback | A speaking question type for ELSA's core skill: the player says the word, a speech service scores it | Bias against accents, noisy rooms, latency, privacy of voice recordings | Agreement with human raters, the gap between accent groups, p95 scoring latency |
+
+**Question generation with evals.** A model drafts items (the word, a sentence that uses it, one
+correct meaning and three distractors at a target level) as JSON. Each batch must pass an eval
+suite before an editor sees it: the schema and the bank's existing load checks (four unique
+choices, one answer, valid positions); an independent model that answers each item without the
+key and must agree with it; a duplicate and near-duplicate check against the bank; a safety
+filter; and a fixed golden set of reviewed items that every prompt or model change is scored
+against in CI. Editors approve items before they reach a quiz. After release, the store already
+keeps what is needed to judge an item: each answer's choice, points and elapsed time per
+(player, question). Items whose correct rate is near 0 or 100 %, or whose wrong answers all land
+on one distractor, go back to review. The metrics: the share of generated items that pass the
+evals, the share editors reject, and the share later pulled after release; the target for
+wrong keys in released items is zero.
+
+**Adaptive difficulty.** The model estimates each player's level from past answers (an item
+response model or an Elo-style rating per item and player; a language model is not needed for
+this part) and picks the difficulty band of the next quiz. Inside one quiz everyone still gets
+the same questions in the same order, so the shared leaderboard stays fair; mixing levels in one
+quiz would need a handicap in the score, which is a product decision, not a technical one. The
+risks: a wrong estimate that makes quizzes too hard or too easy, and new players with no
+history (start them at a middle band). The metrics: calibration (predicted against real correct
+rate per band), quiz completion rate, and how often players return, compared with fixed
+difficulty in an A/B test.
+
+**Pronunciation feedback.** A new question type: the client records the word, uploads it over
+HTTP to a speech-scoring service, and gets back a score per phoneme. The service returns a
+signed result, and the player sends that result to the quiz service as the answer; the quiz
+service checks the signature and scores it with the same `score_answer` script, so the audio
+never travels over the WebSocket and the store's rules do not change. The time limit must allow
+for recording and scoring, so these questions get a longer `T`. The risks: lower scores for some
+accents, which is unfair and also moves players on the leaderboard; background noise; a slow service
+that makes answers late; and voice data, which needs consent, a short retention period and no
+use for training without permission. The metrics: correlation with human raters on a labeled
+set, the score gap between accent groups on that set, the rate of answers scored late because
+of scoring latency, and p95 scoring latency against its budget.
+
+**Cost and change control.** Prompts and model versions are pinned and versioned with the eval
+results, so a model upgrade is a reviewed change with numbers, like an ADR. Generation runs in
+batches, so its cost is per item, not per player.
+
+<!-- AI-ASSISTED-END -->
 
 ## 17. ADR index
 
