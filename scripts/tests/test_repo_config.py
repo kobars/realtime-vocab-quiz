@@ -96,9 +96,7 @@ def test_workflow_runs_on_every_pull_request_update_and_on_main(workflow: str) -
     assert on[on.index("push:") + 1] == "branches: [main]"
 
 
-@pytest.mark.parametrize(
-    "workflow", ["ci.yml", "security.yml", "containers.yml", "codeql.yml"]
-)
+@pytest.mark.parametrize("workflow", ["ci.yml", "security.yml", "containers.yml", "codeql.yml"])
 def test_only_a_newer_pull_request_run_cancels_an_older_one(workflow: str) -> None:
     concurrency = _section(WORKFLOWS / workflow, "concurrency", 0)
     group = "group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}"
