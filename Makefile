@@ -20,7 +20,7 @@ DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
 # even to start the development Redis or to stop anything. Placeholders: never start the stack with it.
 COMPOSE_NO_SECRETS = ADMIN_TOKEN="$${ADMIN_TOKEN:-unused}" REDIS_PASSWORD="$${REDIS_PASSWORD:-unused}" docker compose
 
-.PHONY: help build up down dev-api test test-integration check acceptance contracts audit audit-python audit-web audit-secrets review-budget
+.PHONY: help build up down smoke-full dev-api test test-integration check acceptance contracts audit audit-python audit-web audit-secrets review-budget
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -33,6 +33,8 @@ up: ## Start the development Redis
 	$(COMPOSE_NO_SECRETS) up -d --wait redis
 down: ## Stop the development Redis and the full stack
 	$(COMPOSE_NO_SECRETS) --profile '*' down
+smoke-full: ## Smoke-test the running full stack through nginx, stopping one API node
+	uv run --project api --locked python load/smoke_full.py
 dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)
 	cd api && ALLOWED_ORIGINS='$(DEV_ORIGINS)' uv run --locked python -m quiz --host 127.0.0.1 --port $(DEV_API_PORT)
 test: ## Run unit, property and contract tests (no Redis)
