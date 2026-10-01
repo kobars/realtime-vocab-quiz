@@ -1,5 +1,5 @@
-# AI-ASSISTED: shared pytest setup: Hypothesis profiles, folder markers, the one Redis fixture and
-# a deadline on the in-process WebSocket client's receive.
+# AI-ASSISTED: shared pytest setup: Hypothesis profiles, folder markers, the one Redis fixture, a
+# deadline on the in-process WebSocket client's receive and a reader of the service's metrics.
 import os
 import shutil
 import subprocess
@@ -19,6 +19,7 @@ from starlette.testclient import WebSocketTestSession
 from starlette.types import Message
 
 from quiz.adapters.redis import RedisStore
+from quiz.obs import metrics
 
 settings.register_profile("dev", max_examples=50)
 settings.register_profile("ci", max_examples=500, deadline=None, print_blob=True)
@@ -149,3 +150,15 @@ async def redis_store(redis_client: Redis, redis_prefix: str) -> RedisStore:
     store = RedisStore(redis_client, prefix=redis_prefix)
     await store.start()
     return store
+
+
+@pytest.fixture
+def metric() -> Callable[..., float]:
+    """``metric(name, **labels)``: a sample's value on the shared registry, 0 before it exists.
+
+    The registry lives for the whole run, so a test compares two reads, never one exact value."""
+
+    def read(name: str, **labels: str) -> float:
+        return metrics.REGISTRY.get_sample_value(name, labels) or 0.0
+
+    return read

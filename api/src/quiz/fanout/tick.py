@@ -10,7 +10,8 @@ from collections.abc import AsyncIterator
 
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.fanout.broadcast import Relay, Sockets
-from quiz.ports.store import FeedStore
+from quiz.obs import metrics
+from quiz.ports.store import FeedStore, Publish
 
 log = logging.getLogger(__name__)
 SHIFT_S = 1.0  # a rank that only shifted is sent at most this often
@@ -60,18 +61,20 @@ class Ticker:
         while True:
             wait_s = self._tick_s
             try:
-                result = await self._store.publish_if_dirty(quiz_id, self._node_id)
-                if result.status == "ended":
-                    if result.seq is not None:
-                        return result.seq
-                    # a host mark not yet announced: retry until the deadline is due (redis.md §3.1)
-                    if (end := await self._store.end_quiz(quiz_id, "deadline")).status == "ended":
-                        return end.seq
-                if result.status == "busy":
-                    wait_s = (result.retry_ms + 1) / 1000
-                if clock() >= shift_at:
-                    shift_at = clock() + SHIFT_S
-                    await relay.shifted()
+                with metrics.TICK_DURATION.time():
+                    result = await self._publish(quiz_id)
+                    if result.status == "ended":
+                        if result.seq is not None:
+                            return result.seq
+                        # a host mark not yet announced: retry until the deadline (redis.md §3.1)
+                        end = await self._store.end_quiz(quiz_id, "deadline")
+                        if end.status == "ended":
+                            return end.seq
+                    if result.status == "busy":
+                        wait_s = (result.retry_ms + 1) / 1000
+                    if clock() >= shift_at:
+                        shift_at = clock() + SHIFT_S
+                        await relay.shifted()
             except DomainError as error:
                 if error.code is ErrorCode.QUIZ_NOT_FOUND:  # expired, or lost by the store
                     return None
@@ -79,6 +82,12 @@ class Ticker:
             except ConnectionError, TimeoutError:
                 log.warning("tick of quiz %s: store unreachable", quiz_id)
             await asyncio.sleep(wait_s)
+
+    async def _publish(self, quiz_id: str) -> Publish:
+        result = await self._store.publish_if_dirty(quiz_id, self._node_id)
+        if result.status == "published":
+            metrics.LEADERBOARD_FRAMES.inc()
+        return result
 
 
 async def _relay(relay: Relay, messages: AsyncIterator[str]) -> None:

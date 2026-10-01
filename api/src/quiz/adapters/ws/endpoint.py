@@ -17,6 +17,7 @@ from quiz.adapters.ws.sender import Sender
 from quiz.adapters.ws.session import Deps, serve
 from quiz.app.service import Connection, QuizService
 from quiz.config import Settings
+from quiz.obs import metrics
 from quiz.ports.clock import Clock
 from quiz.ports.store import Store
 from quiz.ports.tickets import TicketStore
@@ -76,10 +77,11 @@ class Gateway:
         with structlog.contextvars.bound_contextvars(request_id=conn.conn_id, quiz_id=None):
             try:
                 await ws.accept(subprotocol=SUBPROTOCOL)
-                rate, burst = settings.rate_limit_per_s, settings.rate_limit_burst
-                soft, hard = settings.send_buffer_soft_bytes, settings.send_buffer_hard_bytes
-                limiter, sender = RateLimiter(rate, burst, self.clock), Sender(ws, soft, hard)
-                code = await serve(ws, conn, limiter, sender, self._deps)
+                with metrics.WS_CONNECTIONS.track_inprogress():
+                    rate, burst = settings.rate_limit_per_s, settings.rate_limit_burst
+                    soft, hard = settings.send_buffer_soft_bytes, settings.send_buffer_hard_bytes
+                    limiter, sender = RateLimiter(rate, burst, self.clock), Sender(ws, soft, hard)
+                    code = await serve(ws, conn, limiter, sender, self._deps)
             except WebSocketDisconnect as gone:
                 code = gone.code
             finally:

@@ -18,7 +18,7 @@ from quiz.app.service import Connection
 from quiz.domain.session import Question
 from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
-from quiz.ports.store import FeedStore, Limits, Ranks, Row, Store
+from quiz.ports.store import FeedStore, Limits, Publish, Ranks, Row, Store
 
 QUESTIONS = (Question("q0", 1), Question("q1", 3))
 
@@ -95,6 +95,29 @@ async def test_100_answers_in_1_s_make_at_most_6_frames_ending_on_the_standings(
     last = sink.frames[-1]
     assert (last["seq"], last["playerCount"], len(last["entries"])) == (final.at_seq, 100, 100)
     assert [[e["rank"], e["userId"], e["displayName"], e["score"]] for e in last["entries"]] == rows
+
+
+async def test_each_tick_is_timed_and_each_published_frame_counted(
+    store: FeedStore, metric: Callable[..., float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quiz_id = await quiz_with(store, "a")
+    publish, ticks, results = store.publish_if_dirty, [0], []
+
+    async def counted(quiz_id: str, node_id: str) -> Publish:
+        ticks[0] += 1  # before the call: a tick cancelled in the script is still timed
+        results.append(result := await publish(quiz_id, node_id))
+        return result
+
+    monkeypatch.setattr(store, "publish_if_dirty", counted)
+    frames, timed = metric("leaderboard_frames_total"), metric("tick_duration_seconds_count")
+    (ticker := Ticker(store, Sink(), "n1")).open(quiz_id)
+    await asyncio.sleep(0.3)
+    await score(store, quiz_id, "a", 0)
+    await asyncio.sleep(0.3)
+    await ticker.stop()
+    assert [r.status for r in results].count("published") == 2  # the join's and the answer's
+    assert metric("leaderboard_frames_total") - frames == 2
+    assert metric("tick_duration_seconds_count") - timed == ticks[0] >= 3
 
 
 async def test_the_tick_runs_only_while_the_quiz_has_local_sockets(

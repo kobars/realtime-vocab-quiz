@@ -182,7 +182,7 @@ class MemoryStore:
             quiz.state = step.state
             if not replay and result.points > 0:
                 quiz.scored.add(user_id)
-            return Answered(result, step_back)
+            return Answered(result, step_back, replay)
 
     async def read_seq(self, quiz_id: str) -> int | None:
         quiz = self._quizzes.get(quiz_id)

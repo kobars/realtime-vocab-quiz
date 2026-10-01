@@ -129,10 +129,11 @@ class RedisStore:
     ) -> port.Answered:
         args = (user_id, question_index, choice_index, submission_id, conn_id)
         reply = await self._run("score_answer", quiz_id, *args)
-        i, choice, key, correct, late, points, total, seq, back = (int(v or 0) for v in reply[1:10])
+        fields = (int(v or 0) for v in reply[1:11])
+        i, choice, key, correct, late, points, total, seq, back, replay = fields
         flags = bool(correct), bool(late)
         result = AnswerScored(user_id, i, submission_id, choice, key, *flags, points, total, seq)
-        return port.Answered(result, bool(back))
+        return port.Answered(result, bool(back), bool(replay))
 
     async def _read(
         self, quiz_id: str, offset: int, limit: int, user_ids: Sequence[str] = ()

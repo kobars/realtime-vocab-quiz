@@ -1,7 +1,7 @@
 -- AI-ASSISTED: score_answer of docs/spec/redis.md §3 in the check order of docs/spec/domain.md §5.2.
 -- ARGV: uid, i, choiceIndex, submissionId, connId. points() comes from lib/points.lua.
 -- One TIME read for the deadline and the elapsed time. Never increments seq: atSeq = GET seq.
--- Returns ok, the 8 stored reply fields, then stepBack (never stored, 0 on a replay).
+-- Returns ok, the 8 stored reply fields, then stepBack (0 on a replay) and replay; neither is stored.
 local uid, i, choice, sid, conn = ARGV[1], tonumber(ARGV[2]), tonumber(ARGV[3]), ARGV[4], ARGV[5]
 local meta = redis.call('HMGET', KEYS[K.meta], 'startMs', 'deadlineMs', 'endedMs', 'endSeq',
   'questionCount', 'timeLimitMs')
@@ -16,7 +16,7 @@ if stored then  -- idempotency layer 1: the submissionId
   if r[1] ~= i then
     return {'INVALID_MESSAGE'}
   end
-  r[9] = 0
+  r[9], r[10] = 0, 1
   return {'ok', unpack(r)}
 end
 
@@ -56,5 +56,5 @@ local reply = {i, choice, key, correct and 1 or 0, elapsed > limit and 1 or 0, p
   tonumber(redis.call('GET', KEYS[K.seq])) or 0}
 redis.call('HSET', KEYS[K.subs], sub_field, cjson.encode(reply))
 refresh()
-reply[9] = step_back
+reply[9], reply[10] = step_back, 0
 return {'ok', unpack(reply)}

@@ -1,7 +1,7 @@
 # AI-ASSISTED: use-case tests: protocol messages in, replies out, on the memory store and a clock.
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, Literal, override
 
 import pytest
@@ -13,7 +13,6 @@ from quiz.app.service import Connection, QuizService
 from quiz.contracts import messages as m
 from quiz.domain import errors as domain
 from quiz.domain.session import Question
-from quiz.obs import metrics
 from quiz.ports.questions import BankQuestion
 from quiz.ports.store import End, Limits, Page, Ranks, Snapshot
 
@@ -339,13 +338,28 @@ async def test_first_writes_after_the_deadline_announce_the_end(
 
 
 async def test_clock_step_back_counts_once_and_never_on_a_replay(
-    service: QuizService, store: SpyStore
+    service: QuizService, store: SpyStore, metric: Callable[..., float]
 ) -> None:
-    before = metrics.REDIS_CLOCK_STEP._value.get()  # noqa: SLF001 - the counter's raw value
+    before = metric("redis_clock_step_total")
     conn = await joined(service)
     await send(service, conn, m.Next(questionIndex=0))
     store.now[0] -= 5
     [result] = await send(service, conn, answer(0))
     assert result.pointsAwarded == 150  # elapsed is clamped to 0
     assert await send(service, conn, answer(0)) == [result]
-    assert metrics.REDIS_CLOCK_STEP._value.get() == before + 1  # noqa: SLF001
+    assert metric("redis_clock_step_total") == before + 1
+
+
+async def test_answers_count_once_per_first_scoring_by_result_never_on_a_replay(
+    service: QuizService, store: SpyStore, metric: Callable[..., float]
+) -> None:
+    def counts() -> list[float]:
+        return [metric("answers_total", result=r) for r in ("correct", "wrong", "late")]
+
+    before, conn = counts(), await joined(service)
+    for i, choice, wait_ms in ((0, 1, 0), (1, 2, 0), (2, 1, 20_001)):  # correct, wrong, late
+        await send(service, conn, m.Next(questionIndex=i))
+        store.now[0] += wait_ms
+        [result] = await send(service, conn, answer(i, choice, sid=i))
+        assert await send(service, conn, answer(i, choice, sid=i)) == [result]
+    assert [n - b for n, b in zip(counts(), before, strict=True)] == [1, 1, 1]
