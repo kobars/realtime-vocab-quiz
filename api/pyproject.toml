@@ -62,13 +62,16 @@ strict = true
 python_version = "3.14"
 mypy_path = ["src", "../scripts"]
 files = ["src", "tests", "../scripts"]
+# Test folders have no __init__.py: name modules by path so same-named test files can coexist.
+explicit_package_bases = true
 warn_unreachable = true
 
 [tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = ["tests", "../scripts/tests"]
 pythonpath = ["../scripts"]
-addopts = ["--strict-markers", "--strict-config", "-ra"]
+# importlib mode lets test files in different folders share a basename without __init__.py.
+addopts = ["--strict-markers", "--strict-config", "-ra", "--import-mode=importlib"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 xfail_strict = true
