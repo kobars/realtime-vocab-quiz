@@ -7,6 +7,7 @@
 import logging
 import unicodedata
 import uuid
+from collections.abc import Awaitable
 from dataclasses import dataclass
 
 from quiz.contracts import messages as m
@@ -66,6 +67,26 @@ class QuizService:
         self._store, self._bank, self._clock = store, bank, clock
         self._shared: dict[str, Shared] = {}  # per quiz: the standings at its latest seq
 
+    def drop_cache(self, quiz_id: str | None = None) -> None:
+        """Forget the cached standings of one quiz, or of all quizzes.
+
+        A store restart can lose writes without moving ``seq``, so the reconnect and
+        resubscribe path calls this before it sends its repair snapshots (redis.md §5).
+        """
+        if quiz_id is None:
+            self._shared.clear()
+        else:
+            self._shared.pop(quiz_id, None)
+
+    async def _write[T](self, quiz_id: str, call: Awaitable[T]) -> T:
+        """Run a store write; its refusal at the deadline announces the end (redis.md §3.1)."""
+        try:
+            return await call
+        except DomainError as error:
+            if error.code is ErrorCode.QUIZ_ENDED and error.end_seq is None:
+                await self._store.end_quiz(quiz_id, "deadline")  # not_due: a host mark only
+            raise
+
     async def handle(self, conn: Connection, msg: m.ClientMessage) -> Outcome:
         kind = msg.type
         try:
@@ -100,7 +121,7 @@ class QuizService:
             atSeq=j.at_seq,
             quizId=quiz_id,
             userId=conn.user_id,
-            displayName=name,
+            displayName=j.display_name,
             questionCount=j.question_count,
             timeLimitMs=j.time_limit_ms,
             quizRemainingMs=j.quiz_remaining_ms,
@@ -113,7 +134,9 @@ class QuizService:
 
     async def _join(self, conn: Connection, quiz_id: str, name: str) -> Joined | None:
         try:
-            return await self._store.join(quiz_id, conn.user_id, name, conn.conn_id)
+            return await self._write(
+                quiz_id, self._store.join(quiz_id, conn.user_id, name, conn.conn_id)
+            )
         except DomainError as error:
             if error.code is ErrorCode.QUIZ_ENDED:
                 return None  # answered with the final snapshot
@@ -121,7 +144,8 @@ class QuizService:
 
     async def _on_next(self, conn: Connection, msg: m.Next) -> m.ServerMessage:
         quiz_id = _bound(conn, write=True)
-        s = await self._store.serve_next(quiz_id, conn.user_id, msg.questionIndex, conn.conn_id)
+        serve = self._store.serve_next(quiz_id, conn.user_id, msg.questionIndex, conn.conn_id)
+        s = await self._write(quiz_id, serve)
         if isinstance(s, Finished):
             return m.Finished(
                 atSeq=s.at_seq, score=s.total, rank=s.rank, playerCount=s.player_count
@@ -143,7 +167,8 @@ class QuizService:
     async def _on_answer(self, conn: Connection, msg: m.Answer) -> m.ServerMessage:
         quiz_id, user_id = _bound(conn, write=True), conn.user_id
         answer = (msg.questionIndex, msg.choiceIndex, msg.submissionId)
-        answered = await self._store.apply_answer(quiz_id, user_id, *answer, conn.conn_id)
+        apply = self._store.apply_answer(quiz_id, user_id, *answer, conn.conn_id)
+        answered = await self._write(quiz_id, apply)
         r = answered.result
         return m.AnswerResult(
             atSeq=r.at_seq,
@@ -160,10 +185,10 @@ class QuizService:
     async def _on_ping(self, conn: Connection, msg: m.Ping) -> m.ServerMessage:
         del msg
         try:
-            head = None if conn.quiz_id is None else await self._head(conn.quiz_id)
+            seq = None if conn.quiz_id is None else await self._store.read_seq(conn.quiz_id)
         except ConnectionError, TimeoutError:
-            head = None
-        return m.Pong(seq=None if head is None else head[0])
+            seq = None
+        return m.Pong(seq=seq)
 
     async def _on_resync(self, conn: Connection, msg: m.Resync) -> Outcome:
         del msg  # lastSeq only says what the client had: the reply is always a full snapshot
@@ -172,9 +197,9 @@ class QuizService:
             raise Refused(m.ErrorCode.RATE_LIMITED, "at most one resync per second")
         conn.last_resync_ms = now
         snap = await self.snapshot(quiz_id, conn.user_id)
-        if (you := snap.you) is None or you.rank <= len(snap.entries):
-            return Outcome((snap,))
-        count = snap.playerCount  # outside the shown entries: the own rank as rank_update (§4)
+        you, count = snap.you, snap.playerCount
+        if you is None or count <= m.FULL_LIST_MAX or you.rank <= len(snap.entries):
+            return Outcome((snap,))  # above 200 players and outside the entries: rank_update (§4)
         update = m.RankUpdate(atSeq=snap.atSeq, rank=you.rank, score=you.score, playerCount=count)
         return Outcome((snap, update))
 
@@ -188,17 +213,25 @@ class QuizService:
             entries=[_entry(row) for row in page.rows],
         )
 
-    async def _head(self, quiz_id: str) -> tuple[int, str]:
+    async def _head(self, quiz_id: str) -> tuple[int, str, int]:
         page = await self._store.standings_page(quiz_id, 0, 1)
-        return page.at_seq, "ended" if page.final else "open"
+        return page.at_seq, "ended" if page.final else "open", page.player_count
 
     async def snapshot(self, quiz_id: str, user_id: str | None) -> m.Snapshot:
-        """The standings cached per (quiz, seq, status); the player's own row read fresh."""
+        """The standings cached per (quiz, seq, status, player count); the own row read fresh.
+
+        A join moves no ``seq``, so the player count is part of the key. If the own row was
+        read at another seq or count than the cached part, both are read again together.
+        """
         head, shared = await self._head(quiz_id), self._shared.get(quiz_id)
-        if shared is None or (shared.at_seq, shared.status) != head:
+        if shared is None or (shared.at_seq, shared.status, shared.player_count) != head:
             shared = self._shared[quiz_id] = await self._store.snapshot(quiz_id, None)
         users = () if user_id is None else (user_id,)
-        you = next(iter((await self._store.ranks_of(quiz_id, users)).rows.values()), None)
+        ranks = await self._store.ranks_of(quiz_id, users)
+        you = next(iter(ranks.rows.values()), None)
+        if (ranks.at_seq, ranks.player_count) != (shared.at_seq, shared.player_count):
+            shared = self._shared[quiz_id] = await self._store.snapshot(quiz_id, user_id)
+            you = shared.you
         return m.Snapshot(
             atSeq=shared.at_seq,
             status=shared.status,
