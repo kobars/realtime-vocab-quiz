@@ -72,6 +72,5 @@ security header of `web/security-headers.conf` (CSP, `nosniff`, `Referrer-Policy
 
 - [DESIGN.md](DESIGN.md) — the system design
 - [docs/DECISIONS.md](docs/DECISIONS.md) — architecture decision records
-- [docs/TRACEABILITY.md](docs/TRACEABILITY.md) — requirements and their evidence
 - [AGENTS.md](AGENTS.md) — rules for contributors and coding agents
 - [SECURITY.md](SECURITY.md) — how to report a vulnerability, and the security scans

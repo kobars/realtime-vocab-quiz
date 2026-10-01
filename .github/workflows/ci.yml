@@ -21,7 +21,7 @@ jobs:
   check:
     if: github.event.action != 'edited'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
@@ -42,7 +42,7 @@ jobs:
   integration:
     if: github.event.action != 'edited'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     services:
       redis:
         image: redis:8-alpine
