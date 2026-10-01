@@ -193,7 +193,6 @@ def test_build_context_leaves_out_local_state() -> None:
 def test_make_build_builds_both_images_from_the_repository_root() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     recipe = makefile.split("\nbuild:", 1)[1].split("\nup:", 1)[0]
-    assert "not yet" not in recipe
     assert "docker build -f api/Dockerfile" in recipe
     assert "docker build -f web/Dockerfile" in recipe
 

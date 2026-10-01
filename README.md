@@ -5,9 +5,6 @@ vocabulary questions, and watch a shared leaderboard update live as scores
 change. The server is Python (FastAPI over WebSockets, Redis for scores and
 fan-out); the client is a Vue 3 single-page app.
 
-**Status: work in progress.** The repository layout, the locked dependencies
-and the document skeletons exist; the service itself is being built.
-
 ## Stack
 
 | Part | Tools |
@@ -19,7 +16,7 @@ and the document skeletons exist; the service itself is being built.
 | Client tests and quality | Vitest (v8 coverage), @vue/test-utils, happy-dom, ESLint, vue-tsc |
 | Infra | Docker Compose, nginx |
 
-## Working today
+## Run and test
 
 ```bash
 uv sync --project api        # install the server dependencies
@@ -67,12 +64,12 @@ security header of `web/security-headers.conf` (CSP, `nosniff`, `Referrer-Policy
 `Permissions-Policy`) on `/` and on a hashed asset (locally:
 `make build && scripts/smoke_images.sh`).
 
-`make help` lists every target; a target whose work has not landed yet prints
-`not yet`.
+`make help` lists every target.
 
 ## Documents
 
 - [DESIGN.md](DESIGN.md) — the system design
 - [docs/DECISIONS.md](docs/DECISIONS.md) — architecture decision records
+- [docs/ai-log/](docs/ai-log/) — how AI was used in each change, and how it was checked
 - [AGENTS.md](AGENTS.md) — rules for contributors and coding agents
 - [SECURITY.md](SECURITY.md) — how to report a vulnerability, and the security scans

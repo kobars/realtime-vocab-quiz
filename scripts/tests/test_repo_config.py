@@ -1,4 +1,4 @@
-# AI-ASSISTED: checks on the pre-commit hooks, make check, deptry and the CI workflow triggers.
+# AI-ASSISTED: checks on the pre-commit hooks, make targets, deptry and the CI workflow triggers.
 """Tests for the repository's hook and workflow configuration.
 
 The workflows and the Makefile are read as text; the hook test uses pre-commit's own
@@ -195,3 +195,23 @@ def test_dependency_check_fails_when_a_direct_import_is_undeclared(tmp_path: Pat
     result = _deptry("src", "--config", str(tmp_path / "pyproject.toml"))
     assert result.returncode == 1
     assert "DEP003 'starlette' imported but it is a transitive dependency" in result.stderr
+
+
+def _phony_and_targets(makefile: str) -> tuple[list[str], list[str]]:
+    """Return the sorted ``.PHONY`` names and the sorted names of the defined targets."""
+    phony = re.search(r"^\.PHONY:(.*)$", makefile, re.MULTILINE)
+    assert phony is not None
+    targets = re.findall(r"^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?!=)", makefile, re.MULTILINE)
+    return sorted(phony.group(1).split()), sorted(targets)
+
+
+def test_target_names_with_digits_underscores_and_dots_are_found() -> None:
+    makefile = ".PHONY: e2e\nVAR := 1\nV2:=2\ne2e: ## a\n\techo\nlint_py.v2: ## b\n\techo\n"
+    assert _phony_and_targets(makefile) == (["e2e"], ["e2e", "lint_py.v2"])
+
+
+def test_every_make_target_is_phony_and_none_is_a_placeholder() -> None:
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    phony, targets = _phony_and_targets(makefile)
+    assert phony == targets
+    assert "not yet" not in makefile
