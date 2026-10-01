@@ -41,6 +41,20 @@ async def test_seeded_bank_has_three_quizzes_of_ten() -> None:
         assert all(len(set(q.choices)) == 4 for q in questions)
 
 
+async def test_seeded_answer_positions_follow_no_pattern() -> None:
+    """Every player sees the same choice order and each answer is revealed, so the positions of
+    the correct choices must not let a player predict the later ones."""
+    bank = MockQuestionBank.load()
+    for quiz_id in bank.quiz_ids:
+        questions = await bank.questions(quiz_id)
+        assert questions is not None
+        answers = [q.correct_choice for q in questions]
+        assert set(answers) == {0, 1, 2, 3}, quiz_id
+        for period in range(1, 5):
+            repeats = sum(a == b for a, b in zip(answers, answers[period:], strict=False))
+            assert repeats <= (len(answers) - period) // 2, (quiz_id, period, answers)
+
+
 async def test_unknown_quiz_is_none() -> None:
     assert await MockQuestionBank.load().questions("NOPE-1") is None
 
@@ -92,3 +106,4 @@ def test_bad_file_is_named(tmp_path: Path) -> None:
     (tmp_path / "bad.json").write_text(json.dumps(broken("questions.0.id", "Q42")))
     with pytest.raises(ValueError, match=r"bad\.json"):
         MockQuestionBank.load(tmp_path)
+
