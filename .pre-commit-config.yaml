@@ -1,0 +1,25 @@
+# AI-ASSISTED: pre-commit hooks on staged files: internal-content guard, ruff and ESLint.
+# Install once with `uvx pre-commit install`; the hooks use the locked tools of api/ and web/.
+repos:
+  - repo: local
+    hooks:
+      - id: check-internal
+        name: internal content
+        entry: uv run --project api --locked python scripts/check_internal.py
+        language: system
+        types: [text]
+      - id: ruff-check
+        name: ruff lint
+        entry: bash -c 'cd api && uv run --locked ruff check --force-exclude "${@/#/../}"' --
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: bash -c 'cd api && uv run --locked ruff format --check --force-exclude "${@/#/../}"' --
+        language: system
+        types: [python]
+      - id: eslint
+        name: eslint
+        entry: bash -c 'cd web && pnpm exec eslint --max-warnings 0 --no-warn-ignored "${@/#web\//}"' --
+        language: system
+        files: ^web/.*\.(js|ts|vue)$
