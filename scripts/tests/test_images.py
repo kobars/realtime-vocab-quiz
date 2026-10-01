@@ -1,20 +1,25 @@
 # AI-ASSISTED: static guards on the Dockerfiles, the build context and the make build recipe.
 """The image rules that a build alone does not enforce: the locked install, the non-root user,
-the healthchecks, the SPA fallback and a build context without local state.
+the healthchecks, the WebSocket frame cap, the SPA fallback and a build context without local state.
 
 The files are read as text, so the tests need no Docker daemon.
 """
 
+import json
 from pathlib import Path
+
+from quiz.config import Settings
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def _stages(dockerfile: Path) -> list[list[str]]:
-    """Return the stripped instruction lines of each ``FROM`` stage, comments dropped."""
+    """Return the stripped instruction lines of each ``FROM`` stage, comments dropped and
+    backslash continuations joined into one line."""
     stages: list[list[str]] = []
-    for raw in dockerfile.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
+    text = dockerfile.read_text(encoding="utf-8").replace("\\\n", " ")
+    for raw in text.splitlines():
+        line = " ".join(raw.split())
         if line.startswith("FROM "):
             stages.append([])
         if stages and line and not line.startswith("#"):
@@ -41,12 +46,26 @@ def test_api_runtime_holds_only_the_venv_and_the_source_and_runs_as_10001() -> N
     assert any(line.startswith("HEALTHCHECK") for line in runtime)
 
 
+def test_api_image_caps_websocket_frames_just_above_the_gateway_limit() -> None:
+    """uvicorn buffers a whole frame before the gateway sees it; its default cap is 16 MiB."""
+    _, runtime = _stages(ROOT / "api" / "Dockerfile")
+    cmd = json.loads(next(line for line in runtime if line.startswith("CMD "))[len("CMD") :])
+    assert cmd[0] == "uvicorn"
+    assert "--ws-max-size" in cmd
+    cap = int(cmd[cmd.index("--ws-max-size") + 1])
+    limit = Settings.model_fields["max_payload_bytes"].default
+    # Above the limit, so the gateway's MESSAGE_TOO_LARGE and close 1009 still answer such frames.
+    assert limit < cap <= 4 * limit
+
+
 def test_web_image_serves_dist_from_unprivileged_nginx_with_an_spa_fallback() -> None:
     builder, runtime = _stages(ROOT / "web" / "Dockerfile")
     assert any("pnpm install --frozen-lockfile" in line for line in builder)
     assert "RUN pnpm build" in builder
     assert runtime[0].startswith("FROM nginxinc/nginx-unprivileged:")
-    assert "try_files $uri $uri/ /index.html;" in runtime
+    # No $uri/ fallback: it answers a directory path with a 301 to the internal port.
+    assert "try_files $uri /index.html;" in runtime
+    assert not any("$uri/" in line for line in runtime)
     assert "COPY --from=builder /web/dist /usr/share/nginx/html" in runtime
     assert any(line.startswith("HEALTHCHECK") for line in runtime)
 
