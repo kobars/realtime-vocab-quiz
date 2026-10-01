@@ -111,7 +111,7 @@ it('while the socket is reconnecting a pill says so and the choices are locked; 
   expect(w.get('[data-test="connection"]').text()).toBe('Updating…')
   clock = 8_000
   await receive(snapshot(140), question(0, 12_000))
-  await frames(700)
+  await frames(50)
   expect(w.get('[data-test="connection"]').text()).toBe('')
   expect(w.get('[data-test="ring"]').text()).toBe('12')
   expect(w.get('[data-test="score"]').text()).toBe('Score 140')
@@ -249,6 +249,30 @@ it('feedback: a late answer reads Too late: 0 points; the last question offers S
   expect(document.activeElement?.textContent?.trim()).toBe('See my result')
   await w.get('button:focus').trigger('click')
   expect(port.next.mock.calls).toEqual([[10]])
+})
+
+it('two late answers in a row are each announced: the region empties when the next question opens', async () => {
+  const w = await playing(question(3))
+  press('3')
+  await receive(result(2, 0, { questionIndex: 3, late: true, score: 410 }))
+  expect(w.get('[data-test="announce"]').text()).toBe('Too late: 0 points. Score 410.')
+  await receive(question(4))
+  expect(w.get('[data-test="announce"]').text()).toBe('')
+  press('3')
+  await receive(result(2, 0, { questionIndex: 4, submissionId: 's-2', late: true, score: 410 }))
+  expect(w.get('[data-test="announce"]').text()).toBe('Too late: 0 points. Score 410.')
+})
+
+it('a rejoin swaps the header score at once; only an answer result counts it up', async () => {
+  const w = await playing()
+  await receive(joined({ cursor: 0, cursorOpen: true, score: 140 }), snapshot(140))
+  expect(w.get('[data-test="score"]').text()).toBe('Score 140')
+  press('3')
+  await receive(result(2, 133, { score: 273 }))
+  await frames(300)
+  expect(w.get('[data-test="score"]').text()).not.toBe('Score 273')
+  await frames(400)
+  expect(w.get('[data-test="score"]').text()).toBe('Score 273')
 })
 
 it('reduced motion: the points and the total show their final value at once', async () => {
