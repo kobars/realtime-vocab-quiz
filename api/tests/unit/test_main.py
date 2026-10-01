@@ -11,12 +11,16 @@ from quiz.config import Settings
 from quiz.main import Hook, create_app, services_of
 
 
-async def test_memory_store_uses_the_injected_clock() -> None:
-    app = create_app(Settings(store="memory"), clock=lambda: 42)
-    services = services_of(app)
+async def test_memory_store_runs_on_the_injected_clock_and_tickets_on_real_time() -> None:
+    now = [0]
+    services = services_of(create_app(Settings(store="memory"), clock=lambda: now[0]))
     assert isinstance(services.store, MemoryStore)
     assert isinstance(services.tickets, MemoryTicketStore)
-    assert services.clock() == 42
+    ticket = await services.tickets.issue_ticket((await services.tickets.create_session("Ann"))[1])
+    now[0] += 60_000  # quiz time jumps past the 30 s ticket life; the ticket stays valid
+    assert ticket is not None
+    assert await services.tickets.redeem(ticket) is not None
+    assert services.clock() == 60_000
     assert await services.bank.questions("VOCAB-42")
 
 

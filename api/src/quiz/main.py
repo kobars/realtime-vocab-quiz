@@ -1,10 +1,7 @@
 # AI-ASSISTED: the composition root: settings in, the store, mocks and use cases wired, app out.
-"""``create_app()`` is the one place that picks adapters. Later parts of the service (the
-gateway, the HTTP endpoints, the fan-out tasks) read ``services_of(app)`` and add their own
-start and stop hooks; stop hooks run in reverse order, also after a failed start.
-
-``uvicorn quiz.main:app`` builds the app from the environment on first access, so importing this
-module for ``create_app`` builds nothing."""
+"""``create_app()`` is the one place that picks adapters and hands them their dependencies.
+Start hooks run in order; stop hooks run in reverse, also after a failed start. ``quiz.main:app``
+is built on first access, so importing ``create_app`` builds nothing."""
 
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -53,24 +50,17 @@ def _wire(settings: Settings, clock: Clock | None) -> Services:
     bank = MockQuestionBank.load()
     if settings.store == "memory":
         quiz_clock = clock or wall_clock_ms  # quiz time; ticket and session expiry stay real
-        store, tickets = MemoryStore(quiz_clock), MemoryTicketStore(wall_clock_ms)
+        memory = MemoryStore(quiz_clock)
+        service = QuizService(memory, bank, quiz_clock)
         return Services(
-            settings, quiz_clock, store, tickets, bank, QuizService(store, bank, quiz_clock)
+            settings, quiz_clock, memory, MemoryTicketStore(wall_clock_ms), bank, service
         )
     # Redis reads its own TIME for quiz time; the wall clock only paces the resync limit.
     client = Redis.from_url(settings.redis_url, decode_responses=True)  # connects on first use
-    redis_store = RedisStore(client)
-    services = Services(
-        settings,
-        wall_clock_ms,
-        redis_store,
-        RedisTicketStore(client),
-        bank,
-        QuizService(redis_store, bank, wall_clock_ms),
-    )
-    services.startup.append(redis_store.start)
-    services.shutdown.append(client.aclose)
-    return services
+    redis, tickets = RedisStore(client), RedisTicketStore(client)
+    service = QuizService(redis, bank, wall_clock_ms)
+    stop: list[Hook] = [client.aclose]
+    return Services(settings, wall_clock_ms, redis, tickets, bank, service, [redis.start], stop)
 
 
 def create_app(settings: Settings | None = None, *, clock: Clock | None = None) -> FastAPI:
