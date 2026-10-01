@@ -865,6 +865,7 @@ dev = [
     { name = "ruff" },
 ]
 load = [
+    { name = "httpx" },
     { name = "websockets" },
 ]
 
@@ -891,7 +892,10 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "ruff", specifier = ">=0.16.9" },
 ]
-load = [{ name = "websockets", specifier = ">=17.1" }]
+load = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "websockets", specifier = ">=17.1" },
+]
 
 [[package]]
 name = "redis"
