@@ -23,6 +23,7 @@ build-backend = "uv_build"
 dev = [
     "anyio>=4.15.1",
     "deptry>=0.25.1",
+    "diff-cover>=10.6.0",
     "httpx>=0.28.1",
     "httpx2>=2.13.1",
     "hypothesis>=6.168.3",
