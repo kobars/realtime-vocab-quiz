@@ -29,7 +29,8 @@ TOKENS = httpx.MockTransport(
 
 @pytest.fixture
 def app_url() -> Iterator[str]:
-    app = create_app(Settings(admin_mock=True, admin_token=SecretStr("load-token")))
+    token = SecretStr("load-token")
+    app = create_app(Settings(admin_mock=True, admin_token=token, allowed_origins=(OPTS.origin,)))
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
     thread = threading.Thread(target=server.run)
     thread.start()
@@ -39,6 +40,12 @@ def app_url() -> Iterator[str]:
     yield f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}"
     server.should_exit = True
     thread.join()
+
+
+@pytest.fixture
+def exported_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A shell that exports the stack's port must not change the origins the app accepts."""
+    monkeypatch.setenv("QUIZ_PORT", "18080")
 
 
 def bot(deadline_s: float = 5) -> Player:
@@ -211,6 +218,7 @@ async def test_a_timer_at_the_stop_counts_no_missing_answer(timer: str) -> None:
     )
 
 
+@pytest.mark.usefixtures("exported_port")
 async def test_a_swarm_plays_whole_quizzes_against_the_app(app_url: str) -> None:
     flags = "--quizzes 2 --bots 3 --think-ms 0 --duration 1 --ramp 0 --timeout-ms 300"
     opts = parse([*flags.split(), "--url", app_url])
