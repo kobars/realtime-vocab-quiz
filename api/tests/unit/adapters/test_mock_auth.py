@@ -164,3 +164,14 @@ async def test_redis_variant_uses_set_ex_and_getdel() -> None:
     names = [name for _, name, _ in redis.calls]
     assert not [name for name in names if token in name or ticket in name]  # digests only
 
+
+async def test_memory_variant_drops_expired_sessions_and_tickets() -> None:
+    now = [0]
+    store = MemoryTicketStore(lambda: now[0])
+    for _ in range(1_000):
+        _, token = await store.create_session("Ada")
+        assert await store.issue_ticket(token) is not None
+    now[0] += SESSION_MS
+    _, token = await store.create_session("Ada")
+    assert await store.issue_ticket(token) is not None
+    assert len(store._sessions) == len(store._tickets) == 1  # noqa: SLF001
