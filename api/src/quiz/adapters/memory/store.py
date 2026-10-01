@@ -26,7 +26,6 @@ class _Quiz:
     names: dict[str, str] = field(default_factory=dict)
     present: dict[str, str] = field(default_factory=dict)  # user id -> connection id
     tick_until_ms: int = 0  # the 200 ms tick token
-    marked: bool = False  # a host end refuses writes before it is announced
     end_seq: int | None = None  # the seq of quiz_ended, once announced
 
     def fence(self, user_id: str, conn_id: str) -> None:
@@ -187,6 +186,8 @@ class MemoryStore:
             now = self._clock()
             if not quiz.state.is_open(now):
                 return port.Publish("ended", quiz.end_seq)
+            # a clock step-back never stretches the token past TICK_MS
+            quiz.tick_until_ms = min(quiz.tick_until_ms, now + TICK_MS)
             if now < quiz.tick_until_ms:
                 return port.Publish("busy", retry_ms=quiz.tick_until_ms - now)
             if not quiz.state.dirty:
@@ -203,10 +204,9 @@ class MemoryStore:
                 return port.End("ended", quiz.end_seq)
             if reason == "deadline" and now < quiz.deadline_ms:
                 return port.End("not_due")
-            if reason == "host" and not quiz.marked:  # refuse writes; announce on the next call
-                quiz.marked = True
+            if reason == "host" and not quiz.state.marked:  # refuse writes; announce next call
                 deadline_ms = min(now, quiz.state.deadline_ms)
-                quiz.state = replace(quiz.state, deadline_ms=deadline_ms, dirty=False)
+                quiz.state = replace(quiz.state, deadline_ms=deadline_ms, marked=True, dirty=False)
                 return port.End("marked")
             quiz.state = s.transition(quiz.state, s.End(), now).state
             quiz.end_seq = quiz.state.seq

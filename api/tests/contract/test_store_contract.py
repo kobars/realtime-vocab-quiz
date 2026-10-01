@@ -1,5 +1,6 @@
 # AI-ASSISTED: the shared store contract (docs/spec/redis.md §3); every store must pass it.
 # Time moves only through ``advance`` and no exact points are asserted: real clocks pass too.
+# ``advance(-ms)`` steps the clock back; a real clock cannot, and its harness ignores it.
 
 from collections.abc import Awaitable, Callable
 
@@ -257,6 +258,20 @@ async def test_dirty_gates_publish_and_tick_holds(
     assert (await store.publish_if_dirty(quiz_id, "n1")).status == "clean"
 
 
+async def test_tick_token_holds_at_most_200_ms_after_a_clock_step_back(
+    store: Store, advance: Advance, quiz_id: str
+) -> None:
+    await started(store, quiz_id, "a")
+    assert (await store.publish_if_dirty(quiz_id, "n1")).status == "published"
+    await advance(-5000)
+    await store.join(quiz_id, "b", "B", "c-b")  # dirty again
+    busy = await store.publish_if_dirty(quiz_id, "n2")
+    assert busy.status == "busy"
+    assert 0 < busy.retry_ms <= 200
+    await advance(200)
+    assert await store.publish_if_dirty(quiz_id, "n2") == Publish("published", 2)
+
+
 async def test_seq_moves_only_with_broadcasts(store: Store, quiz_id: str) -> None:
     await started(store, quiz_id, "a")
     result = (await store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-a")).result
@@ -286,6 +301,21 @@ async def test_end_quiz_twice_announces_once(store: Store, quiz_id: str) -> None
     assert (await store.standings_page(quiz_id, 0, 10)).final
 
 
+async def test_host_mark_survives_a_clock_step_back(
+    store: Store, advance: Advance, quiz_id: str
+) -> None:
+    await started(store, quiz_id, "a")
+    assert await store.end_quiz(quiz_id, "host") == End("marked")
+    await advance(-1)
+    assert (await store.snapshot(quiz_id, None)).status == "ended"
+    assert (await store.standings_page(quiz_id, 0, 10)).final
+    assert await refused(store.join(quiz_id, "b", "B", "c-b")) == ErrorCode.QUIZ_ENDED
+    late = store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-a")
+    assert await refused(late) == ErrorCode.QUIZ_ENDED
+    assert await store.publish_if_dirty(quiz_id, "n1") == Publish("ended", None)
+    assert await store.end_quiz(quiz_id, "host") == End("ended", 1)
+
+
 async def test_deadline_ends_the_quiz(store: Store, advance: Advance, quiz_id: str) -> None:
     await store.create_quiz(quiz_id, QUESTIONS, window_ms=300, time_limit_ms=LIMIT_MS)
     await store.join(quiz_id, "a", "A", "c-a")
@@ -310,6 +340,6 @@ async def test_leave_sets_dirty_only_while_open(
     assert await store.publish_if_dirty(quiz_id, "n1") == Publish("published", 2)
     await advance(250)
     await store.end_quiz(quiz_id, "host")
-    assert await store.leave(quiz_id, "b", "c-b")  # after the mark: no frame follows
+    assert await store.leave(quiz_id, "b", "c-b")  # after the mark: the seat is still freed
     assert await store.end_quiz(quiz_id, "host") == End("ended", 3)
     assert (await store.snapshot(quiz_id, None)).online_count == 0
