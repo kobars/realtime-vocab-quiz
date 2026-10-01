@@ -73,10 +73,14 @@ def logged(caplog: pytest.LogCaptureFixture, level: int) -> list[str]:
     return [r.getMessage() for r in caplog.records if r.levelno == level]
 
 
+STORE_BLIPS = pytest.mark.parametrize("blip", [ConnectionError(), TimeoutError()], ids=type)
+
+
+@STORE_BLIPS
 async def test_a_store_blip_logs_a_warning_and_the_loop_keeps_ticking(
-    sockets: Mock, caplog: pytest.LogCaptureFixture
+    sockets: Mock, caplog: pytest.LogCaptureFixture, blip: Exception
 ) -> None:
-    store = ScriptedStore(ConnectionError(), Publish("clean"), Publish("ended", SEQ))
+    store = ScriptedStore(blip, Publish("clean"), Publish("ended", SEQ))
     await run(store, sockets)
     assert store.calls == 3
     assert logged(caplog, logging.WARNING) == ["tick of quiz Q: store unreachable"]
@@ -120,9 +124,12 @@ async def test_a_malformed_broadcast_is_skipped_and_the_next_one_relayed(
     assert logged(caplog, logging.ERROR) == ["broadcast not relayed"]
 
 
-async def test_quiz_ended_goes_out_with_you_null_when_the_rank_read_fails(sockets: Mock) -> None:
+@STORE_BLIPS
+async def test_quiz_ended_goes_out_with_you_null_when_the_rank_read_fails(
+    sockets: Mock, blip: Exception
+) -> None:
     store = ScriptedStore()
-    store.ranks_error = ConnectionError()
+    store.ranks_error = blip
     assert await Relay("Q", cast("Store", store), sockets, store.limits).relay(ended(SEQ + 1))
     sent = last_sent(sockets)
     assert (sent["type"], sent["seq"], sent["you"]) == ("quiz_ended", SEQ + 1, None)
