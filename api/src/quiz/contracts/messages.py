@@ -208,7 +208,8 @@ class Pong(_Message):
 
 class ProtocolError(_Message):
     type: Literal["error"] = "error"
-    code: ErrorCode
+    # Lax so decoded JSON (a plain str) validates like raw JSON; unknown codes still fail.
+    code: Annotated[ErrorCode, Field(strict=False)]
     message: str
     requestType: str | None
 
