@@ -41,9 +41,10 @@ class Sink:
 
 
 @pytest.fixture(params=["memory", "redis"])
-def store(request: pytest.FixtureRequest, redis_store: RedisStore) -> FeedStore:
+def store(request: pytest.FixtureRequest) -> FeedStore:
     if request.param == "memory":
         return MemoryStore(lambda: time.time_ns() // 1_000_000)
+    redis_store: RedisStore = request.getfixturevalue("redis_store")
     return redis_store
 
 
