@@ -124,9 +124,11 @@ async def test_tokens_and_ids_have_the_wire_format(
     store_and_clock: tuple[TicketStore, list[int]],
 ) -> None:
     store, _ = store_and_clock
-    identity, ticket = await ticket_for(store)
-    assert len(ticket) == 43  # 32 random bytes in base64url without padding
-    assert set(ticket + identity.user_id) <= set(
+    identity, token = await store.create_session("Ada")
+    ticket = await store.issue_ticket(token)
+    assert ticket is not None
+    assert len(token) == len(ticket) == 43  # 32 random bytes in base64url without padding
+    assert set(token + ticket + identity.user_id) <= set(
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
     )
     assert 1 <= len(identity.user_id) <= 64
@@ -153,8 +155,23 @@ async def test_display_name_is_nfc_normalized(
 async def test_redis_variant_uses_set_ex_and_getdel() -> None:
     redis = FakeRedis([0])
     store = RedisTicketStore(redis)
-    _, ticket = await ticket_for(store)
+    _, token = await store.create_session("Ada")
+    ticket = await store.issue_ticket(token)
+    assert ticket is not None
     await store.redeem(ticket)
     commands = [(cmd, ex) for cmd, _, ex in redis.calls]
     assert commands == [("SET", 86_400), ("GET", None), ("SET", 30), ("GETDEL", None)]
-    assert all(ticket not in name for _, name, _ in redis.calls)  # keys hold a digest only
+    names = [name for _, name, _ in redis.calls]
+    assert not [name for name in names if token in name or ticket in name]  # digests only
+
+
+async def test_memory_variant_drops_expired_sessions_and_tickets() -> None:
+    now = [0]
+    store = MemoryTicketStore(lambda: now[0])
+    for _ in range(1_000):
+        _, token = await store.create_session("Ada")
+        assert await store.issue_ticket(token) is not None
+    now[0] += SESSION_MS
+    _, token = await store.create_session("Ada")
+    assert await store.issue_ticket(token) is not None
+    assert len(store._sessions) == len(store._tickets) == 1  # noqa: SLF001
