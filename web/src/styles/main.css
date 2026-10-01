@@ -3,6 +3,9 @@
 @import 'tw-animate-css';
 @import './tokens.css';
 
+/* Direction A is light only: dark: applies under a .dark ancestor, never from the OS setting. */
+@custom-variant dark (&:is(.dark *));
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -31,6 +34,9 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* transition-* without a duration class follows the motion tokens, so reduced motion stops it too. */
+  --default-transition-duration: var(--motion-base);
+  --default-transition-timing-function: var(--ease-standard);
 }
 
 /* Tailwind has no theme namespace for these, so they are utilities that read the tokens. */
