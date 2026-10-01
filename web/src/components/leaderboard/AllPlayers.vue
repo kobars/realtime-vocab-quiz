@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: "Show all players": get_leaderboard pages with their atSeq, read again (at most once per second) while the standings move (UI spec §3.6, §6.1). -->
+<!-- AI-ASSISTED: "Show all players": get_leaderboard pages with their atSeq, read again (at most once per second, on the monotonic clock) while the standings move or no reply came (UI spec §3.6, §6.1; protocol §3, §7). -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
@@ -11,39 +11,55 @@ const store = useQuizStore()
 const open = ref(false)
 const offset = ref(0)
 const toggle = useTemplateRef<InstanceType<typeof Button>>('toggle')
+const panel = useTemplateRef<HTMLElement>('panel')
 let loadedAt = -Infinity
 let reload: ReturnType<typeof setTimeout> | null = null
 
-const rows = computed(() => store.allPlayers.slice(offset.value, offset.value + PAGE_SIZE))
+/** The reply for the open offset, once it has arrived. */
+const page = computed(() => (store.page?.offset === offset.value ? store.page : null))
+const rows = computed(() => page.value?.rows ?? [])
 const last = computed(() => Math.min(offset.value + PAGE_SIZE, store.playerCount))
 
+function cancel(): void {
+  if (reload !== null) clearTimeout(reload)
+  reload = null
+}
+
 function load(at: number): void {
+  cancel()
   offset.value = at
-  loadedAt = Date.now()
+  loadedAt = store.now()
   store.loadPage(at)
 }
 
 function show(): void {
   open.value = true
   load(0)
+  void nextTick(() => panel.value?.focus())
 }
 
 function hide(): void {
   open.value = false
-  if (reload !== null) clearTimeout(reload)
-  reload = null
+  cancel()
   void nextTick(() => (toggle.value?.$el as HTMLElement | undefined)?.focus())
 }
 
-// The open page is stale once a newer frame is applied; the final page never is.
-watch(() => [store.seq, store.pageAtSeq, store.pageFinal] as const, ([seq, atSeq, final]) => {
-  if (!open.value || final || atSeq === null || seq <= atSeq || reload !== null) return
+// The open page is stale while no reply for it came (dropped or refused: retry, protocol §7), or once its standings
+// differ from the applied ones (a lower seq is a store restart, protocol §3); the final page never is.
+const stale = (): boolean => open.value && (page.value === null || (!page.value.final && page.value.atSeq !== store.seq))
+
+function schedule(): void {
+  if (reload !== null || !stale()) return
   reload = setTimeout(() => {
     reload = null
-    if (open.value) load(offset.value)
-  }, Math.max(0, loadedAt + PAGE_RELOAD_MS - Date.now()))
-})
-onBeforeUnmount(() => reload !== null && clearTimeout(reload))
+    if (!stale()) return
+    if (store.now() - loadedAt >= PAGE_RELOAD_MS) load(offset.value)
+    else schedule()
+  }, Math.max(0, loadedAt + PAGE_RELOAD_MS - store.now()))
+}
+
+watch(() => [open.value, store.seq, page.value, store.connection, store.lastError], schedule)
+onBeforeUnmount(cancel)
 </script>
 
 <template>
@@ -57,13 +73,15 @@ onBeforeUnmount(() => reload !== null && clearTimeout(reload))
   </Button>
   <section
     v-else
+    ref="panel"
+    tabindex="-1"
     class="flex flex-col gap-2"
     :aria-label="strings.leaderboard.showAll"
     @keydown.esc="hide"
   >
     <p class="text-sm text-muted-foreground">
       {{ strings.leaderboard.range(offset + 1, last, store.playerCount) }} ·
-      <span data-test="page-seq">{{ store.pageFinal ? strings.leaderboard.final : store.pageAtSeq === null ? '' : strings.leaderboard.asOf(store.pageAtSeq) }}</span>
+      <span data-test="page-seq">{{ page === null ? '' : page.final ? strings.leaderboard.final : strings.leaderboard.asOf(page.atSeq) }}</span>
     </p>
     <LeaderboardRows
       :entries="rows"
