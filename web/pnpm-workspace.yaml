@@ -1,2 +1,3 @@
+# AI-ASSISTED: build-script policy for the client dependencies (vue-demi needs no build).
 allowBuilds:
   vue-demi: false
