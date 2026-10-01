@@ -13,7 +13,8 @@ These rules apply to every change, whether a person or a coding agent makes it.
 ## Tests
 
 - Write the test first where behavior matters; new behavior has a test that fails without it.
-- **Never edit `api/tests/acceptance/`** once it is merged. The reviewer checks that the folder is
+- **Never edit the tests in `api/tests/acceptance/`** once they are merged. The PR that adds them
+  is the only one that changes the folder; after it, the reviewer checks that the folder is
   unchanged in every PR.
 
 ## Checks
