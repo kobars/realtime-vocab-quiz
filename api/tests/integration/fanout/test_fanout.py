@@ -19,7 +19,7 @@ from quiz.app.service import Connection, QuizService
 from quiz.domain.session import Question
 from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
-from quiz.ports.store import FeedStore, Limits, Ranks, Row, Store
+from quiz.ports.store import FeedStore, Limits, Publish, Ranks, Row, Store
 
 QUESTIONS = (Question("q0", 1), Question("q1", 3))
 
@@ -115,7 +115,7 @@ async def test_each_tick_is_timed_and_each_published_frame_counted(
 
     monkeypatch.setattr(store, "publish_if_dirty", counted)
     frames, timed = metric("leaderboard_frames_total"), metric("tick_duration_seconds_count")
-    (ticker := Ticker(store, Sink(), "n1")).open(quiz_id)
+    (ticker := ticker_of(store, Sink())).open(quiz_id)
     await asyncio.sleep(0.3)
     await score(store, quiz_id, "a", 0)
     await asyncio.sleep(0.3)
