@@ -50,6 +50,34 @@ describe('connectTicket', () => {
     expect(ticket).toBe('ticket-for-token-1')
   })
 
+  it('gives overlapping connects one session, each with its own ticket', async () => {
+    const api = fakeApi()
+    const [a, b] = await Promise.all([connectTicket(api, 'Ana'), connectTicket(api, 'Ana')])
+    expect(api.createSession).toHaveBeenCalledTimes(1)
+    expect([a.identity, b.identity]).toEqual([{ userId: 'u1', sessionToken: 'token-1' }, { userId: 'u1', sessionToken: 'token-1' }])
+    expect(api.createTicket).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(sessionStorage.getItem(IDENTITY_KEY) ?? '')).toEqual(a.identity)
+  })
+
+  it('replaces a forgotten session once when overlapping connects both get a 401', async () => {
+    sessionStorage.setItem(IDENTITY_KEY, JSON.stringify({ userId: 'old', sessionToken: 'gone' }))
+    const api = fakeApi([null, null])
+    const [a, b] = await Promise.all([connectTicket(api, 'Ana'), connectTicket(api, 'Ana')])
+    expect(api.createSession).toHaveBeenCalledTimes(1)
+    expect([a.identity.userId, b.identity.userId]).toEqual(['u1', 'u1'])
+    expect(JSON.parse(sessionStorage.getItem(IDENTITY_KEY) ?? '').userId).toBe('u1')
+  })
+
+  it('keeps the stored identity when a ticket fails for another reason than 401', async () => {
+    const stored = JSON.stringify({ userId: 'kept', sessionToken: 'tok' })
+    sessionStorage.setItem(IDENTITY_KEY, stored)
+    const api = fakeApi()
+    api.createTicket.mockRejectedValueOnce(new Error('POST /api/tickets failed: 503'))
+    await expect(connectTicket(api, 'Ana')).rejects.toThrow('503')
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem(IDENTITY_KEY)).toBe(stored)
+  })
+
   it('fails and forgets the session when a new session gets no ticket either', async () => {
     await expect(connectTicket(fakeApi([null]), 'Ana')).rejects.toThrow('refused a ticket')
     expect(sessionStorage.getItem(IDENTITY_KEY)).toBeNull()
