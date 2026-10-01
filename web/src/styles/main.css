@@ -16,6 +16,9 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-highlight: var(--highlight);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-destructive: var(--destructive);
