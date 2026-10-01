@@ -5,11 +5,11 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   plugins: [vue()],
   resolve: { alias: { '@': '/src' } },
-  // The token test reads the UI spec's token table and tokens.css as text.
+  // The style tests read the UI spec's token table, tokens.css and main.css as text.
   server: { fs: { allow: ['.', '../docs/spec'] } },
   test: {
     environment: 'happy-dom',
     include: ['src/**/*.test.ts'],
-    css: { include: [/tokens\.css/] },
+    css: { include: [/(tokens|main)\.css/] },
   },
 })
