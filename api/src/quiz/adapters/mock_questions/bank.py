@@ -62,39 +62,49 @@ class _Quiz(BaseModel):
         return self
 
 
-def parse_quiz(data: object) -> tuple[str, tuple[BankQuestion, ...]]:
-    """Validate one quiz file's content; raise ``ValueError`` on any broken rule."""
+def _parse(data: object) -> _Quiz:
     try:
-        quiz = _Quiz.model_validate(data)
+        return _Quiz.model_validate(data)
     except ValidationError as error:
         msg = f"invalid quiz: {error}"
         raise ValueError(msg) from None
-    return quiz.quiz_id, tuple(
-        BankQuestion(q.id, q.word, q.choices, q.answer) for q in quiz.questions
-    )
+
+
+def _questions(quiz: _Quiz) -> tuple[BankQuestion, ...]:
+    return tuple(BankQuestion(q.id, q.word, q.choices, q.answer) for q in quiz.questions)
+
+
+def parse_quiz(data: object) -> tuple[str, tuple[BankQuestion, ...]]:
+    """Validate one quiz file's content; raise ``ValueError`` on any broken rule."""
+    quiz = _parse(data)
+    return quiz.quiz_id, _questions(quiz)
 
 
 class MockQuestionBank:
-    def __init__(self, quizzes: dict[str, tuple[BankQuestion, ...]]) -> None:
+    def __init__(
+        self, quizzes: dict[str, tuple[BankQuestion, ...]], titles: dict[str, str] | None = None
+    ) -> None:
         self._quizzes = quizzes
+        self._titles = titles or {}
 
     @classmethod
     def load(cls, folder: Path = DATA) -> Self:
         quizzes: dict[str, tuple[BankQuestion, ...]] = {}
+        titles: dict[str, str] = {}
         for path in sorted(folder.glob("*.json")):
             try:
-                quiz_id, questions = parse_quiz(json.loads(path.read_text(encoding="utf-8")))
+                quiz = _parse(json.loads(path.read_text(encoding="utf-8")))
             except ValueError as error:
                 msg = f"{path.name}: {error}"
                 raise ValueError(msg) from None
-            if quiz_id in quizzes:
-                msg = f"{path.name}: quiz {quiz_id} is defined twice"
+            if quiz.quiz_id in quizzes:
+                msg = f"{path.name}: quiz {quiz.quiz_id} is defined twice"
                 raise ValueError(msg)
-            quizzes[quiz_id] = questions
+            quizzes[quiz.quiz_id], titles[quiz.quiz_id] = _questions(quiz), quiz.title
         if not quizzes:
             msg = f"no quiz file (*.json) in {folder}"
             raise ValueError(msg)
-        return cls(quizzes)
+        return cls(quizzes, titles)
 
     @property
     def quiz_ids(self) -> tuple[str, ...]:
@@ -102,3 +112,6 @@ class MockQuestionBank:
 
     async def questions(self, quiz_id: str) -> tuple[BankQuestion, ...] | None:
         return self._quizzes.get(quiz_id)
+
+    async def title(self, quiz_id: str) -> str | None:
+        return self._titles.get(quiz_id)

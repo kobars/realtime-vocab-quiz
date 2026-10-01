@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from quiz.contracts import messages as m
 from quiz.domain.errors import DomainError, ErrorCode
+from quiz.obs import metrics
 from quiz.ports.clock import Clock
 from quiz.ports.questions import QuestionBank
 from quiz.ports.store import Finished, Joined, Row, Store
@@ -169,6 +170,8 @@ class QuizService:
         answer = (msg.questionIndex, msg.choiceIndex, msg.submissionId)
         apply = self._store.apply_answer(quiz_id, user_id, *answer, conn.conn_id)
         answered = await self._write(quiz_id, apply)
+        if answered.step_back:  # never set on a replay, so each step counts once
+            metrics.REDIS_CLOCK_STEP.inc()
         r = answered.result
         return m.AnswerResult(
             atSeq=r.at_seq,
