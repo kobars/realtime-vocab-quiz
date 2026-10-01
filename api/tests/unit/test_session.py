@@ -110,6 +110,14 @@ def test_next_n_finishes_from_any_cursor(state: QuizState, skipped: tuple[ev.Eve
         assert refused(done.state, Answer("ann", 1, 0, "s9"), START + 300) == "ALREADY_ANSWERED"
 
 
+def test_a_finished_player_gets_only_the_retry_rows_of_next() -> None:
+    finished = transition(OPEN.state, ServeNext("ann", 4), START + 200).state
+    retry = transition(finished, ServeNext("ann", 1), START + 300)
+    assert retry == Step(finished, (), ev.QuestionServed("ann", 1, "q1", START, T - 300))
+    assert refused(finished, ServeNext("ann", 2), START + 300) == "INVALID_STATE"
+    assert refused(finished, ServeNext("ann", 0), START + 300) == "INVALID_STATE"
+
+
 def test_quiz_ended_is_broadcast_once() -> None:
     ended = transition(SERVED.state, End(), DEADLINE + 5)
     assert isinstance(ended.reply, ev.QuizEnded)
