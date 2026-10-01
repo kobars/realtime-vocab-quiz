@@ -1,6 +1,7 @@
 # AI-ASSISTED: the shared store contract (docs/spec/redis.md §3); every store must pass it.
-# Time moves only through ``advance`` and no exact points are asserted: real clocks pass too.
+# Time moves only through the harness and no exact points are asserted: real clocks pass too.
 # ``advance(-ms)`` steps the clock back; a real clock cannot, and its harness ignores it.
+# Expiries that a slow step could beat move only after the setup: ``pass_deadline``, ``hold_tick``.
 
 from collections.abc import Awaitable, Callable
 
@@ -11,6 +12,7 @@ from quiz.domain.session import Question
 from quiz.ports.store import End, Finished, Publish, Row, Served, Store
 
 type Advance = Callable[[int], Awaitable[None]]
+type QuizStep = Callable[[str], Awaitable[None]]
 
 QUESTIONS = tuple(Question(f"q{i}", i % 4) for i in range(3))
 WINDOW_MS, LIMIT_MS = 600_000, 20_000
@@ -22,10 +24,8 @@ async def refused(call: Awaitable[object]) -> ErrorCode:
     return info.value.code
 
 
-async def started(
-    store: Store, quiz_id: str, *users: str, limit_ms: int = LIMIT_MS, window_ms: int = WINDOW_MS
-) -> None:
-    await store.create_quiz(quiz_id, QUESTIONS, window_ms=window_ms, time_limit_ms=limit_ms)
+async def started(store: Store, quiz_id: str, *users: str, limit_ms: int = LIMIT_MS) -> None:
+    await store.create_quiz(quiz_id, QUESTIONS, window_ms=WINDOW_MS, time_limit_ms=limit_ms)
     for user in users:
         await store.join(quiz_id, user, user.upper(), f"c-{user}")
         await store.serve_next(quiz_id, user, 0, f"c-{user}")
@@ -174,11 +174,13 @@ async def test_finished_player_gets_only_the_retry_rows(store: Store, quiz_id: s
     assert (finished.total, finished.rank) == (total, 1)
 
 
-async def test_refusals_after_the_deadline(store: Store, advance: Advance, quiz_id: str) -> None:
-    await started(store, quiz_id, "a", window_ms=300)  # a short window: real clocks wait it out
+async def test_refusals_after_the_deadline(
+    store: Store, pass_deadline: QuizStep, quiz_id: str
+) -> None:
+    await started(store, quiz_id, "a")
     first = await store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-a")
     await store.serve_next(quiz_id, "a", 1, "c-a")
-    await advance(350)
+    await pass_deadline(quiz_id)
     for user in ("a", "nobody"):  # the deadline check comes before the player check
         conn = f"c-{user}"
         assert await refused(store.join(quiz_id, user, "X", conn)) == ErrorCode.QUIZ_ENDED
@@ -258,11 +260,12 @@ async def test_snapshot_above_200_players_carries_top_50(store: Store, quiz_id: 
 
 
 async def test_dirty_gates_publish_and_tick_holds(
-    store: Store, advance: Advance, quiz_id: str
+    store: Store, advance: Advance, hold_tick: QuizStep, quiz_id: str
 ) -> None:
     await started(store, quiz_id, "a")
     first = await store.publish_if_dirty(quiz_id, "n1")
     assert (first.status, first.seq) == ("published", 1)
+    await hold_tick(quiz_id)
     await answer(store, quiz_id, "a", 0, 0, "s1")  # dirty again, but the token holds
     busy = await store.publish_if_dirty(quiz_id, "n2")
     assert busy.status == "busy"
@@ -277,10 +280,11 @@ async def test_dirty_gates_publish_and_tick_holds(
 
 
 async def test_tick_token_holds_at_most_200_ms_after_a_clock_step_back(
-    store: Store, advance: Advance, quiz_id: str
+    store: Store, advance: Advance, hold_tick: QuizStep, quiz_id: str
 ) -> None:
     await started(store, quiz_id, "a")
     assert (await store.publish_if_dirty(quiz_id, "n1")).status == "published"
+    await hold_tick(quiz_id)  # on a real clock the long hold stands in for the step back
     await advance(-5000)
     await store.join(quiz_id, "b", "B", "c-b")  # dirty again
     busy = await store.publish_if_dirty(quiz_id, "n2")
@@ -342,11 +346,11 @@ async def test_host_mark_survives_a_clock_step_back(
     assert await store.end_quiz(quiz_id, "host") == End("ended", 1)
 
 
-async def test_deadline_ends_the_quiz(store: Store, advance: Advance, quiz_id: str) -> None:
-    await store.create_quiz(quiz_id, QUESTIONS, window_ms=300, time_limit_ms=LIMIT_MS)
+async def test_deadline_ends_the_quiz(store: Store, pass_deadline: QuizStep, quiz_id: str) -> None:
+    await store.create_quiz(quiz_id, QUESTIONS, window_ms=WINDOW_MS, time_limit_ms=LIMIT_MS)
     await store.join(quiz_id, "a", "A", "c-a")
     assert await store.end_quiz(quiz_id, "deadline") == End("not_due")
-    await advance(350)
+    await pass_deadline(quiz_id)
     assert await refused(store.serve_next(quiz_id, "a", 0, "c-a")) == ErrorCode.QUIZ_ENDED
     assert await store.publish_if_dirty(quiz_id, "n1") == Publish("ended", None)
     assert await store.end_quiz(quiz_id, "deadline") == End("ended", 1)
