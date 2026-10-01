@@ -70,8 +70,9 @@ def test_refused_requests() -> None:
     assert refused(SERVED.state, ServeNext("bob", 0), START) == "NOT_JOINED"
     assert refused(SERVED.state, Answer("ann", 1, 0, "s1"), START) == "QUESTION_NOT_OPEN"
     assert refused(SERVED.state, ServeNext("ann", 3), START) == "INVALID_STATE"
-    for command in (Join("bob"), ServeNext("ann", 1), Answer("ann", 0, 2, "s1")):
-        assert refused(SERVED.state, command, DEADLINE) == "QUIZ_ENDED"
+    for user in ("ann", "bob"):  # the deadline is checked before the player exists
+        for command in (Join(user), ServeNext(user, 1), Answer(user, 0, 2, "s1")):
+            assert refused(SERVED.state, command, DEADLINE) == "QUIZ_ENDED"
 
 
 def test_skips_the_last_answer_finishes_and_a_repeat_of_next_n() -> None:
