@@ -25,10 +25,12 @@ dev = [
     "hypothesis>=6.168.3",
     "import-linter>=2.15",
     "mypy>=2.3.1",
+    "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.9",
+    "typos>=1.50.3",
 ]
 load = [
     "httpx>=0.28.1",
