@@ -155,11 +155,14 @@ async def swarm(opts: Options, proc: int = 0) -> tuple[Recorder, dict[str, float
     start = time.monotonic()
     deadline = start + opts.ramp + opts.duration
 
-    async def steady_cpu() -> float:
-        """This process's CPU share from the end of the ramp to the deadline."""
-        await asyncio.sleep(opts.ramp)
+    async def steady_cpu(slots: asyncio.Future[list[None]]) -> float:
+        """This process's CPU share from the end of the ramp to the deadline, or to the end of
+        its slots if a quiz ends first: idle time after them would hide a busy swarm."""
+        await asyncio.wait([slots], timeout=max(0.0, start + opts.ramp - time.monotonic()))
+        if slots.done():  # no steady window
+            return 0.0
         cpu0, t0 = time.process_time(), time.monotonic()
-        await asyncio.sleep(deadline - t0)
+        await asyncio.wait([slots], timeout=max(0.0, deadline - t0))
         return 100 * (time.process_time() - cpu0) / max(time.monotonic() - t0, 1e-9)
 
     async def slot(index: int, http: httpx.AsyncClient) -> None:
@@ -179,13 +182,15 @@ async def swarm(opts: Options, proc: int = 0) -> tuple[Recorder, dict[str, float
             cohort += 1
             rec.counts["cohorts"] += 1
             if p.ended:
+                rec.counts["slots_ended_early"] += time.monotonic() < deadline
                 return
 
     limits = httpx.Limits(max_connections=100)
     async with httpx.AsyncClient(base_url=opts.url, timeout=10, limits=limits) as http:
-        steady = asyncio.create_task(steady_cpu())
-        await asyncio.gather(*(slot(i, http) for i in range(proc, opts.bots, opts.procs)))
-    return rec, {"cpu_pct": round(await steady, 1), "rss_mb": _rss_mb()}
+        slots = asyncio.gather(*(slot(i, http) for i in range(proc, opts.bots, opts.procs)))
+        cpu_pct = await steady_cpu(slots)
+        await slots
+    return rec, {"cpu_pct": round(cpu_pct, 1), "rss_mb": _rss_mb()}
 
 
 def worker(opts: Options, proc: int) -> tuple[Recorder, dict[str, float]]:

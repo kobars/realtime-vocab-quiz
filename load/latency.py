@@ -36,6 +36,8 @@ def summary(rec: Recorder, procs: list[dict[str, float]], active_s: float) -> di
     problems = [f"a swarm process above {CPU_LIMIT_PCT:.0f}% CPU"] if cpu > CPU_LIMIT_PCT else []
     if not rec.answer_ms:
         problems.append("no answer samples")
+    if early := c["slots_ended_early"]:
+        problems.append(f"{early} bot slots stopped at a quiz end before the deadline")
     return {
         "answer": _latency(rec.answer_ms, c["answer_missing"], c["answer_timeout"]),
         "leaderboard": _latency(rec.board_ms, c["board_missing"], c["board_timeout"]),

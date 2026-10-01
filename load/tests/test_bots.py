@@ -235,6 +235,23 @@ async def test_a_swarm_plays_whole_quizzes_against_the_app(app_url: str) -> None
         assert rec.counts[failure] == 0
 
 
+async def test_a_quiz_end_before_the_deadline_ends_the_cpu_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def busy_until_the_quiz_ends(p: Player, *_: object) -> None:
+        until = time.monotonic() + 0.3
+        while time.monotonic() < until:
+            pass
+        p.ended = True
+
+    monkeypatch.setattr(bots, "play", busy_until_the_quiz_ends)
+    t0 = time.monotonic()
+    rec, proc = await swarm(parse(["--bots", "1", "--duration", "3", "--ramp", "0"]))
+    assert time.monotonic() - t0 < 1  # no idle wait for the deadline
+    assert proc["cpu_pct"] > 50  # idle time until the deadline would dilute it to about 10%
+    assert rec.counts["slots_ended_early"] == 1
+
+
 def test_the_report_is_printed_before_the_result_is_saved(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
