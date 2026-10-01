@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
     "redis[hiredis]>=8.1.0",
+    "starlette>=1.7.0",
     "structlog>=26.1.0",
     "uvicorn[standard]>=0.54.0",
 ]
@@ -20,6 +21,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "deptry>=0.25.1",
     "httpx>=0.28.1",
     "httpx2>=2.13.1",
     "hypothesis>=6.168.3",
