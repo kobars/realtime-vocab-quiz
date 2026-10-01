@@ -324,8 +324,8 @@ Redis load per second (computed, a subtotal of the main calls):
   only shifted ([redis spec](docs/spec/redis.md), "Reads at one `seq`").
 
 5,000 players in one quiz on two nodes cost 1,000 + 1,000 + 10 + 2 script calls and 200 `GET`s
-per second, plus up to 2,000 calls inside the tick script at A11's pace. Not counted: snapshots (2 to 4
-script calls each), the presence renew every 3 s per node and quiz, joins and reconnects, and
+per second, plus up to 2,000 calls inside the tick script at A11's pace. Not counted: snapshots (1 to 3
+script calls each; concurrent misses of the cached standings share one read), the presence renew every 3 s per node and quiz, joins and reconnects, and
 clients that send faster than A11 (up to 20 messages per second per socket, A6).
 
 **Measured numbers.**

@@ -92,6 +92,7 @@ class Page:
 @dataclass(frozen=True, slots=True)
 class Ranks:
     at_seq: int
+    status: Literal["open", "ended"]
     player_count: int
     rows: Mapping[str, Row | None]  # per asked user id; None if that user is not a player
 

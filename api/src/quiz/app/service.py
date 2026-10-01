@@ -4,6 +4,7 @@
 ``DomainError`` keeps its code, a store's ``ConnectionError`` or ``TimeoutError`` is
 ``UNAVAILABLE``, anything else ``INTERNAL`` with a reference that the log line repeats."""
 
+import asyncio
 import logging
 import unicodedata
 import uuid
@@ -15,7 +16,7 @@ from quiz.domain.errors import DomainError, ErrorCode
 from quiz.obs import metrics
 from quiz.ports.clock import Clock
 from quiz.ports.questions import QuestionBank
-from quiz.ports.store import Finished, Joined, Store
+from quiz.ports.store import Finished, Joined, Ranks, Store
 from quiz.ports.store import Snapshot as Shared
 
 log = logging.getLogger(__name__)
@@ -51,6 +52,11 @@ def _error(code: m.ErrorCode, text: str, request_type: str) -> m.ProtocolError:
     return m.ProtocolError(code=code, message=text, requestType=request_type)
 
 
+def _key(read: Shared | Ranks) -> tuple[int, str, int]:
+    """What the cached standings are keyed by: a join moves no ``seq``, so the count is in it."""
+    return read.at_seq, read.status, read.player_count
+
+
 def _bound(conn: Connection, *, write: bool = False) -> str:
     if conn.quiz_id is None:
         raise Refused(m.ErrorCode.NOT_JOINED, "send join first")
@@ -63,17 +69,20 @@ class QuizService:
     def __init__(self, store: Store, bank: QuestionBank, clock: Clock) -> None:
         self._store, self._bank, self._clock = store, bank, clock
         self._shared: dict[str, Shared] = {}  # per quiz: the standings at its latest seq
+        self._refills: dict[str, asyncio.Task[Shared]] = {}  # per quiz: the read in flight
 
     def drop_cache(self, quiz_id: str | None = None) -> None:
-        """Forget the cached standings of one quiz, or of all quizzes.
+        """Forget the cached standings of one quiz, or of all quizzes, and the reads in flight.
 
         A store restart can lose writes without moving ``seq``, so the reconnect and
         resubscribe path calls this before it sends its repair snapshots (redis.md §5).
         """
         if quiz_id is None:
             self._shared.clear()
+            self._refills.clear()
         else:
             self._shared.pop(quiz_id, None)
+            self._refills.pop(quiz_id, None)
 
     async def _write[T](self, quiz_id: str, call: Awaitable[T]) -> T:
         """Run a store write; its refusal at the deadline announces the end (redis.md §3.1)."""
@@ -212,25 +221,34 @@ class QuizService:
             entries=[row.entry() for row in page.rows],
         )
 
-    async def _head(self, quiz_id: str) -> tuple[int, str, int]:
-        page = await self._store.standings_page(quiz_id, 0, 1)
-        return page.at_seq, "ended" if page.final else "open", page.player_count
+    async def _refill(self, quiz_id: str) -> Shared:
+        """Read the cached standings again; concurrent misses of one quiz share one read."""
+        if (read := self._refills.get(quiz_id)) is None:
+            read = self._refills[quiz_id] = asyncio.create_task(self._store.snapshot(quiz_id, None))
+
+            def forget(done: asyncio.Task[Shared]) -> None:
+                if self._refills.get(quiz_id) is done:
+                    del self._refills[quiz_id]
+                if not done.cancelled():
+                    done.exception()  # retrieved even when every waiter was cancelled
+
+            read.add_done_callback(forget)
+        shared = self._shared[quiz_id] = await asyncio.shield(read)
+        return shared
 
     async def snapshot(self, quiz_id: str, user_id: str | None) -> m.Snapshot:
         """The standings cached per (quiz, seq, status, player count); the own row read fresh.
 
-        A join moves no ``seq``, so the player count is part of the key. If the own row was
-        read at another seq or count than the cached part, both are read again together.
+        The own row's read gives the key. If the standings read for a miss lands at another
+        key, both parts are read again together.
         """
-        head, shared = await self._head(quiz_id), self._shared.get(quiz_id)
-        if shared is None or (shared.at_seq, shared.status, shared.player_count) != head:
-            shared = self._shared[quiz_id] = await self._store.snapshot(quiz_id, None)
-        users = () if user_id is None else (user_id,)
-        ranks = await self._store.ranks_of(quiz_id, users)
-        you = next(iter(ranks.rows.values()), None)
-        if (ranks.at_seq, ranks.player_count) != (shared.at_seq, shared.player_count):
-            shared = self._shared[quiz_id] = await self._store.snapshot(quiz_id, user_id)
-            you = shared.you
+        ranks = await self._store.ranks_of(quiz_id, () if user_id is None else (user_id,))
+        you, shared = next(iter(ranks.rows.values()), None), self._shared.get(quiz_id)
+        if shared is None or _key(shared) != _key(ranks):
+            shared = await self._refill(quiz_id)
+            if _key(shared) != _key(ranks):
+                shared = self._shared[quiz_id] = await self._store.snapshot(quiz_id, user_id)
+                you = shared.you
         return m.Snapshot(
             atSeq=shared.at_seq,
             status=shared.status,
