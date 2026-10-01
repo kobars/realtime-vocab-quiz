@@ -90,7 +90,7 @@ Rules:
 | `pong` read (Redis) | A plain `GET` of the counter for each `ping` of a joined connection; never changes it |
 | Gateway (each API node) | Relays broadcasts in the order it receives them; fills `pong.seq` from the `pong` read, never from the frames it relayed, so a node that relayed nothing yet or missed a frame on its pub/sub link still reports the quiz's counter; conflates `leaderboard` frames per slow socket (§5) |
 | Client and load bots | Apply broadcasts in `seq` order with the rules below; the bots also count gaps and resyncs and time answer → leaderboard |
-| Tests | Check that the published `seq` values have no gaps (`api/tests/integration/test_seq.py`) |
+| Tests | Check that the published `seq` values have no gaps (`api/tests/integration/test_invariants.py`) |
 
 What the client does with an incoming `seq` (`L` = its `lastSeq`):
 

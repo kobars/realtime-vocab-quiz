@@ -121,7 +121,7 @@ The gate is atomic: inside one script the node sees no token, deletes `dirty` (a
 
 ## 6. Tests that prove this design
 
-- `api/tests/integration/test_seq.py::test_seq_has_no_gaps_under_concurrent_answers` (C2, the `seq` rule).
+- `api/tests/integration/test_invariants.py::test_seq_has_no_gaps_under_concurrent_answers` (C2, the `seq` rule, while two nodes tick through two waves of 1,000 concurrent answers with duplicate `submissionId`s) and `::test_concurrent_joins_get_unique_ranks` (200 joins at once get ranks 1..200).
 - `api/tests/integration/test_tick.py::test_two_nodes_publish_one_frame_per_tick` and `::test_tick_token_stretched_by_a_clock_step_back_is_cut_to_one_tick` (the gate and the token); `api/tests/contract/test_store_contract.py::test_leave_sets_dirty_only_while_open` and `::test_seq_moves_only_with_broadcasts` on Redis (joins and leaves set `dirty` and never move `seq`).
 - `api/tests/contract/test_store_contract.py::test_refusals_after_the_deadline` on Redis (writes after the deadline are refused) and `api/tests/integration/test_deadline.py::test_end_quiz_is_idempotent`.
 - `api/tests/property/test_standings_props.py::test_sort_score_round_trips`, `api/tests/unit/test_standings.py::test_sort_score_rejects_out_of_range` and `api/tests/integration/test_create_quiz.py::test_window_above_60_min_is_rejected`.
