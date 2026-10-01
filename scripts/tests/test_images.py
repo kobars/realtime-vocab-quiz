@@ -9,9 +9,14 @@ The files are read as text, so the tests need no Docker daemon.
 import json
 from pathlib import Path
 
-from uvicorn.main import main as uvicorn_cli
+import pytest
+import uvicorn
+from starlette.applications import Starlette
 
+import quiz.__main__ as quiz_main
+from quiz.adapters.ws.heartbeat import server_config
 from quiz.config import Settings
+from quiz.main import module_app
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -55,12 +60,15 @@ def test_api_runtime_holds_only_the_venv_and_the_source_and_runs_as_10001() -> N
     assert any(line.startswith("HEALTHCHECK") for line in runtime)
 
 
+def _server_config() -> uvicorn.Config:
+    """The config that ``python -m quiz``, the image's command, runs uvicorn with."""
+    assert _api_cmd() == ["python", "-m", "quiz"]
+    return server_config(Starlette(), Settings(), "0.0.0.0", 8000)  # noqa: S104
+
+
 def test_api_image_caps_websocket_frames_just_above_the_gateway_limit() -> None:
     """uvicorn buffers a whole frame before the gateway sees it; its default cap is 16 MiB."""
-    cmd = _api_cmd()
-    assert cmd[0] == "uvicorn"
-    assert "--ws-max-size" in cmd
-    cap = int(cmd[cmd.index("--ws-max-size") + 1])
+    cap = _server_config().ws_max_size
     limit = Settings.model_fields["max_payload_bytes"].default
     # Above the limit, so the gateway's MESSAGE_TOO_LARGE and close 1009 still answer such frames.
     assert limit < cap <= 4 * limit
@@ -94,6 +102,31 @@ def test_make_build_builds_both_images_from_the_repository_root() -> None:
 
 def test_api_image_leaves_x_forwarded_for_to_the_gateway_and_turns_deflate_off() -> None:
     """uvicorn's own proxy headers trust loopback peers before the gateway's trusted proxies."""
-    params = uvicorn_cli.make_context("uvicorn", _api_cmd()[1:]).params
-    assert params["proxy_headers"] is False
-    assert params["ws_per_message_deflate"] is False
+    config = _server_config()
+    assert config.log_config is None  # keeps the app's JSON log handlers
+    assert config.proxy_headers is False
+    assert config.ws_per_message_deflate is False
+
+
+def test_api_image_pings_every_heartbeat_and_drops_a_socket_without_a_pong_by_the_next() -> None:
+    config, heartbeat_s = _server_config(), Settings().heartbeat_ms / 1000
+    assert config.ws_ping_interval == config.ws_ping_timeout == heartbeat_s == 25
+
+
+def test_python_m_quiz_serves_the_module_app_with_the_server_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started: list[uvicorn.Config] = []
+
+    class Server:
+        def __init__(self, config: uvicorn.Config) -> None:
+            self.config = config
+
+        def run(self) -> None:
+            started.append(self.config)
+
+    monkeypatch.setattr(uvicorn, "Server", Server)
+    quiz_main.main()
+    (config,) = started
+    assert config.app is module_app()
+    assert (config.host, config.port, config.ws_ping_interval) == ("0.0.0.0", 8000, 25)  # noqa: S104

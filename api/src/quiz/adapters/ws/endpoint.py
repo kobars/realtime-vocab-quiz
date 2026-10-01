@@ -18,6 +18,7 @@ from quiz.adapters.ws.session import Deps, serve
 from quiz.app.service import Connection, QuizService
 from quiz.config import Settings
 from quiz.ports.clock import Clock
+from quiz.ports.store import Store
 from quiz.ports.tickets import TicketStore
 
 log = logging.getLogger(__name__)
@@ -42,9 +43,11 @@ def path_only(record: logging.LogRecord) -> bool:
 
 
 class Gateway:
-    def __init__(self, settings: Settings, tickets: TicketStore, service: QuizService) -> None:
+    def __init__(
+        self, settings: Settings, tickets: TicketStore, service: QuizService, store: Store
+    ) -> None:
         self._settings, self._tickets = settings, tickets
-        self.registry = Registry()
+        self.registry = Registry(store, settings.grace_ms)
         self._deps = Deps(service, self.registry, settings.max_payload_bytes)
         self.caps = ConnectionCaps(settings.max_connections, settings.per_ip_conn_cap)
         self.clock: Clock = lambda: time.monotonic_ns() // 1_000_000  # paces the token buckets

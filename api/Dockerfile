@@ -30,8 +30,6 @@ USER 10001:10001
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request, sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status != 200)"]
-# uvicorn buffers a whole frame before the gateway's 16 KiB check; its own default cap is 16 MiB.
-# 64 KiB keeps the gateway's MESSAGE_TOO_LARGE path for 16-64 KiB and bounds memory above it.
-# The gateway alone reads X-Forwarded-For; permessage-deflate is off, as the spec says.
-CMD ["uvicorn", "quiz.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", \
-     "--no-proxy-headers", "--ws-max-size", "65536", "--ws-per-message-deflate", "false"]
+# python -m quiz runs uvicorn through quiz.adapters.ws.heartbeat.server_config, so the settings
+# set the heartbeat (HEARTBEAT_MS) and the frame cap; proxy headers and permessage-deflate are off.
+CMD ["python", "-m", "quiz"]
