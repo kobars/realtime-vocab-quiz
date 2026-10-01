@@ -459,9 +459,9 @@ stated the fix and a test pinned it. The full record is in the AI-LOG entries (b
 | Tool | Model | Role in the design |
 |---|---|---|
 | Claude Code | claude-opus-5-5 | Drafted the architecture, the protocol, the Redis data model and scripts, the UI spec, the test strategy and the ADRs |
-| Codex CLI | `gpt-6-astra`, high reasoning, read-only sandbox | Independent reviewer of the design drafts, and of every PR, before its merge |
+| Codex CLI | `gpt-6-astra`, high reasoning, read-only sandbox | Independent reviewer of the design drafts, of each spec PR once it merged, and of every later PR before its merge |
 | A second Claude Code agent | claude-opus-5-5, fresh context, read-only | Independent reviewer of the design drafts, with no access to how they were written |
-| Claude Code `/code-review` | claude-opus-5-5, high | Reviewer of every PR, before its merge, next to Codex |
+| Claude Code `/code-review` | claude-opus-5-5, high | Reviewer of each spec PR once it merged and of every later PR before its merge, next to Codex |
 
 **Design tasks and the nature of each interaction.**
 
