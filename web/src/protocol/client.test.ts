@@ -234,7 +234,10 @@ it('drops next() while the socket is still connecting instead of throwing', asyn
   const socket = await connected(false)
   expect(() => client.next(0)).not.toThrow()
   socket.open()
-  expect(socket.types()).toEqual(['join'])
+  socket.receive(joined())
+  socket.receive({ type: 'error', code: 'RATE_LIMITED', requestType: null } as Partial<ServerMessage>)
+  await wait(5_000)
+  expect(socket.types()).toEqual(['join', 'resync'])
 })
 
 it('opens one socket after start, stop, start while the first ticket request is pending', async () => {
@@ -539,7 +542,7 @@ it('sends the same next again after the growing backoff after UNAVAILABLE, until
   expect(nexts(socket)).toEqual([10, 10, 10])
 })
 
-it.each(['INVALID_STATE', 'QUIZ_ENDED', 'NOT_JOINED'])('stops retrying a next after the final error %s', async (code) => {
+it.each(['INVALID_STATE', 'QUIZ_ENDED'])('stops retrying a next after the final error %s', async (code) => {
   const client = start()
   const socket = await joinedSocket()
   client.next(3)
@@ -549,15 +552,82 @@ it.each(['INVALID_STATE', 'QUIZ_ENDED', 'NOT_JOINED'])('stops retrying a next af
   expect(nexts(socket)).toEqual([3])
 })
 
-it('joins again after a next gets NOT_JOINED, and leaves the next request to that joined', async () => {
+it('joins again after a next gets NOT_JOINED, and repeats that next once after the joined', async () => {
   const client = start()
   const socket = await joinedSocket()
   client.next(3)
   socket.receive(overload('NOT_JOINED'))
   expect(socket.types().slice(-2)).toEqual(['next', 'join'])
-  socket.receive(joined())
+  socket.receive(overload('RATE_LIMITED', null))
   await wait(5_000)
   expect(nexts(socket)).toEqual([3])
+  socket.receive(joined())
+  expect(socket.types().slice(-2)).toEqual(['resync', 'next'])
+  socket.receive(overload('RATE_LIMITED', null))
+  await wait(1_000)
+  socket.receive(question(3))
+  socket.receive(overload('RATE_LIMITED', null))
+  await wait(5_000)
+  expect(nexts(socket)).toEqual([3, 3, 3])
+})
+
+it('repeats no next after NOT_JOINED when a newer next replaced it before the joined', async () => {
+  const client = start()
+  const socket = await joinedSocket()
+  client.next(3)
+  socket.receive(overload('NOT_JOINED'))
+  client.next(2)
+  socket.receive(joined())
+  await wait(5_000)
+  expect(nexts(socket)).toEqual([3, 2])
+})
+
+it('sends one join when an answer and a next in flight both get NOT_JOINED, then repeats both', async () => {
+  uuids('s-1')
+  const client = start()
+  const socket = await joinedSocket()
+  client.answer(0, 2)
+  client.next(1)
+  socket.receive(answerError('NOT_JOINED'))
+  socket.receive(overload('NOT_JOINED'))
+  expect(socket.types().filter((type) => type === 'join')).toHaveLength(2)
+  socket.receive(joined())
+  expect(socket.types().slice(-3)).toEqual(['resync', 'answer', 'next'])
+})
+
+it('sends no second join on NOT_JOINED while a rejoin is in flight, and still resends the answer after it', async () => {
+  uuids('s-1')
+  const client = start()
+  const socket = await joinedSocket()
+  client.answer(0, 2)
+  client.rejoin()
+  socket.receive(answerError('NOT_JOINED'))
+  expect(socket.types().filter((type) => type === 'join')).toHaveLength(2)
+  socket.receive(joined())
+  expect(answers(socket)).toEqual([answerMsg('s-1'), answerMsg('s-1')])
+})
+
+it('records no pending next for a next() dropped between sockets', async () => {
+  const client = start()
+  ;(await joinedSocket()).drop()
+  client.next(5)
+  await wait(1_000)
+  const second = await connected()
+  second.receive(joined())
+  second.receive(overload('RATE_LIMITED', null))
+  await wait(5_000)
+  expect(nexts(second)).toEqual([])
+})
+
+it('drops the pending next and its retry on quiz_ended', async () => {
+  const client = start(() => 0.5)
+  const socket = await joinedSocket()
+  client.next(5)
+  socket.receive(overload('UNAVAILABLE'))
+  socket.receive({ type: 'quiz_ended', seq: 1 } as Partial<ServerMessage>)
+  socket.receive(overload('RATE_LIMITED', null))
+  await wait(5_000)
+  expect(nexts(socket)).toEqual([5])
 })
 
 it('retries only the newest next when the player asks again before the retry', async () => {
