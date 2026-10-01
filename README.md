@@ -40,14 +40,13 @@ The API refuses a WebSocket upgrade from an origin it does not allow (HTTP 403).
 `DEV_ORIGINS` change the port and the list.
 
 `make check` runs, in order: the client install from the lock file
-(`pnpm install --frozen-lockfile`); every pre-commit hook on every file (the
-internal-content guard `scripts/check_internal.py`, ruff lint and format, ESLint,
-typos, and lychee in Docker on the relative links and anchors of the tracked
-Markdown); mypy (strict); import-linter; deptry (every import in `api/src` is a
-declared dependency and every runtime dependency is used; `api/tests`, `scripts/`
-and `load/` import only declared packages); pytest (without the `integration` and
-`acceptance` markers) with a branch-coverage floor (`api/pyproject.toml`);
-the contract drift check; vue-tsc; Vitest with coverage thresholds
+(`pnpm install --frozen-lockfile`); every pre-commit hook on every file (ruff
+lint and format, ESLint, typos, and lychee in Docker on the relative links and
+anchors of the tracked Markdown); mypy (strict); import-linter; deptry (every
+import in `api/src` is a declared dependency and every runtime dependency is
+used; `api/tests`, `scripts/` and `load/` import only declared packages); pytest
+(without the `integration` and `acceptance` markers) with a branch-coverage
+floor (`api/pyproject.toml`); the contract drift check; vue-tsc; Vitest with coverage thresholds
 (`web/vitest.config.ts`); and the client build (`pnpm -C web build`). Every pull
 request runs the same gate in GitHub Actions (`.github/workflows/ci.yml`), plus the
 Redis integration tests and the guard on the commit messages and the PR text (run
