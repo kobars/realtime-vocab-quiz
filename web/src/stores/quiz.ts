@@ -76,6 +76,9 @@ export const useQuizStore = defineStore('quiz', () => {
     return s.question === null ? 0 : Math.max(0, s.question.deadlineAt - at)
   }
 
+  /** Display only: the time until the quiz window closes, from `quizRemainingMs`. */
+  const quizMsLeft = (at = deps.now()): number => (s.quiz === null ? 0 : Math.max(0, s.quiz.endsAt - at))
+
   function join(quizId: string, displayName: string): void {
     client.value?.stop()
     Object.assign(s, initial(), { connection: 'connecting' })
@@ -193,5 +196,5 @@ export const useQuizStore = defineStore('quiz', () => {
     if (s.connection === 'resyncing') s.connection = 'joined'
   }
 
-  return { ...toRefs(s), nextIndex, msLeft, join, answer, next, loadPage }
+  return { ...toRefs(s), nextIndex, msLeft, quizMsLeft, join, answer, next, loadPage }
 })
