@@ -198,8 +198,8 @@ class QuizService:
         conn.last_resync_ms = now
         snap = await self.snapshot(quiz_id, conn.user_id)
         you, count = snap.you, snap.playerCount
-        if you is None or count <= m.FULL_LIST_MAX or you.rank <= len(snap.entries):
-            return Outcome((snap,))  # above 200 players and outside the entries: rank_update (§4)
+        if you is None or you.rank <= len(snap.entries):  # the store's limits cut the entries
+            return Outcome((snap,))  # above full_list_max and outside the entries: rank_update (§4)
         update = m.RankUpdate(atSeq=snap.atSeq, rank=you.rank, score=you.score, playerCount=count)
         return Outcome((snap, update))
 
