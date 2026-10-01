@@ -1,0 +1,16 @@
+{
+  "quiz_id": "ACAD-10",
+  "title": "Academic words",
+  "questions": [
+    {"id": "acad10-01", "word": "analyze", "choices": ["to guess quickly", "to ignore", "to examine in detail", "to copy exactly"], "answer": 2},
+    {"id": "acad10-02", "word": "hypothesis", "choices": ["a proven law", "a short poem", "a list of sources", "an idea to be tested"], "answer": 3},
+    {"id": "acad10-03", "word": "significant", "choices": ["important or large", "tiny and unnoticed", "written by hand", "temporary"], "answer": 0},
+    {"id": "acad10-04", "word": "derive", "choices": ["to destroy", "to obtain from a source", "to drive away", "to hide"], "answer": 1},
+    {"id": "acad10-05", "word": "coherent", "choices": ["confusing", "very old", "logical and consistent", "too long"], "answer": 2},
+    {"id": "acad10-06", "word": "empirical", "choices": ["based on theory alone", "ruled by an emperor", "empty", "based on observation"], "answer": 3},
+    {"id": "acad10-07", "word": "infer", "choices": ["to conclude from evidence", "to refuse", "to make worse", "to state directly"], "answer": 0},
+    {"id": "acad10-08", "word": "concise", "choices": ["long and detailed", "brief and clear", "badly organized", "certain"], "answer": 1},
+    {"id": "acad10-09", "word": "ambiguous", "choices": ["clear and exact", "using both hands", "open to more than one meaning", "very ambitious"], "answer": 2},
+    {"id": "acad10-10", "word": "synthesize", "choices": ["to take apart", "to sing together", "to delay", "to combine into a whole"], "answer": 3}
+  ]
+}
