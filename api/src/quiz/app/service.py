@@ -15,7 +15,7 @@ from quiz.domain.errors import DomainError, ErrorCode
 from quiz.obs import metrics
 from quiz.ports.clock import Clock
 from quiz.ports.questions import QuestionBank
-from quiz.ports.store import Finished, Joined, Row, Store
+from quiz.ports.store import Finished, Joined, Store
 from quiz.ports.store import Snapshot as Shared
 
 log = logging.getLogger(__name__)
@@ -49,10 +49,6 @@ class Refused(Exception):  # noqa: N818 - a reply, not a fault
 
 def _error(code: m.ErrorCode, text: str, request_type: str) -> m.ProtocolError:
     return m.ProtocolError(code=code, message=text, requestType=request_type)
-
-
-def _entry(row: Row) -> m.Entry:
-    return m.Entry(rank=row.rank, userId=row.user_id, displayName=row.display_name, score=row.score)
 
 
 def _bound(conn: Connection, *, write: bool = False) -> str:
@@ -213,7 +209,7 @@ class QuizService:
             offset=msg.offset,
             playerCount=page.player_count,
             final=page.final,
-            entries=[_entry(row) for row in page.rows],
+            entries=[row.entry() for row in page.rows],
         )
 
     async def _head(self, quiz_id: str) -> tuple[int, str, int]:
@@ -240,6 +236,6 @@ class QuizService:
             status=shared.status,
             playerCount=shared.player_count,
             onlineCount=shared.online_count,
-            entries=[_entry(row) for row in shared.rows],
+            entries=[row.entry() for row in shared.rows],
             you=None if you is None else m.You(rank=you.rank, score=you.score),
         )

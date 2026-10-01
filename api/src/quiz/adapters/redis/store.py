@@ -1,4 +1,4 @@
-# AI-ASSISTED: the Redis store: each port method is one Lua script over the keys of quiz_keys().
+# AI-ASSISTED: the Redis store: one Lua script per port method; the feed is the events channel.
 """The store port on Redis. Scripts read the Redis clock; Python passes no time or points.
 
 The client must decode responses (``decode_responses=True``). A redis-py connection or
@@ -7,13 +7,14 @@ need no redis import to tell an unreachable store from a fault.
 """
 
 import json
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Sequence
+from contextlib import aclosing, asynccontextmanager, contextmanager
 from dataclasses import replace
 from typing import Literal, cast
 
 from redis import exceptions as redis_errors
 from redis.asyncio import Redis
+from redis.asyncio.client import PubSub
 
 from quiz.adapters.redis.keys import quiz_keys
 from quiz.adapters.redis.scripts import Reply, Scripts
@@ -25,6 +26,7 @@ from quiz.ports import store as port
 from quiz.ports.store import Created, Joined, Limits
 
 WAITAOF_TIMEOUT_MS = 2000  # the host end waits this long for the mark's fsync (redis.md §3.1)
+SUBSCRIBE_TIMEOUT_S = 5  # subscribe() waits this long for Redis to confirm the subscription
 
 
 def _ok(name: str, reply: Reply) -> Reply:
@@ -46,6 +48,13 @@ def _reachable() -> Iterator[None]:
         raise TimeoutError(str(error)) from error
     except redis_errors.ConnectionError as error:
         raise ConnectionError(str(error)) from error
+
+
+async def _messages(pubsub: PubSub) -> AsyncGenerator[str]:
+    with _reachable():
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                yield message["data"]
 
 
 class RedisStore:
@@ -175,6 +184,21 @@ class RedisStore:
                 return port.Publish("clean")
             case status:
                 raise ValueError(status)
+
+    @asynccontextmanager
+    async def subscribe(self, quiz_id: str) -> AsyncIterator[AsyncIterator[str]]:
+        """The quiz's ``events`` channel, entered once Redis confirmed the subscription."""
+        pubsub = self._client.pubsub()
+        try:
+            async with aclosing(_messages(pubsub)) as messages:
+                with _reachable():
+                    await pubsub.subscribe(quiz_keys(quiz_id, self._prefix).events)
+                    if await pubsub.get_message(timeout=SUBSCRIBE_TIMEOUT_S) is None:
+                        msg = "Redis did not confirm the subscription"
+                        raise ConnectionError(msg)
+                yield messages
+        finally:
+            await pubsub.aclose()  # type: ignore[no-untyped-call]
 
     async def end_quiz(
         self, quiz_id: str, reason: Literal["deadline", "host"], *, on: Redis | None = None
