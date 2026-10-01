@@ -31,6 +31,7 @@ class Connection:  # what one socket knows: its user (from the ticket) and its q
     user_id: str
     quiz_id: str | None = None  # the quiz of the first successful join
     read_only: bool = False  # joined after the end: pages and resync only
+    present: bool = False  # joined while open: holds the presence that its leave removes
     time_limit_ms: int = 0
     last_resync_ms: int | None = None
 
@@ -122,7 +123,7 @@ class QuizService:
             snapshot = await self.snapshot(quiz_id, conn.user_id)
             conn.quiz_id, conn.read_only = quiz_id, True
             return Outcome((snapshot, _error(m.ErrorCode.QUIZ_ENDED, "the quiz has ended", "join")))
-        conn.quiz_id, conn.time_limit_ms = quiz_id, j.time_limit_ms
+        conn.quiz_id, conn.time_limit_ms, conn.present = quiz_id, j.time_limit_ms, True
         reply = m.Joined(
             atSeq=j.at_seq,
             quizId=quiz_id,

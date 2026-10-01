@@ -129,7 +129,7 @@ async def test_a_failed_leave_is_logged_and_not_raised(caplog: pytest.LogCapture
             raise ConnectionError(msg)
 
     registry = Registry(cast("Store", Down()), 1)
-    conn = Connection("c0", "u0", "VOCAB-42")
+    conn = Connection("c0", "u0", "VOCAB-42", present=True)
     registry.bind(conn, sender_of(Socket()))
     registry.drop(conn)
     await asyncio.sleep(0.05)
@@ -153,7 +153,7 @@ async def test_a_replaced_socket_that_drops_last_keeps_the_newer_sockets_leave(
     *, newest_bound_first: bool
 ) -> None:
     registry, store, _ = await grace_registry()
-    old, new = Connection("c-old", "u0", "VOCAB-42"), Connection("c-new", "u0", "VOCAB-42")
+    old, new = (Connection(c, "u0", "VOCAB-42", present=True) for c in ("c-old", "c-new"))
     for conn in (old, new):
         await store.join("VOCAB-42", "u0", "Ann", conn.conn_id)
     for conn in (new, old) if newest_bound_first else (old, new):
@@ -166,7 +166,7 @@ async def test_a_replaced_socket_that_drops_last_keeps_the_newer_sockets_leave(
 
 async def test_a_read_only_join_keeps_the_pending_leave() -> None:
     registry, store, now = await grace_registry()
-    first = Connection("c-a", "u0", "VOCAB-42")
+    first = Connection("c-a", "u0", "VOCAB-42", present=True)
     await store.join("VOCAB-42", "u0", "Ann", first.conn_id)
     registry.bind(first, sender_of(Socket()))
     registry.drop(first)
@@ -495,3 +495,17 @@ async def test_a_close_that_stalls_still_ends_the_handler_within_flush_s(*, drai
     deps = Deps(cast("QuizService", Service()), Registry(cast("Store", None), 10_000), 16 * KIB)
     handler = serve(cast("WebSocket", sock), Connection("c0", "u0"), limiter(), sender, deps)
     assert await asyncio.wait_for(handler, 1) == 1013
+
+
+async def test_a_present_socket_that_joins_again_after_the_end_still_leaves() -> None:
+    registry, store, now = await grace_registry()
+    service, conn = QuizService(store, Bank(), lambda: now[0]), Connection("c0", "u0")
+    join = m.Join(quizId="VOCAB-42", displayName="Ann")
+    assert [type(r) for r in (await service.handle(conn, join)).replies] == [m.Joined]
+    registry.bind(conn, sender_of(Socket()))
+    now[0] = 60_000  # past the deadline: the repeated join is answered read only
+    replies = (await service.handle(conn, join)).replies
+    assert [type(r) for r in replies] == [m.Snapshot, m.ProtocolError]
+    registry.drop(conn)
+    await asyncio.sleep(0.05)
+    assert await online(store) == 0

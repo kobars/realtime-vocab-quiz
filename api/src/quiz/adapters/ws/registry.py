@@ -8,7 +8,8 @@ A joined socket that drops keeps its presence for the grace period, then ``leave
 own connection id. Timers are per connection and nothing cancels them: ``leave`` compares the
 connection id, so the store alone decides whether the socket still holds the presence. A rejoin
 or a replacing join makes the older socket's leave stale, and a read-only join (after the end)
-writes no presence, so the earlier socket's leave still removes it (docs/spec/redis.md §3, §3.1).
+writes no presence, so the earlier socket's leave still removes it. A socket that joined while
+open keeps its leave even if it joins again after the end (docs/spec/redis.md §3, §3.1).
 The watcher hears when a quiz gets its first local socket and when it loses its last."""
 
 import asyncio
@@ -89,8 +90,8 @@ class Registry:
             del self._quizzes[conn.quiz_id], self._players[conn.quiz_id]
             if self.watcher is not None:
                 self.watcher.close(conn.quiz_id)
-        if conn.read_only:
-            return  # joined after the end: no presence to remove
+        if not conn.present:
+            return  # joined only after the end: no presence to remove
         timer = asyncio.create_task(self._leave_later(conn.quiz_id, conn.user_id, conn.conn_id))
         self._leaving.add(timer)
         timer.add_done_callback(self._leaving.discard)
