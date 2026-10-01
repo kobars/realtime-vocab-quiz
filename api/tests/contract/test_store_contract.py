@@ -266,8 +266,8 @@ async def test_a_start_ahead_of_the_clock_counts_as_reached_at_zero(
     await answer(store, quiz_id, "b", 1, 1, "s2")  # b: two correct answers, more than a's one
     await move_start(quiz_id, 256 << REACHED_BITS)  # unclamped, this outweighs 256 points
     await answer(store, quiz_id, "a", 0, 0, "s3")
-    rows = (await store.ranks_of(quiz_id, ["a", "b"])).rows
-    assert [rows["b"].rank, rows["a"].rank] == [1, 2]
+    page = await store.standings_page(quiz_id, 0, 2)
+    assert [row.user_id for row in page.rows] == ["b", "a"]
 
 
 async def test_standings_pages(store: Store, quiz_id: str) -> None:
