@@ -175,15 +175,21 @@ export const useQuizStore = defineStore('quiz', () => {
     s.lastError = { code, message, requestType }
     // The client settles every answer error but these, so the choices unlock.
     if (requestType === 'answer' && !RETRY_ANSWER_ON.includes(code)) s.pending = null
-    if (code === 'QUIZ_NOT_FOUND') {
-      client.value?.stop()
-      client.value = null
-      s.connection = 'idle'
-    } else if (code === 'QUIZ_ENDED') {
+    if (code === 'QUIZ_NOT_FOUND') idle()
+    else if (code === 'QUIZ_ENDED') {
       if (s.connection === 'connecting') s.connection = 'joined'
       end()
     } else if (code === 'UNSUPPORTED_VERSION' || code === 'SESSION_REPLACED') client.value?.stop()
+    // A failed first join binds nothing and the client never sends it again (protocol §1): back to idle, to retry.
+    else if (requestType === 'join' && s.quiz === null) idle()
     else if (REJOIN_ON.includes(code) && !s.ended) client.value?.rejoin()
+  }
+
+  /** Drops the client for good, so the join screen can start a new one. */
+  function idle(): void {
+    client.value?.stop()
+    client.value = null
+    s.connection = 'idle'
   }
 
   function standings(seq: number, rows: Entry[], players: number, online: number, you?: You | null, replace = false): void {
