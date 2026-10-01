@@ -6,6 +6,8 @@ export type Broadcast = Leaderboard | QuizEnded
 export const GAP_WAIT_MAX_MS = 250
 /** How long a `pong.seq` above L may wait for its broadcast before the client resyncs. */
 export const PONG_CHECK_MS = 1000
+/** The most broadcasts held until a snapshot: the newest, as the snapshot drops older ones (a resync can wait long). */
+export const BUFFER_MAX = 64
 
 /** What the caller does after one inbound message. */
 export interface SeqStep {
@@ -56,7 +58,7 @@ export class SeqTracker {
     // No script publishes after the end, so a leaderboard frame that arrives now is older.
     if (this.finalSeq !== null) return nothing()
     if (this.resyncing) {
-      this.buffer.push(frame)
+      this.hold(frame)
       return nothing()
     }
     const last = this.last
@@ -65,7 +67,7 @@ export class SeqTracker {
       return { ...nothing(), apply: [frame] }
     }
     if (frame.seq === last) return nothing()
-    this.buffer.push(frame)
+    this.hold(frame)
     // A gap waits 0–250 ms; a lower seq means the store restarted, so resync at once.
     const delayMs = frame.seq > last ? Math.floor(this.random() * (GAP_WAIT_MAX_MS + 1)) : 0
     return this.startResync(delayMs)
@@ -113,6 +115,11 @@ export class SeqTracker {
   readBeforeEnd(atSeq: number, status?: Snapshot['status']): boolean {
     if (this.finalSeq === null) return false
     return status === 'open' || (status === undefined && atSeq < this.finalSeq)
+  }
+
+  private hold(frame: Broadcast): void {
+    this.buffer.push(frame)
+    if (this.buffer.length > BUFFER_MAX) this.buffer.shift()
   }
 
   private startResync(delayMs: number): SeqStep {
