@@ -123,7 +123,7 @@ stateDiagram-v2
     joining --> live: snapshot (ended), then QUIZ_ENDED
     joining --> idle: QUIZ_NOT_FOUND
     resyncing --> live: snapshot
-    live --> resyncing: seq gap, pong.seq ≠ lastSeq, seq < lastSeq
+    live --> resyncing: seq gap, pong.seq > lastSeq for 1 s, seq < lastSeq
     live --> joining: NOT_JOINED, QUESTION_NOT_OPEN, INVALID_STATE, ALREADY_ANSWERED
     resyncing --> joining: NOT_JOINED, QUESTION_NOT_OPEN, INVALID_STATE, ALREADY_ANSWERED
     joining --> reconnecting: close that reconnects, or 50 s silence
@@ -176,10 +176,10 @@ After a reconnect, the new `joined` keeps the current screen when it agrees with
 | `finished` | → finished | — | Provisional rank |
 | `leaderboard` | — | — | Rows move (FLIP); counts update; applied by the `seq` rules of protocol §3 |
 | `rank_update` | — | — | Pinned "my row" updates |
-| `snapshot` | → results if `status: "ended"` | `resyncing` → `live`; in `joining` it answers a join after the end and the connection waits for the `QUIZ_ENDED` that follows | Standings replaced without animation; my rank and score from `you` |
+| `snapshot` | → results if `status: "ended"`; ignored with `status: "open"` once `quiz_ended` was applied (protocol §3) | `resyncing` → `live`; in `joining` it answers a join after the end and the connection waits for the `QUIZ_ENDED` that follows | Standings replaced without animation; my rank and score from `you` |
 | `leaderboard_page` | — | — | Rows appended to "Show all players" |
 | `quiz_ended` | → results (from any phase) | — | Podium; my final rank from `you`; the pill and any pending request are dropped |
-| `pong` | — | `live` → `resyncing` if `seq` differs from `lastSeq` | None |
+| `pong` | — | `live` → `resyncing` if `seq` is still above `lastSeq` 1 s later (protocol §3) | None |
 | `INVALID_MESSAGE`, `UNSUPPORTED_TYPE` | — | — | None (logged to the console; a client bug) |
 | `UNSUPPORTED_VERSION` | — | → `blocked` | "A new version is available" |
 | `MESSAGE_TOO_LARGE` | — | → `reconnecting` (close 1009) | Calm pill |
