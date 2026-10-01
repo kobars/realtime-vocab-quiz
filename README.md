@@ -29,6 +29,7 @@ uvx pre-commit install       # run the guard, ruff and ESLint on staged files at
 make check                   # every check a change must pass; stops at the first failing step
 make test                    # the server and client unit tests
 make test-integration        # the tests that need Redis (set REDIS_URL to use your own)
+make audit                   # the dependency audits and the secret scan (needs the network and gitleaks 8.25+)
 make build                   # the API and web images, elsaquiz-api and elsaquiz-web (IMAGE_TAG=dev)
 make dev-api                 # one API node on 127.0.0.1:8001 (memory store) that allows the :5173 origins
 pnpm -C web dev              # client on :5173; /api/* (prefix dropped) and /ws go to 127.0.0.1:8001 or QUIZ_API_URL
@@ -57,3 +58,4 @@ the commit messages and the PR text (run again when the PR text is edited).
 - [docs/DECISIONS.md](docs/DECISIONS.md) — architecture decision records
 - [docs/TRACEABILITY.md](docs/TRACEABILITY.md) — requirements and their evidence
 - [AGENTS.md](AGENTS.md) — rules for contributors and coding agents
+- [SECURITY.md](SECURITY.md) — how to report a vulnerability, and the security scans

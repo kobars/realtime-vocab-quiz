@@ -12,7 +12,7 @@ IMAGE_TAG ?= dev
 DEV_API_PORT ?= 8001
 DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
 
-.PHONY: help build up down dev-api demo demo-stop test test-integration check acceptance load contracts new-quiz ai-log
+.PHONY: help build up down dev-api demo demo-stop test test-integration check acceptance load contracts new-quiz ai-log audit audit-python audit-web audit-secrets
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -49,6 +49,14 @@ check: ## Run every check a change must pass
 	$(call step,vue-tsc,pnpm -C web exec vue-tsc --noEmit)
 	$(call step,vitest,$(VITEST))
 	$(call step,web build,pnpm -C web build)
+audit: audit-python audit-web audit-secrets ## Run the dependency audits and the secret scan (needs the network)
+audit-python: ## Audit the locked Python dependencies with pip-audit
+	$(call step,python audit,set -o pipefail; uv export --project api --locked --all-groups --no-emit-project | uvx pip-audit@2.10.1 -r /dev/stdin --disable-pip --strict)
+audit-web: ## Audit the production web dependencies (high severity and above)
+	$(call step,web audit,pnpm -C web audit --prod --audit-level high)
+audit-secrets: ## Scan the whole git history for secrets with gitleaks 8.25 or later (.gitleaks.toml)
+	$(call step,full history,[ "$$(git rev-parse --is-shallow-repository 2>/dev/null)" = false ] || { echo 'not a full git clone: the secret scan needs the whole history' >&2; false; })
+	$(call step,secret scan,gitleaks git --redact --verbose --no-banner .)
 acceptance: ## Run the acceptance tests
 	@echo "not yet"
 load: ## Run the load scenarios with the bot swarm
