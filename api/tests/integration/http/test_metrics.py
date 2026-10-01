@@ -1,4 +1,4 @@
-# AI-ASSISTED: a /metrics scrape finds each named metric with its type.
+# AI-ASSISTED: a /metrics scrape finds each named metric with its type, and each answer result.
 import httpx
 
 from quiz.config import Settings
@@ -24,4 +24,5 @@ async def test_metrics_scrape_finds_each_name() -> None:
     assert {name: types.get(name) for name in METRICS} == METRICS
     for name in METRICS:
         assert any(line.startswith(name) for line in lines), name
-    assert 'answers_total{result="late"} 0.0' in lines
+    series = {line.rpartition(" ")[0] for line in lines}
+    assert {f'answers_total{{result="{r}"}}' for r in ("correct", "wrong", "late")} <= series

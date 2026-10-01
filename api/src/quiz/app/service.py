@@ -180,6 +180,8 @@ class QuizService:
         if answered.step_back:  # never set on a replay, so each step counts once
             metrics.REDIS_CLOCK_STEP.inc()
         r = answered.result
+        if not answered.replay:
+            metrics.ANSWERS.labels("late" if r.late else "correct" if r.correct else "wrong").inc()
         return m.AnswerResult(
             atSeq=r.at_seq,
             questionIndex=r.question_index,

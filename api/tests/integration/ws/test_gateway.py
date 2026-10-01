@@ -3,12 +3,14 @@ import io
 import itertools
 import json
 import logging
+from collections.abc import Callable
 from functools import partial
 from typing import Any
 
 import pytest
 from starlette.testclient import TestClient, WebSocketDenialResponse, WebSocketTestSession
 
+from quiz.adapters.ws import endpoint
 from quiz.adapters.ws.endpoint import UVICORN_LOGGERS, path_only
 from quiz.config import Settings
 from quiz.domain.session import Question
@@ -78,6 +80,29 @@ def test_the_caps_refuse_with_429_per_ip_and_503_per_process() -> None:
                 assert refused(other, ticket(one)) == 503
         with connect(one, ticket(one)):  # closed sockets free their slots
             pass
+
+
+def test_ws_connections_counts_accepted_sockets_until_each_closes(
+    metric: Callable[..., float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with client_of() as client:
+        before = metric("ws_connections")
+        assert refused(client, None) == 401  # never accepted: never counted
+        with connect(client, ticket(client)), connect(client, ticket(client)):
+            assert metric("ws_connections") == before + 2
+        assert metric("ws_connections") == before  # closed by the client
+        with connect(client, ticket(client)) as ws:
+            ws.send_text('{"v":1,"type":"ping","pad":"' + "x" * 16_384 + '"}')
+            assert until_close(ws)[1] == 1009
+        assert metric("ws_connections") == before  # closed by the server
+
+        async def crash(*_: object) -> int:
+            raise RuntimeError
+
+        monkeypatch.setattr(endpoint, "serve", crash)
+        with pytest.raises(RuntimeError), connect(client, ticket(client)):
+            pass
+        assert metric("ws_connections") == before  # the session failed
 
 
 def test_x_forwarded_for_counts_real_clients_only_behind_the_trusted_proxy() -> None:
