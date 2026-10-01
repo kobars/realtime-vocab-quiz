@@ -1,4 +1,5 @@
-# AI-ASSISTED: stateful test of the session state machine: C1, C2, C3, C6, answer/skip exclusivity.
+# AI-ASSISTED: stateful test of the session state machine: C1, C2, C3, C6, answer/skip exclusivity,
+# accepted answers and the deadline.
 from collections import Counter
 
 from hypothesis import strategies as st
@@ -101,15 +102,25 @@ class SessionMachine(RuleBasedStateMachine):
     def advance(self, dt: int) -> None:
         self.now += dt
 
+    # A jump to around the deadline, so the deadline tick and the post-deadline refusals run too.
+    @precondition(lambda self: len(self.log) > 10)
+    @rule(dt=st.integers(-1, T))
+    def pass_deadline(self, dt: int) -> None:
+        self.now = max(self.now, self.state.deadline_ms + dt)
+
     @rule(user_id=users)
     def join(self, user_id: str) -> None:
-        self.apply(Join(user_id))
+        open_ = self.state.is_open(self.now)
+        out = self.apply(Join(user_id))
+        assert open_ or out is ErrorCode.QUIZ_ENDED
 
     @rule(user_id=users, offset=st.sampled_from([1, 1, 1, 0, 2, -1]))  # mostly a fresh serve
     def next(self, user_id: str, offset: int) -> None:
         index = self.cursor(user_id) + offset
         before = self.state
         out = self.apply(ServeNext(user_id, index))
+        if user_id in before.players and not before.is_open(self.now):
+            assert out is ErrorCode.QUIZ_ENDED
         if isinstance(out, Step) and isinstance(out.reply, QuestionServed):
             assert out.reply.serve_ms == (self.serves[user_id, index] if offset == 0 else self.now)
             if offset == 0:  # a duplicate next writes nothing
@@ -125,13 +136,19 @@ class SessionMachine(RuleBasedStateMachine):
         index = max(0, self.cursor(user_id)) + offset
         choice = (QUESTIONS[index % 3].correct_choice + (0 if correct else 1)) % 4
         before = self.state
+        player = before.players.get(user_id)
         stored = self.results.get((user_id, sid))
         out = self.apply(Answer(user_id, index, choice, sid))
         if stored is not None and stored.question_index == index:  # layer 1: a replay
             assert out == Step(before, (), stored)
         elif stored is not None:  # a submission id reused on another question
             assert out is ErrorCode.INVALID_MESSAGE
-        elif isinstance(out, Step):
+        elif player is None:
+            assert out is ErrorCode.NOT_JOINED
+        elif not before.is_open(self.now):  # after the deadline a new answer writes nothing
+            assert out is ErrorCode.QUIZ_ENDED
+        elif index == player.cursor and player.cursor_open:  # a fresh answer is accepted
+            assert isinstance(out, Step)
             assert isinstance(out.reply, AnswerScored)
             self.results[user_id, sid] = out.reply
             elapsed = max(0, self.now - self.serves[user_id, index])
@@ -139,12 +156,19 @@ class SessionMachine(RuleBasedStateMachine):
             assert out.reply.points == score_answer(
                 correct=correct, elapsed_ms=elapsed, time_limit_ms=T
             )
-        elif (user_id, index) in self.closed and before.is_open(self.now):
+        elif 0 <= index <= player.cursor:
             assert out is ErrorCode.ALREADY_ANSWERED  # layer 2
+        else:
+            assert out is ErrorCode.QUESTION_NOT_OPEN
 
     @rule()
     def tick(self) -> None:
-        self.apply(Tick())
+        before = self.state
+        out = self.apply(Tick())
+        if before.ended_ms is None and not before.is_open(self.now):  # the deadline has passed
+            assert isinstance(out, Step)
+            assert isinstance(out.reply, QuizEnded)
+            assert out.reply.at_ms == before.deadline_ms
 
     @precondition(lambda self: len(self.log) > 40)
     @rule()
