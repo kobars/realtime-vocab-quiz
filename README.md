@@ -30,6 +30,7 @@ make check                   # every check a change must pass; stops at the firs
 make test                    # the server and client unit tests
 make test-integration        # the tests that need Redis (set REDIS_URL to use your own)
 make audit                   # the dependency audits and the secret scan (needs the network and gitleaks 8.25+)
+make acceptance              # the acceptance tests; ACCEPTANCE_STORE=redis runs them on a Redis of their own
 make build                   # the API and web images, elsaquiz-api and elsaquiz-web (IMAGE_TAG=dev)
 make dev-api                 # one API node on 127.0.0.1:8001 (memory store) that allows the :5173 origins
 pnpm -C web dev              # client on :5173; /api/* (prefix dropped) and /ws go to 127.0.0.1:8001 or QUIZ_API_URL

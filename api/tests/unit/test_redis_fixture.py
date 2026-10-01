@@ -1,6 +1,8 @@
 # AI-ASSISTED: the test Redis fixture removes its container when startup fails after `docker run`.
 import importlib.util
+import os
 import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Self
@@ -49,3 +51,30 @@ def test_container_is_removed_when_startup_fails(
         conftest._start_redis(wait_s=0)  # noqa: SLF001 - the fixture's own helper
     assert calls[0] == ("run", "-d")
     assert calls[-1] == ("rm", "-f")
+
+
+def test_redis_acceptance_run_refuses_the_dev_redis() -> None:
+    """The Redis acceptance harness flushes its REDIS_URL, so a dev-port URL must stop the run.
+
+    The host never resolves: without the guard the flush fails to connect, never touching data.
+    """
+    tests = Path(__file__).parents[1]
+    env = os.environ | {"ACCEPTANCE_STORE": "redis", "REDIS_URL": "redis://dev.invalid:6381/0"}
+    run = subprocess.run(  # noqa: S603 - this interpreter, fixed arguments
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            f"{tests}/acceptance/test_join.py::test_ac1_join_by_quiz_id",
+        ],
+        cwd=tests.parent,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert run.returncode == pytest.ExitCode.TESTS_FAILED, run.stdout
+    assert "REDIS_URL points at the dev Redis on port 6381" in run.stdout
