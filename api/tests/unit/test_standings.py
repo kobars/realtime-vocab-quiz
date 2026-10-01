@@ -56,23 +56,29 @@ def test_reached_time_after_clock_step_back_is_clamped() -> None:
 def test_sort_score_layout() -> None:
     assert encode_sort_score(0, 0) == 2**30 * 2**22
     assert encode_sort_score(133, 6_800) == (2**30 - 133) * 2**22 + 6_800
-    assert encode_sort_score(MAX_TOTAL, MAX_REACHED_REL_MS) < 2**53
+    assert encode_sort_score(0, MAX_REACHED_REL_MS) < 2**53
 
 
 def test_sort_score_decodes() -> None:
     assert decode_sort_score(encode_sort_score(1_234, 56_789)) == (1_234, 56_789)
 
 
+def test_largest_total_is_below_2_pow_30() -> None:
+    assert MAX_TOTAL == 2**30 - 1
+    assert encode_sort_score(MAX_TOTAL, 0) == 2**22
+    assert decode_sort_score(2**22) == (MAX_TOTAL, 0)
+
+
 @pytest.mark.parametrize(
     ("total", "reached_rel_ms"),
-    [(-1, 0), (MAX_TOTAL + 1, 0), (0, -1), (0, MAX_REACHED_REL_MS + 1)],
+    [(-1, 0), (2**30, 0), (0, -1), (0, MAX_REACHED_REL_MS + 1)],
 )
 def test_sort_score_rejects_out_of_range(total: int, reached_rel_ms: int) -> None:
     with pytest.raises(ValueError, match="out of range"):
         encode_sort_score(total, reached_rel_ms)
 
 
-@pytest.mark.parametrize("score", [-1, (2**30 + 1) * 2**22])
+@pytest.mark.parametrize("score", [-1, 0, 2**22 - 1, (2**30 + 1) * 2**22])
 def test_decode_rejects_out_of_range(score: int) -> None:
     with pytest.raises(ValueError, match="out of range"):
         decode_sort_score(score)
