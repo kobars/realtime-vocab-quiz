@@ -138,19 +138,19 @@ export const useQuizStore = defineStore('quiz', () => {
         return
       case 'answer_result':
         if (s.pending?.submissionId === message.submissionId) s.pending = null
-        s.lastResult = message
-        s.myScore = message.score
+        // A reply read before the end never changes the final standings either (protocol §3).
+        if (s.ended) return
+        Object.assign(s, { lastResult: message, myScore: message.score, phase: 'feedback' })
         setCursor(message.questionIndex, false)
-        if (!s.ended) s.phase = 'feedback'
         return
       case 'finished':
-        Object.assign(s, { finished: true, myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
-        if (!s.ended) s.phase = 'finished'
+        if (s.ended) return
+        Object.assign(s, { finished: true, phase: 'finished', myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
         return
       case 'leaderboard':
         return standings(message.seq, message.entries, message.playerCount, message.onlineCount, undefined, message.rebase)
       case 'rank_update':
-        Object.assign(s, { myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
+        if (!s.ended) Object.assign(s, { myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
         return
       case 'snapshot':
         // A snapshot read before the end never undoes it (protocol §3).
@@ -175,8 +175,9 @@ export const useQuizStore = defineStore('quiz', () => {
 
   function onJoined(message: Joined): void {
     s.quiz = { ...message, endsAt: deps.now() + message.quizRemainingMs }
-    Object.assign(s, { myScore: message.score, finished: message.finished, connection: 'resyncing' })
+    Object.assign(s, { finished: message.finished, connection: 'resyncing' })
     if (s.ended) return
+    s.myScore = message.score
     // Feedback for the answered, closed cursor stays, even on the last question (UI spec §4.2).
     if (!message.cursorOpen && s.phase === 'feedback' && s.lastResult?.questionIndex === message.cursor) return
     if (message.finished) s.phase = 'finished'

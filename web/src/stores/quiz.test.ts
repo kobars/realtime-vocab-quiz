@@ -160,6 +160,21 @@ it('the end: results with my final rank; a late open snapshot and finished never
   expect(store.page).toEqual({ offset: 1, atSeq: 4, final: true, rows: [me] })
 })
 
+it('the end keeps my final rank, score and player count against late replies, and sends no answer retry', async () => {
+  const { store, socket } = await playing()
+  socket.receive(question(0))
+  store.answer(1)
+  socket.receive(error('UNAVAILABLE', 'answer'))
+  socket.receive({ type: 'quiz_ended', seq: 4, playerCount: 2, entries: [rival, me], you: { rank: 2, score: 0 } })
+  await wait(10_000)
+  expect(socket.sent.filter((message) => message.type === 'answer')).toHaveLength(1)
+  socket.receive({ type: 'finished', atSeq: 3, score: 150, rank: 1, playerCount: 3 })
+  socket.receive({ type: 'rank_update', atSeq: 3, rank: 3, score: 10, playerCount: 4 })
+  socket.receive(result(0, 's-1', 140))
+  socket.receive(joined({ score: 140 }))
+  expect([store.phase, store.myRank, store.myScore, store.playerCount]).toEqual(['results', 2, 0, 2])
+})
+
 it('a join after the end: the final snapshot, then QUIZ_ENDED, shows the results', async () => {
   const { store, socket } = await joinQuiz()
   socket.receive(snapshot(9, 'ended'))
