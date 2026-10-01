@@ -1,28 +1,43 @@
-# AI-ASSISTED: the joined sockets of this node per quiz, and closing a replaced session.
+# AI-ASSISTED: the joined sockets of this node per quiz, session replacement and the leave grace.
 """Which socket of this node serves which quiz: a broadcast reaches every local socket of the
-quiz, and a connection that a newer join replaced is closed here when it lives on this node."""
+quiz, and a connection that another join replaced is closed here when it lives on this node.
+
+A joined socket that drops keeps its presence for the grace period, then ``leave`` runs. A join
+of the same player on this node cancels the timer; ``leave`` compares the connection id, so a
+timer that still fires never removes a newer connection (docs/spec/redis.md §3)."""
+
+import asyncio
+import logging
 
 from quiz.adapters.ws.sender import Sender
 from quiz.app.service import CLOSE_REPLACED, Connection
 from quiz.contracts import messages as m
+from quiz.domain.errors import DomainError
+from quiz.ports.store import Store
+
+log = logging.getLogger(__name__)
 
 
 class Registry:
-    def __init__(self) -> None:
+    def __init__(self, store: Store, grace_ms: int) -> None:
+        self._store, self._grace_s = store, grace_ms / 1000
         self._senders: dict[str, Sender] = {}  # conn_id → its sender
         self._quizzes: dict[str, dict[str, Sender]] = {}  # quiz_id → conn_id → sender
+        self._grace: dict[tuple[str, str], asyncio.Task[None]] = {}  # (quiz_id, user_id) → timer
 
     def bind(self, conn: Connection, sender: Sender) -> None:
-        """Record a socket under the quiz it joined; a repeat join changes nothing."""
-        if conn.quiz_id is not None:
-            self._senders[conn.conn_id] = sender
-            self._quizzes.setdefault(conn.quiz_id, {})[conn.conn_id] = sender
+        """Record a joined socket; a pending leave of the same player is cancelled."""
+        if conn.quiz_id is None:
+            return
+        self._senders[conn.conn_id] = sender
+        self._quizzes.setdefault(conn.quiz_id, {})[conn.conn_id] = sender
+        if (timer := self._grace.pop((conn.quiz_id, conn.user_id), None)) is not None:
+            timer.cancel()
 
     def senders(self, quiz_id: str) -> list[Sender]:
         return list(self._quizzes.get(quiz_id, {}).values())
 
     def broadcast(self, quiz_id: str, data: bytes, *, leaderboard: bool) -> None:
-        """Queue one encoded frame on every local socket of the quiz."""
         for sender in self.senders(quiz_id):
             sender.send_frame(data, leaderboard=leaderboard)
 
@@ -30,17 +45,31 @@ class Registry:
         """Close a socket of this node that a newer join took over: the error, then 4001."""
         if (sender := self._senders.get(conn_id)) is not None:
             text = "this quiz was opened on another connection"
-            error = m.ProtocolError(
-                code=m.ErrorCode.SESSION_REPLACED, message=text, requestType=None
+            sender.send(
+                m.ProtocolError(code=m.ErrorCode.SESSION_REPLACED, message=text, requestType=None)
             )
-            sender.send(error)
             sender.close(CLOSE_REPLACED)
 
     def drop(self, conn: Connection) -> None:
-        """Forget a closed socket."""
+        """Forget a closed socket; its player leaves after the grace unless they join again."""
         if self._senders.pop(conn.conn_id, None) is None or conn.quiz_id is None:
             return
         quiz = self._quizzes[conn.quiz_id]
         del quiz[conn.conn_id]
         if not quiz:
             del self._quizzes[conn.quiz_id]
+        if conn.read_only:
+            return  # joined after the end: no presence to remove
+        key = (conn.quiz_id, conn.user_id)
+        if (timer := self._grace.pop(key, None)) is not None:
+            timer.cancel()
+        self._grace[key] = asyncio.create_task(self._leave_later(key, conn.conn_id))
+
+    async def _leave_later(self, key: tuple[str, str], conn_id: str) -> None:
+        await asyncio.sleep(self._grace_s)
+        if self._grace.get(key) is asyncio.current_task():
+            del self._grace[key]
+        try:
+            await self._store.leave(*key, conn_id)
+        except ConnectionError, TimeoutError, DomainError:  # the presence sweep drops it later
+            log.warning("the leave of a closed connection failed", exc_info=True)
