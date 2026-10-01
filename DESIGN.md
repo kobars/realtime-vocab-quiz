@@ -306,7 +306,7 @@ to fix. Each now has a spec section and a test (`docs/ai-log/design-phase.md` li
 |---|---|---|
 | A reconnect created a new player: tickets came from the display name and were single use | A session token per tab gets a fresh ticket for the same user before every connect (protocol §8) | `api/tests/unit/adapters/test_mock_auth.py`, `web/src/protocol/identity.test.ts` |
 | A retried `next` could skip a question or restart its 20 s timer | `next` and `answer` carry the question index; the serve time is stored once (domain §5.1) | `api/tests/unit/test_session.py`, `api/tests/integration/test_serve_script.py` |
-| Only the tick checked the deadline, and ticks stop on a node without sockets | Every write script checks the deadline on Redis `TIME` (Redis §3) | `api/tests/integration/test_score_script.py`, `api/tests/contract/test_store_contract.py` |
+| Only the tick checked the deadline, and ticks stop on a node without sockets | `join`, `serve_question`, `score_answer` and the tick script `publish_leaderboard` check the deadline on Redis `TIME` and refuse late writes; `leave` is still accepted after it (Redis §3) | `api/tests/integration/test_score_script.py`, `api/tests/integration/test_join_script.py`, `api/tests/contract/test_store_contract.py` (on the memory and the Redis store) |
 | The packed sorted-set score overflows after about 69.9 min; 0-point answers moved the tie-break | The window is at most 60 min; `reachedRelMs` moves only on points (domain §6) | `api/tests/integration/test_create_quiz.py`, `api/tests/unit/test_standings.py` |
 | Each join broadcast to everyone: about 12.5 million sends for 5,000 joins | A join only sets `dirty`; the next coalesced frame carries the count (ADR-004) | `api/tests/integration/test_join_script.py` |
 
@@ -317,9 +317,9 @@ the confirmed defects in a follow-up PR:
 | Spec PR | Confirmed defects (examples) | Fix PR and test |
 |---|---|---|
 | #3 domain | The `next` table had no order and two rows overlapped at the last question | #34; `api/tests/unit/test_session.py` |
-| #5 protocol | A newer frame conflated ahead of a queued `pong` looked like a store restart; `pong.seq` came from a node cache; a late `snapshot` could undo `quiz_ended`; a failed `join` bound the socket | #26, #30; `scripts/tests/test_protocol_spec.py` |
+| #5 protocol | A newer frame conflated ahead of a queued `pong` looked like a store restart; `pong.seq` came from a node cache; a late `snapshot` could undo `quiz_ended`; a failed `join` bound the socket; the unicast `atSeq` had no client rule; the upgrade refusals had no close code | #26, #30; `scripts/tests/test_protocol_spec.py` (the `atSeq` rule, the upgrade refusals seen as close 1006), `api/tests/unit/app/test_service.py` (`pong.seq` from the counter, the failed `join`), `web/src/protocol/seq.test.ts` (the late `snapshot`); the conflation barrier is a spec rule with no test until the send buffer is built |
 | #7 UI | The connection chart had no edges into `blocked` from `joining` or `resyncing`, and none out of `joining` after the end | #18; `scripts/tests/test_ui_spec.py` |
-| #9 Redis | `create_quiz` accepted `T = 0` (the points formula divides by `T`); presence was never cleared after a node crash; a finished player could be served again | #16; `api/tests/integration/test_create_quiz.py`, `api/tests/integration/test_serve_script.py` |
+| #9 Redis | `create_quiz` accepted `T = 0` (the points formula divides by `T`); a finished player could be served again; presence was never cleared after a node crash | #16; `api/tests/integration/test_create_quiz.py` (`T = 0`), `api/tests/integration/test_serve_script.py` (the finished player); the presence renewal is specified (Redis §3) with no test yet, because its script is not written |
 
 Claude Code also caught some of its own mistakes while drafting. In the Redis spec it first
 planned to end the quiz inside the write script that hit the deadline, which would have made
@@ -330,9 +330,11 @@ writing the script table (PR #9).
 
 - **Remove the snapshot cache** (Codex, design review). The concern was real: answers do not
   move `seq`, so a cached per-player snapshot could be stale. Removing the cache was more than
-  needed. Standings at one `seq` never change, so I kept the cache for the shared standings
-  only and read the player's own row fresh (`api/tests/unit/app/test_service.py`,
-  `test_snapshot_never_mixes_stale_standings_with_a_fresh_own_row`).
+  needed. I kept the cache for the shared standings only, per `seq`, status and player count,
+  and read the player's own row fresh. The shared list is the standings as of the cached read:
+  `score_answer` does not move `seq`, so the list can lag answers scored since then until the
+  next tick's frame corrects it; only the own row is always current
+  (`api/tests/unit/app/test_service.py`, `test_snapshot_caches_the_shared_part_per_seq`).
 - **Finish a player only from the last question** (the review of PR #3). The review read the
   session core as strict, but a PR merged after the review made it finish from any cursor, with
   tests. Following the review would have changed working, tested behavior, so the spec follows
@@ -346,7 +348,8 @@ writing the script table (PR #9).
 reviewers could not just agree with me. (2) Two reviewers from two vendors, run independently;
 agreement between them raised a finding's priority. (3) Every claim checked against the draft
 before it was adopted; one Codex claim (the store tests must run on both stores) was already in
-the draft. (4) Every fix stated in a spec section that names the test that proves it. (5) The
+the draft. (4) Every fix stated in a spec section, with the test that pins it listed in
+`docs/ai-log/design-phase.md` (and in the spec's own test list, where it has one). (5) The
 tests run: `make test-integration` and the unit suites in `make check` pass on `main`; the exact
 commands and results are in each AI-LOG entry.
 
@@ -357,7 +360,7 @@ commands and results are in each AI-LOG entry.
 
 <!-- AI-ASSISTED-END -->
 
-## 16. GenAI roadmap (V-11)
+## 16. GenAI roadmap (X-8)
 
 <!-- AI-ASSISTED-BEGIN: drafted with Claude Code from the ports and the data the store already keeps, checked by hand against the architecture. -->
 
@@ -380,12 +383,14 @@ suite before an editor sees it: the schema and the bank's existing load checks (
 choices, one answer, valid positions); an independent model that answers each item without the
 key and must agree with it; a duplicate and near-duplicate check against the bank; a safety
 filter; and a fixed golden set of reviewed items that every prompt or model change is scored
-against in CI. Editors approve items before they reach a quiz. After release, the store already
-keeps what is needed to judge an item: each answer's choice, points and elapsed time per
-(player, question). Items whose correct rate is near 0 or 100 %, or whose wrong answers all land
-on one distractor, go back to review. The metrics: the share of generated items that pass the
-evals, the share editors reject, and the share later pulled after release; the target for
-wrong keys in released items is zero.
+against in CI. Editors approve items before they reach a quiz. After release, the store holds
+each answer's choice, points and elapsed time per (player, question), but every key of a quiz
+expires 24 h after its last write (Redis §2) and nothing exports them yet. So the pipeline adds
+an export step: a job copies the answer rows of each quiz into durable analytics storage before
+that TTL, and the item statistics are computed there. Items whose correct rate is near 0 or 100
+%, or whose wrong answers all land on one distractor, go back to review. The metrics: the share
+of generated items that pass the evals, the share editors reject, and the share later pulled
+after release; the target for wrong keys in released items is zero.
 
 **Adaptive difficulty.** The model estimates each player's level from past answers (an item
 response model or an Elo-style rating per item and player; a language model is not needed for
@@ -399,15 +404,19 @@ difficulty in an A/B test.
 
 **Pronunciation feedback.** A new question type: the client records the word, uploads it over
 HTTP to a speech-scoring service, and gets back a score per phoneme. The service returns a
-signed result, and the player sends that result to the quiz service as the answer; the quiz
-service checks the signature and scores it with the same `score_answer` script, so the audio
-never travels over the WebSocket and the store's rules do not change. The time limit must allow
-for recording and scoring, so these questions get a longer `T`. The risks: lower scores for some
-accents, which is unfair and also moves players on the leaderboard; background noise; a slow service
-that makes answers late; and voice data, which needs consent, a short retention period and no
-use for training without permission. The metrics: correlation with human raters on a labeled
-set, the score gap between accent groups on that set, the rate of answers scored late because
-of scoring latency, and p95 scoring latency against its budget.
+signed result that binds the user, the quiz, the question index, the serve time and an expiry,
+so it cannot be replayed or reused for another player or question. The player sends that result
+to the quiz service as the answer, and the quiz service checks the signature, so the audio never
+travels over the WebSocket. `score_answer` takes a choice index 0…3 and compares it with the
+answer key, so it cannot score a phoneme result as it is: this question type needs a new scoring
+input or script, with the same rules (one answer per (player, question), and the deadline and
+the time limit on Redis `TIME`). The time limit must allow for recording and scoring, so these
+questions get a longer `T`. The risks: lower scores for some accents, which is unfair and also
+moves players on the leaderboard; background noise; a slow service that makes answers late; and
+voice data, which needs consent, a short retention period and no use for training without
+permission. The metrics: correlation with human raters on a labeled set, the score gap between
+accent groups on that set, the rate of answers scored late because of scoring latency, and p95
+scoring latency against its budget.
 
 **Cost and change control.** Prompts and model versions are pinned and versioned with the eval
 results, so a model upgrade is a reviewed change with numbers, like an ADR. Generation runs in
