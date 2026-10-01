@@ -53,6 +53,12 @@ async def test_invalid_quiz_shape_is_rejected(
     assert await refused(create) == ErrorCode.INVALID_MESSAGE
 
 
+async def test_read_seq_is_the_counter_or_none(store: Store, quiz_id: str) -> None:
+    assert await store.read_seq(quiz_id) is None
+    await started(store, quiz_id)
+    assert await store.read_seq(quiz_id) == 0
+
+
 async def test_create_twice_is_invalid_state(store: Store, quiz_id: str) -> None:
     await started(store, quiz_id)
     again = store.create_quiz(quiz_id, QUESTIONS, window_ms=1000, time_limit_ms=LIMIT_MS)

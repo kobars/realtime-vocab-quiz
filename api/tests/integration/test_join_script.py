@@ -101,7 +101,7 @@ async def test_reconnect_keeps_player_state_and_replaces_old_connection(
     score = await redis_client.zscore(keys.board, "a")
     await asyncio.sleep(0.01)
     joined = await redis_store.join(quiz_id, "a", "Other name", "c2")
-    assert joined.replaced_conn_id == "c1"
+    assert (joined.replaced_conn_id, joined.display_name) == ("c1", "Ann")
     assert await redis_client.hget(keys.names, "a") == "Ann"
     assert await redis_client.zscore(keys.board, "a") == score
     assert json.loads(str(await redis_client.hget(keys.present, "a")))[0] == "c2"

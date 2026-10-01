@@ -1,13 +1,17 @@
 # AI-ASSISTED: the Redis store: each port method is one Lua script over the keys of quiz_keys().
 """The store port on Redis. Scripts read the Redis clock; Python passes no time or points.
 
-The client must decode responses (``decode_responses=True``).
+The client must decode responses (``decode_responses=True``). A redis-py connection or
+timeout error leaves as the built-in ``ConnectionError`` or ``TimeoutError``, so callers
+need no redis import to tell an unreachable store from a fault.
 """
 
 import json
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from typing import Literal
 
+from redis import exceptions as redis_errors
 from redis.asyncio import Redis
 
 from quiz.adapters.redis.keys import quiz_keys
@@ -27,8 +31,20 @@ def _ok(name: str, reply: Reply) -> Reply:
     return reply
 
 
+@contextmanager
+def _reachable() -> Iterator[None]:
+    """Re-raise redis-py's connection and timeout errors as the built-in ones."""
+    try:
+        yield
+    except redis_errors.TimeoutError as error:
+        raise TimeoutError(str(error)) from error
+    except redis_errors.ConnectionError as error:
+        raise ConnectionError(str(error)) from error
+
+
 class RedisStore:
     def __init__(self, client: Redis, *, prefix: str = "") -> None:
+        self._client = client
         self._scripts = Scripts(client)
         self._prefix = prefix
 
@@ -38,7 +54,9 @@ class RedisStore:
 
     async def _run(self, name: str, quiz_id: str, *args: str | int) -> Reply:
         keys = quiz_keys(quiz_id, self._prefix)
-        return _ok(name, await self._scripts.call(name, keys, *args))
+        with _reachable():
+            reply = await self._scripts.call(name, keys, *args)
+        return _ok(name, reply)
 
     async def create_quiz(
         self, quiz_id: str, questions: tuple[Question, ...], *, window_ms: int, time_limit_ms: int
@@ -54,7 +72,7 @@ class RedisStore:
         seq, cursor, cursor_open, finished, total, count, limit, left = (
             int(v or 0) for v in reply[1:9]
         )
-        replaced = reply[9] if len(reply) > 9 else None  # noqa: PLR2004 - the optional last field
+        name, replaced = reply[9], reply[10] if len(reply) > 10 else None  # noqa: PLR2004
         return Joined(
             seq,
             cursor,
@@ -64,6 +82,7 @@ class RedisStore:
             count,
             limit,
             left,
+            str(name),
             None if replaced is None else str(replaced),
         )
 
@@ -88,6 +107,11 @@ class RedisStore:
 
     async def standings_page(self, quiz_id: str, offset: int, limit: int) -> port.Page:
         raise NotImplementedError
+
+    async def read_seq(self, quiz_id: str) -> int | None:
+        with _reachable():
+            seq = await self._client.get(quiz_keys(quiz_id, self._prefix).seq)
+        return None if seq is None else int(seq)
 
     async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> port.Ranks:
         raise NotImplementedError

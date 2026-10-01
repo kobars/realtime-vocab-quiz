@@ -36,6 +36,7 @@ REDIS_READY = frozenset(
         "test_unknown_quiz_is_not_found",
         "test_invalid_quiz_shape_is_rejected",
         "test_create_twice_is_invalid_state",
+        "test_read_seq_is_the_counter_or_none",
     }
 )
 

@@ -81,7 +81,7 @@ class MemoryStore:
             now = self._clock()
             step = s.transition(quiz.state, s.Join(user_id), now)
             player = step.state.players[user_id]
-            quiz.names.setdefault(user_id, display_name)
+            name = quiz.names.setdefault(user_id, display_name)
             replaced = quiz.present.get(user_id)
             quiz.present[user_id] = conn_id
             quiz.state = state = replace(step.state, dirty=True)  # onlineCount may change
@@ -94,6 +94,7 @@ class MemoryStore:
                 len(state.questions),
                 state.time_limit_ms,
                 max(0, state.deadline_ms - now),
+                name,
                 replaced if replaced != conn_id else None,
             )
 
@@ -150,6 +151,10 @@ class MemoryStore:
                 raise TypeError(result)
             quiz.state = step.state
             return Answered(result, step_back)
+
+    async def read_seq(self, quiz_id: str) -> int | None:
+        quiz = self._quizzes.get(quiz_id)
+        return None if quiz is None else quiz.state.seq
 
     async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> port.Ranks:
         quiz = self._quiz(quiz_id)
