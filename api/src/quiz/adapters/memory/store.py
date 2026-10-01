@@ -3,8 +3,8 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
@@ -32,12 +32,6 @@ class _Quiz:
     tick_until_ms: int = 0  # the tick token, limits.tick_ms long
     end_seq: int | None = None  # the seq of quiz_ended, once announced
     scored: set[str] = field(default_factory=set)  # who scored since the last broadcast
-    feeds: set[asyncio.Queue[str]] = field(default_factory=set)  # one per subscriber
-
-    def publish(self, frame: m.Broadcast, ranks: list[list[str | int]]) -> None:
-        message = f'{{"frame":{encode_broadcast(frame).decode()},"ranks":{json.dumps(ranks)}}}'
-        for feed in self.feeds:
-            feed.put_nowait(message)
 
     def fence(self, user_id: str, conn_id: str) -> None:
         if (held := self.present.get(user_id)) is None:
@@ -53,7 +47,7 @@ class _Quiz:
         ]
 
 
-async def _drain(feed: asyncio.Queue[str]) -> AsyncIterator[str]:
+async def _drain(feed: asyncio.Queue[str]) -> AsyncGenerator[str]:
     while True:
         yield await feed.get()
 
@@ -63,11 +57,21 @@ class MemoryStore:
         self._clock = clock
         self.limits = limits or Limits()
         self._quizzes: dict[str, _Quiz] = {}
+        self._feeds: dict[str, set[asyncio.Queue[str]]] = {}  # per quiz id, one per subscriber
 
     def _quiz(self, quiz_id: str) -> _Quiz:
         if (quiz := self._quizzes.get(quiz_id)) is None:
             raise DomainError(ErrorCode.QUIZ_NOT_FOUND, f"no quiz {quiz_id}")
         return quiz
+
+    def _shown(self, rows: list[Row]) -> list[Row]:
+        """A frame's entries: every row up to ``full_list_max`` players, else the top N."""
+        return rows if len(rows) <= self.limits.full_list_max else rows[: self.limits.top_n]
+
+    def _publish(self, quiz_id: str, frame: m.Broadcast, ranks: list[list[str | int]]) -> None:
+        message = f'{{"frame":{encode_broadcast(frame).decode()},"ranks":{json.dumps(ranks)}}}'
+        for feed in self._feeds.get(quiz_id, ()):
+            feed.put_nowait(message)
 
     async def create_quiz(
         self, quiz_id: str, questions: tuple[s.Question, ...], *, window_ms: int, time_limit_ms: int
@@ -199,7 +203,7 @@ class MemoryStore:
             status: Literal["open", "ended"] = (
                 "open" if quiz.state.is_open(self._clock()) else "ended"
             )
-            shown = rows if len(rows) <= self.limits.full_list_max else rows[: self.limits.top_n]
+            shown = self._shown(rows)
             online = len(quiz.present)
             return port.Snapshot(quiz.state.seq, status, len(rows), online, tuple(shown), you)
 
@@ -218,12 +222,12 @@ class MemoryStore:
                 return port.Publish("clean")
             quiz.state = s.transition(quiz.state, s.Tick(), now).state
             quiz.tick_until_ms = now + tick_ms
-            rows, top_n = quiz.rows(), self.limits.top_n
-            big = len(rows) > self.limits.full_list_max
+            rows = quiz.rows()
+            shown = self._shown(rows)
             ranks: list[list[str | int]] = [
                 [row.user_id, row.rank, row.score]
-                for row in rows[top_n:]
-                if big and row.user_id in quiz.scored
+                for row in rows[len(shown) :]
+                if row.user_id in quiz.scored
             ]
             quiz.scored.clear()
             frame = m.Leaderboard(
@@ -231,9 +235,9 @@ class MemoryStore:
                 rebase=False,
                 playerCount=len(rows),
                 onlineCount=len(quiz.present),
-                entries=[row.entry() for row in (rows[:top_n] if big else rows)],
+                entries=[row.entry() for row in shown],
             )
-            quiz.publish(frame, ranks)
+            self._publish(quiz_id, frame, ranks)
             return port.Publish("published", quiz.state.seq)
 
     async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> port.End:
@@ -253,7 +257,7 @@ class MemoryStore:
             rows = quiz.rows()
             top = [row.entry() for row in rows[: self.limits.top_n]]
             ended = m.QuizEnded(seq=quiz.end_seq, playerCount=len(rows), entries=top, you=None)
-            quiz.publish(ended, [])
+            self._publish(quiz_id, ended, [])
             return port.End("ended", quiz.end_seq)
 
     async def end_by_host(self, quiz_id: str) -> int:
@@ -264,12 +268,15 @@ class MemoryStore:
 
     @asynccontextmanager
     async def subscribe(self, quiz_id: str) -> AsyncIterator[AsyncIterator[str]]:
-        quiz, feed = self._quiz(quiz_id), asyncio.Queue[str]()
-        quiz.feeds.add(feed)
+        feeds, feed = self._feeds.setdefault(quiz_id, set()), asyncio.Queue[str]()
+        feeds.add(feed)
         try:
-            yield _drain(feed)
+            async with aclosing(_drain(feed)) as messages:
+                yield messages
         finally:
-            quiz.feeds.discard(feed)
+            feeds.discard(feed)
+            if not feeds:
+                del self._feeds[quiz_id]
 
     async def renew_presence(
         self, quiz_id: str, stale_ms: int, pairs: Sequence[tuple[str, str]]

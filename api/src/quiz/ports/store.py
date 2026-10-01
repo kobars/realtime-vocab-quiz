@@ -199,7 +199,9 @@ class Feed(Protocol):
     def subscribe(self, quiz_id: str) -> AbstractAsyncContextManager[AsyncIterator[str]]:
         """The quiz's broadcasts as published, ``{"frame": …, "ranks": [[uid, rank, score], …]}``.
 
-        Subscribed once entered: every later broadcast arrives, in ``seq`` order.
+        Subscribed once entered: every later broadcast arrives, in ``seq`` order. The quiz need
+        not exist yet: its broadcasts arrive once it is created. Read the iterator in the task
+        that entered; leaving the context closes it, so a later read ends the iteration.
         """
         ...
 

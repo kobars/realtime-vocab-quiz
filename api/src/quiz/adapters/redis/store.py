@@ -7,8 +7,8 @@ need no redis import to tell an unreachable store from a fault.
 """
 
 import json
-from collections.abc import AsyncIterator, Iterator, Sequence
-from contextlib import asynccontextmanager, contextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Sequence
+from contextlib import aclosing, asynccontextmanager, contextmanager
 from dataclasses import replace
 from typing import Literal, cast
 
@@ -26,6 +26,7 @@ from quiz.ports import store as port
 from quiz.ports.store import Created, Joined, Limits
 
 WAITAOF_TIMEOUT_MS = 2000  # the host end waits this long for the mark's fsync (redis.md §3.1)
+SUBSCRIBE_TIMEOUT_S = 5  # subscribe() waits this long for Redis to confirm the subscription
 
 
 def _ok(name: str, reply: Reply) -> Reply:
@@ -49,7 +50,7 @@ def _reachable() -> Iterator[None]:
         raise ConnectionError(str(error)) from error
 
 
-async def _messages(pubsub: PubSub) -> AsyncIterator[str]:
+async def _messages(pubsub: PubSub) -> AsyncGenerator[str]:
     with _reachable():
         async for message in pubsub.listen():
             if message["type"] == "message":
@@ -189,12 +190,13 @@ class RedisStore:
         """The quiz's ``events`` channel, entered once Redis confirmed the subscription."""
         pubsub = self._client.pubsub()
         try:
-            with _reachable():
-                await pubsub.subscribe(quiz_keys(quiz_id, self._prefix).events)
-                if await pubsub.get_message(timeout=5) is None:
-                    msg = "Redis did not confirm the subscription"
-                    raise ConnectionError(msg)
-            yield _messages(pubsub)
+            async with aclosing(_messages(pubsub)) as messages:
+                with _reachable():
+                    await pubsub.subscribe(quiz_keys(quiz_id, self._prefix).events)
+                    if await pubsub.get_message(timeout=SUBSCRIBE_TIMEOUT_S) is None:
+                        msg = "Redis did not confirm the subscription"
+                        raise ConnectionError(msg)
+                yield messages
         finally:
             await pubsub.aclose()  # type: ignore[no-untyped-call]
 
