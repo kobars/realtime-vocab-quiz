@@ -164,7 +164,7 @@ A browser cannot read the HTTP status of a refused upgrade (401, 403, 429 or 503
 | 1013 | server | Overload or slow client | Yes, after 5 s plus the backoff |
 | 4001 | server | Session replaced by another tab | No; show "opened elsewhere" |
 
-Backoff is full jitter: `floor(random() × min(10,000, 250 × 2^attempt))` ms, reset after 10 s joined, with a 5 s open timeout. There is no graceful drain: when a node stops, its sockets drop and each client reconnects through nginx (to the other node) and resyncs.
+Backoff is full jitter: `floor(random() × min(10,000, 250 × 2^attempt))` ms, reset after 10 s joined, with a 5 s open timeout. A session or ticket request (§8) that gets no reply within 5 s fails and counts as a failed open. After 10 connects in a row without a `joined` the client stops and shows "Still can't connect" (UI §3.7). There is no graceful drain: when a node stops, its sockets drop and each client reconnects through nginx (to the other node) and resyncs.
 
 ## 8. Authentication
 
