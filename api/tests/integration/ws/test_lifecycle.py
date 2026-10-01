@@ -118,13 +118,16 @@ def test_quiz_ended_carries_the_top_50_and_the_own_rank_outside_them() -> None:
 
 
 def test_the_host_end_reaches_every_socket_and_a_second_call_changes_nothing() -> None:
-    with open_quiz() as quiz, quiz.connect("Ann") as ann:
+    with open_quiz() as quiz, quiz.connect("Ann") as ann, quiz.connect("Bob") as bob:
         request(ann, "join", quizId=QUIZ, displayName="Ann")
+        quiz.now[0] += 1  # at 0 points Ann ranks above Bob, who reached 0 later
+        request(bob, "join", quizId=QUIZ, displayName="Bob")
         first, again = (quiz.end_by_host() for _ in range(2))
         assert first == again == {"quizId": QUIZ, "status": "ended", "endSeq": first["endSeq"]}
-        final = ended(ann)
-        assert (final["seq"], final["you"]) == (first["endSeq"], {"rank": 1, "score": 0})
-        assert request(ann, "next", questionIndex=0)["code"] == "QUIZ_ENDED"
+        for ws, rank in ((ann, 1), (bob, 2)):
+            final = ended(ws)
+            assert (final["seq"], final["you"]) == (first["endSeq"], {"rank": rank, "score": 0})
+            assert request(ws, "next", questionIndex=0)["code"] == "QUIZ_ENDED"
 
 
 def test_a_late_joiner_plays_until_the_deadline_and_a_join_after_it_is_read_only() -> None:
