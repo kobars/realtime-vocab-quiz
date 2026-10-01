@@ -1,4 +1,4 @@
-// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement), the connection pill and the error messages, driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement), the phone tabs, the connection pill and the error messages, driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -46,10 +46,15 @@ async function playing(...first: Partial<ServerMessage>[]) {
 const board = (myRank: number, playerCount = 3): Partial<ServerMessage> => ({ type: 'leaderboard', seq: 4, rebase: false, playerCount, onlineCount: playerCount,
   entries: [{ rank: myRank, userId: 'u1', displayName: 'Ana', score: 0 }] })
 
-function reducedMotion(): void {
+function media(matches: (query: string) => boolean): void {
   vi.spyOn(window, 'matchMedia').mockImplementation((query: string) =>
-    ({ matches: query.includes('reduce'), media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }) as unknown as MediaQueryList)
+    ({ matches: matches(query), media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }) as unknown as MediaQueryList)
 }
+const reducedMotion = () => media((query) => query.includes('reduce'))
+// Below 1024 px no `min-width` query matches.
+const phone = () => media(() => false)
+const tab = (w: VueWrapper, name: string) => w.get(`[data-tab="${name}"]`)
+const shown = (w: VueWrapper, panel: string) => w.get(`#panel-${panel}`).isVisible()
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -378,4 +383,63 @@ it.each([
   await receive(event as ClientEvent)
   expect(w.text()).not.toContain('Waiting for the connection…')
   expect(choice(w, 0).attributes('aria-disabled')).toBe('true')
+})
+
+it('phones: Quiz and Leaderboard tabs; the hidden question keeps its countdown and the header keeps the score and rank', async () => {
+  phone()
+  const w = await playing()
+  await receive(board(2))
+  expect(w.get('[role="tablist"]').findAll('[role="tab"]').map((t) => t.text())).toEqual(['Quiz', 'Leaderboard'])
+  expect([tab(w, 'quiz').attributes('aria-selected'), tab(w, 'leaderboard').attributes('aria-selected')]).toEqual(['true', 'false'])
+  expect([shown(w, 'quiz'), shown(w, 'leaderboard')]).toEqual([true, false])
+  expect(w.get('#panel-leaderboard').attributes()).toMatchObject({ role: 'tabpanel', 'aria-labelledby': 'tab-leaderboard' })
+  await tab(w, 'leaderboard').trigger('click')
+  expect([shown(w, 'quiz'), shown(w, 'leaderboard')]).toEqual([false, true])
+  expect(w.get('header').text()).toContain('#2 of 3')
+  clock = 7_500
+  await frames(50)
+  await tab(w, 'quiz').trigger('click')
+  expect(w.get('[data-test="ring"]').attributes('aria-label')).toBe('13 seconds left')
+  expect(port.next).not.toHaveBeenCalled()
+})
+
+it('phones: arrow keys, Home and End move the selected tab and the focus; only the selected tab is in the tab order', async () => {
+  phone()
+  const w = await playing()
+  const key = async (name: string, k: string) => {
+    await tab(w, name).trigger('keydown', { key: k })
+    await nextTick()
+  }
+  expect([tab(w, 'quiz').attributes('tabindex'), tab(w, 'leaderboard').attributes('tabindex')]).toEqual(['0', '-1'])
+  await key('quiz', 'ArrowRight')
+  expect(document.activeElement).toBe(tab(w, 'leaderboard').element)
+  expect([shown(w, 'quiz'), shown(w, 'leaderboard')]).toEqual([false, true])
+  expect([tab(w, 'quiz').attributes('tabindex'), tab(w, 'leaderboard').attributes('tabindex')]).toEqual(['-1', '0'])
+  await key('leaderboard', 'ArrowRight')
+  expect(document.activeElement).toBe(tab(w, 'quiz').element)
+  await key('quiz', 'End')
+  expect(document.activeElement).toBe(tab(w, 'leaderboard').element)
+  await key('leaderboard', 'Home')
+  expect(document.activeElement).toBe(tab(w, 'quiz').element)
+  await key('quiz', 'ArrowLeft')
+  expect(document.activeElement).toBe(tab(w, 'leaderboard').element)
+})
+
+it('phones: keys 1–4 answer nothing while the Leaderboard tab hides the question', async () => {
+  phone()
+  const w = await playing()
+  await tab(w, 'leaderboard').trigger('click')
+  press('2')
+  await nextTick()
+  expect(port.answer).not.toHaveBeenCalled()
+  await tab(w, 'quiz').trigger('click')
+  press('2')
+  expect(port.answer).toHaveBeenCalledOnce()
+})
+
+it('desktops: no tabs, the quiz and the leaderboard side by side', async () => {
+  const w = await playing()
+  expect(w.find('[role="tablist"]').exists()).toBe(false)
+  expect([shown(w, 'quiz'), shown(w, 'leaderboard')]).toEqual([true, true])
+  expect(w.get('#panel-quiz').attributes('role')).toBeUndefined()
 })

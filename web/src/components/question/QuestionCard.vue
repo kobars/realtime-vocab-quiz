@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the question screen: the countdown, the prompt and four choices (click or keys 1–4), locked while an answer is pending or the socket is down, and Skip, locked while the socket is down (UI spec §3.3, §4.1, §6.1, §6.2). -->
+<!-- AI-ASSISTED: the question screen: the countdown, the prompt and four choices (click or keys 1–4 while shown), locked while an answer is pending or the socket is down, and Skip, locked while the socket is down (UI spec §3.3, §4.1, §6.1, §6.2). -->
 <script setup lang="ts">
 import { LoaderCircle } from '@lucide/vue'
 import { useEventListener } from '@vueuse/core'
@@ -31,10 +31,11 @@ function skip(): void {
   if (online.value) store.next()
 }
 
-// Keys 1–4 choose, unless a text field has the focus or a modifier is held.
+// Keys 1–4 choose, unless a text field has the focus, a modifier is held or the phone's Leaderboard tab hides the question.
 useEventListener(window, 'keydown', (event: KeyboardEvent) => {
   const target = event.target instanceof Element ? event.target : null
   if (event.ctrlKey || event.metaKey || event.altKey || target?.closest('input, textarea, select, [contenteditable]')) return
+  if (heading.value?.checkVisibility() === false) return
   const n = Number(event.key)
   if (Number.isInteger(n) && n >= 1 && n <= 4) {
     event.preventDefault()
