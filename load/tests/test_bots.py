@@ -48,7 +48,7 @@ def bot(deadline_s: float = 5) -> Player:
 def waiting(p: Player, *, sent: bool = True) -> None:
     """An open timed answer (sent, or still in its think time) and an open board wait."""
     now = time.monotonic()
-    p.answer, p.timed = (9, "sub", 0), True
+    p.answer, p.timed, p.sent = (9, "sub", 0), True, sent
     p.sent_at, p.answer_due = (now, None) if sent else (None, now + 1)
     p.board.accepted(150, now)
 
@@ -90,7 +90,7 @@ def test_the_cli_checks_its_options() -> None:
 
 
 @pytest.mark.parametrize("sent", [True, False])
-async def test_a_reconnect_drops_the_open_answer(
+async def test_a_reconnect_resends_a_sent_answer_and_drops_an_unsent_one(
     monkeypatch: pytest.MonkeyPatch,
     sent: bool,  # noqa: FBT001
 ) -> None:
@@ -99,11 +99,14 @@ async def test_a_reconnect_drops_the_open_answer(
         return DEAD_LINK
 
     def rejoined(p: Player) -> int:
-        assert (p.answer, p.answer_due, p.board.pending) == (None, None, [])
+        kept = (9, "sub", 0) if sent else None
+        assert (p.answer, p.answer_due, p.timed, p.board.pending) == (kept, None, False, [])
         joined = {"type": "joined", "userId": "u", "finished": True,
                   "cursor": 9, "cursorOpen": False}  # fmt: skip
-        p.handle(joined, time.monotonic(), Backoff(), 0)
-        assert p.settled(time.monotonic())
+        p.handle(joined, now := time.monotonic(), Backoff(), 0)
+        p.due(now)
+        resent = [m["submissionId"] for m in p.outbox if m["type"] == "answer"]
+        assert (resent, p.settled(now)) == ((["sub"], False) if sent else ([], True))
         return NORMAL
 
     p = bot()
@@ -141,17 +144,20 @@ async def test_reconnects_end_at_a_final_close_or_after_the_deadline(
 
 
 class Socket:
-    """Takes what the bot sends; never answers."""
+    """Takes what the bot sends; answers with ``frames``, then nothing."""
 
-    def __init__(self) -> None:
+    def __init__(self, *frames: str) -> None:
         self.sent: list[str] = []
         self.receives = 0
+        self.frames = list(frames)
 
     async def send(self, raw: str) -> None:
         self.sent.append(json.loads(raw)["type"])
 
     async def recv(self) -> str:
         self.receives += 1
+        if self.frames:
+            return self.frames.pop(0)
         await asyncio.sleep(3600)
         return ""
 
@@ -165,6 +171,17 @@ async def test_converse_sleeps_to_its_next_timer_and_closes_at_the_stop() -> Non
     p.board.accepted(150, time.monotonic())
     code = await asyncio.wait_for(converse(ws, p, Backoff(), OPTS, time.monotonic() + 0.3), 2)  # type: ignore[arg-type]
     assert (code, ws.sent, ws.receives) == (NORMAL, ["join"], 1)
+
+
+async def test_converse_reads_frames_in_full_while_an_answer_is_out() -> None:
+    entry = Entry(rank=1, userId="u1", displayName="Ann", score=150)
+    raw = encode_broadcast(
+        Leaderboard(seq=3, rebase=False, playerCount=1, onlineCount=1, entries=[entry])
+    ).decode()
+    p, ws = bot(), Socket(raw)
+    p.user_id, p.answer, p.sent_at = "u1", (0, "sub", 0), time.monotonic()
+    await asyncio.wait_for(converse(ws, p, Backoff(), OPTS, time.monotonic() + 0.1), 2)  # type: ignore[arg-type]
+    assert p.board.best == 150  # the total before its reply: the reply will not wait for it
 
 
 async def test_converse_sends_nothing_once_the_quiz_ended() -> None:

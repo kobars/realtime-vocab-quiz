@@ -39,6 +39,23 @@ def refused(p: Player, code: str, request: str, now: float) -> None:
     p.handle({"type": "error", "code": code, "requestType": request}, now, Backoff(), 0)
 
 
+def question(p: Player, index: int, now: float, think_s: float = 0) -> None:
+    p.handle(
+        {"type": "question", "questionId": "q1", "questionIndex": index}, now, Backoff(), think_s
+    )
+
+
+def reply(p: Player, now: float, points: int = 100) -> None:
+    index, submission, _ = p.answer or (0, "", 0)
+    result = {"type": "answer_result", "submissionId": submission, "questionIndex": index,
+              "correctChoiceIndex": 0, "pointsAwarded": points, "score": points}  # fmt: skip
+    p.handle(result, now, Backoff(), 0)
+
+
+def think_exactly(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("random.uniform", lambda *_: 1.0)
+
+
 def test_backoff_is_full_jitter_capped_at_ten_seconds() -> None:
     assert backoff_s(0, 0.999) == 0.249
     assert backoff_s(3, 0.5) == 1.0
@@ -68,7 +85,7 @@ def test_a_bot_joins_answers_and_times_both_latencies() -> None:
     assert backoff.joined_at == 1.0
     snapshot(p, 4, 1.1)
     p.handle({"type": "question", "questionId": "q1", "questionIndex": 0}, 1.2, backoff, 0)
-    p.due(1.2, timeout_s=5)
+    p.due(1.2)
     assert sent(p) == [("answer", 0)]
     submission = p.answer[1] if p.answer else ""
     result = {
@@ -105,7 +122,7 @@ def test_a_seq_gap_schedules_one_resync() -> None:
     for seq in (7, 8, 9):  # one gap, however many frames show it
         frame(p, seq, 1)
     assert p.rec.counts["seq_gaps"] == 1
-    p.due(2, timeout_s=5)
+    p.due(2)
     assert sent(p) == [("resync", 4)]
     assert p.rec.counts["resyncs"] == 1
     frame(p, 9, 3, rebase=True)
@@ -118,9 +135,9 @@ def test_a_gap_inside_the_resync_limit_waits_for_it() -> None:
     snapshot(p, 4, 0.05)
     sent(p)
     frame(p, 7, 0.3)
-    p.due(0.6, timeout_s=5)
+    p.due(0.6)
     assert sent(p) == []
-    p.due(1.0, timeout_s=5)
+    p.due(1.0)
     assert sent(p) == [("resync", 4)]
 
 
@@ -141,14 +158,14 @@ def test_a_rejoin_keeps_the_resync_limit_and_a_refused_resync_is_retried() -> No
     sent(p)
     joined(p, 0.01)  # a rejoin, for example after INVALID_STATE
     assert sent(p) == [("next", 0)]
-    p.due(0.5, timeout_s=5)
+    p.due(0.5)
     assert sent(p) == []
-    p.due(1.0, timeout_s=5)
+    p.due(1.0)
     assert sent(p) == [("resync", 4)]
     refused(p, "RATE_LIMITED", "resync", 1.25)
     assert not p.resyncing
     frame(p, 7, 1.5)  # a gap while the retry waits: no second count
-    p.due(2.25, timeout_s=5)
+    p.due(2.25)
     assert sent(p) == [("resync", 4)]
     assert (p.rec.counts["resyncs"], p.rec.counts["seq_gaps"]) == (3, 0)
 
@@ -159,24 +176,24 @@ def test_a_refused_join_or_next_is_sent_again(monkeypatch: pytest.MonkeyPatch) -
     joined(p, 0)
     sent(p)
     refused(p, "UNAVAILABLE", "next", 1.0)  # after the backoff: 125 ms, then 250 ms
-    p.due(1.0625, timeout_s=5)
+    p.due(1.0625)
     assert sent(p) == []
-    p.due(1.125, timeout_s=5)
+    p.due(1.125)
     assert sent(p) == [("next", 0)]
     refused(p, "UNAVAILABLE", "next", 2.0)
-    p.due(2.25, timeout_s=5)
+    p.due(2.25)
     assert sent(p) == [("next", 0)]
     refused(p, "INVALID_STATE", "next", 3.0)
     refused(p, "RATE_LIMITED", "join", 3.0)  # after 1 s
     assert sent(p) == [("join", None)]
-    p.due(3.5, timeout_s=5)
+    p.due(3.5)
     assert sent(p) == []
-    p.due(4.0, timeout_s=5)
+    p.due(4.0)
     assert sent(p) == [("join", None)]
     refused(p, "RATE_LIMITED", "next", 5.0)
     joined(p, 5.5)  # the join reads the cursor again and drops the pending retry
     assert sent(p) == [("resync", 0), ("next", 0)]
-    p.due(6.5, timeout_s=5)
+    p.due(6.5)
     assert sent(p) == []
 
 
@@ -196,47 +213,117 @@ def test_a_pong_ahead_of_the_last_seq_resyncs_a_second_later() -> None:
     p.handle({"type": "pong", "seq": None}, 0.5, backoff, 0)
     p.handle({"type": "pong", "seq": 6}, 1, backoff, 0)
     frame(p, 5, 1.5)  # frame 6 never comes
-    p.due(1.9, timeout_s=5)
+    p.due(1.9)
     assert sent(p) == []
-    p.due(2, timeout_s=5)
+    p.due(2)
     assert sent(p) == [("resync", 5)]
     snapshot(p, 6, 2.1)
     p.handle({"type": "pong", "seq": 6}, 3, backoff, 0)
-    p.due(4.5, timeout_s=5)
+    p.due(4.5)
     assert (sent(p), p.rec.counts["seq_gaps"]) == ([], 1)
 
 
 def test_a_retried_answer_keeps_its_submission_id_and_is_never_timed() -> None:
-    p, backoff = player(), Backoff()
-    p.handle({"type": "question", "questionId": "q1", "questionIndex": 3}, 0, backoff, 0)
-    p.due(0, timeout_s=1)
-    first = sent(p)
-    p.due(2, timeout_s=1)  # no reply within the timeout: count it, retry
-    p.due(2, timeout_s=1)
-    assert sent(p) == first == [("answer", 3)]
+    p = player()
+    question(p, 3, 0)
+    p.due(0)
+    first = p.outbox[:]
+    p.outbox.clear()
+    p.due(6)  # no reply within the timeout: count it, retry
+    p.due(6)
+    assert p.outbox == first  # the same submissionId and choiceIndex
     assert p.rec.counts["answer_timeout"] == 1
-    submission = p.answer[1] if p.answer else ""
-    p.handle(
-        {
-            "type": "answer_result",
-            "submissionId": submission,
-            "questionIndex": 3,
-            "correctChoiceIndex": 0,
-            "pointsAwarded": 0,
-            "score": 0,
-        },
-        3,
-        backoff,
+    reply(p, 6.1)
+    assert p.rec.answer_ms == []
+    assert p.board.pending == []  # a replayed total may be shown already: no leaderboard wait
+
+
+def test_a_re_served_question_keeps_the_think_time_or_resends_untimed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    think_exactly(monkeypatch)
+    p = player()
+    question(p, 0, 0.1, think_s=1)
+    question(p, 0, 0.2, think_s=1)  # not sent yet: the think time still ends at 1.1
+    p.due(0.5)
+    assert (sent(p), p.timed) == ([], True)
+    p.due(1.1)
+    first = p.outbox[:]
+    p.outbox.clear()
+    question(p, 0, 1.5)  # sent: the timed reply is lost, resend at once
+    p.due(1.5)
+    assert (p.outbox, p.timed, p.rec.counts["answer_missing"]) == (first, False, 1)
+
+
+def test_no_new_answer_goes_out_after_the_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    think_exactly(monkeypatch)
+    p = player(deadline=100)
+    question(p, 0, 99.5, think_s=2)
+    p.due(101.9)
+    assert (sent(p), p.answer, p.settled(101.9)) == ([], None, True)
+    p = player(deadline=100)
+    question(p, 0, 99)
+    p.due(99)
+    p.due(104.5)  # an answer sent before the deadline is still retried
+    p.due(104.5)
+    assert sent(p) == [("answer", 0), ("answer", 0)]
+
+
+def test_a_reconnect_resends_a_scored_answer_whose_reply_was_lost() -> None:
+    p = player()
+    question(p, 0, 0)
+    p.due(0)
+    first = p.outbox[:]
+    p.disconnected()
+    assert (p.outbox, p.rec.counts["answer_missing"]) == ([], 1)
+    msg = {"type": "joined", "userId": "u1", "finished": False, "cursor": 0, "cursorOpen": False}
+    p.handle(msg, 1, Backoff(), 0)
+    p.due(1)
+    assert p.outbox[1:] == first  # after the resync; no ``next`` before the replayed reply
+    p.outbox.clear()
+    reply(p, 1.1)
+    assert (sent(p), p.rec.answer_ms, p.board.pending) == ([("next", 1)], [], [])
+
+
+def test_a_total_shown_before_its_reply_counts_as_shown_first() -> None:
+    p = player()
+    question(p, 0, 0)
+    p.due(0)
+    p.handle({"type": "rank_update", "score": 100}, 0.1, Backoff(), 0)
+    reply(p, 0.2)
+    p.due(6)
+    assert (p.board.pending, p.rec.counts["board_first"], p.rec.counts["board_timeout"]) == (
+        [],
+        1,
         0,
     )
-    assert p.rec.answer_ms == []
-    assert p.board.pending == []  # no points, so no leaderboard wait
+
+
+def test_a_new_answer_starts_without_the_last_send(monkeypatch: pytest.MonkeyPatch) -> None:
+    think_exactly(monkeypatch)
+    p = player()
+    question(p, 0, 0)
+    p.due(0)
+    question(p, 1, 6, think_s=2)
+    p.due(6.1)
+    assert (p.rec.counts["answer_timeout"], p.timed, p.answer_due) == (0, True, 8)
+
+
+def test_slow_samples_count_as_timeouts_whatever_the_call_order() -> None:
+    p = player()
+    question(p, 0, 0)
+    p.due(0)
+    reply(p, 6)  # before any due() could time it out
+    p.board.accepted(200, 7)
+    p.board.shown(200, 13)
+    assert (p.rec.answer_ms, p.rec.board_ms) == ([], [])
+    assert (p.rec.counts["answer_timeout"], p.rec.counts["board_timeout"]) == (1, 1)
 
 
 def test_a_rejoin_error_drops_the_open_answer_and_reads_the_cursor_again() -> None:
-    p, backoff = player(), Backoff()
-    p.handle({"type": "question", "questionId": "q1", "questionIndex": 0}, 0, backoff, 0)
-    p.due(0, timeout_s=5)
+    p = player()
+    question(p, 0, 0)
+    p.due(0)
     sent(p)
     refused(p, "INVALID_STATE", "answer", 1)
     assert sent(p) == [("join", None)]
