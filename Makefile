@@ -43,7 +43,8 @@ acceptance: ## Run the acceptance tests
 load: ## Run the load scenarios with the bot swarm
 	@echo "not yet"
 contracts: ## Regenerate the JSON Schema and TypeScript types
-	@echo "not yet"
+	$(call step,web install,pnpm -C web install --frozen-lockfile)
+	$(call step,contracts,uv run --project api --locked python scripts/gen_contracts.py)
 new-quiz: ## Create a fresh 60-minute quiz and print its ID and URL
 	@echo "not yet"
 ai-log: ## Build AI-LOG.md from the entries in docs/ai-log
