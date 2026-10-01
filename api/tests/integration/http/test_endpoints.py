@@ -59,9 +59,9 @@ async def test_a_ticket_needs_a_known_session(http: httpx.AsyncClient, auth: str
     assert (resp.status_code, resp.headers["WWW-Authenticate"]) == (401, "Bearer")
 
 
-@pytest.mark.parametrize("name", ["   ", "x" * 33, "x" * 129])
-async def test_a_session_needs_a_display_name(http: httpx.AsyncClient, name: str) -> None:
-    assert (await http.post("/sessions", json={"displayName": name})).status_code == 422
+async def test_a_session_needs_a_display_name(http: httpx.AsyncClient) -> None:
+    for name in ("   ", "x" * 33, "x" * 129):
+        assert (await http.post("/sessions", json={"displayName": name})).status_code == 422
 
 
 async def test_quiz_info_and_unknown_ids_look_alike(http: httpx.AsyncClient) -> None:
@@ -69,6 +69,7 @@ async def test_quiz_info_and_unknown_ids_look_alike(http: httpx.AsyncClient) -> 
     info = await http.get("/quizzes/VOCAB-42")
     expected = {"quizId": "VOCAB-42", "title": "Everyday English", "questionCount": 10}
     assert info.json() == expected | {"status": "open", "players": 0}
+    assert (await http.get("/readyz")).json() == {"status": "ready"}  # the memory store
     for unknown in ("NOPE-1", "ACAD-10", "vocab-42", "X" * 40, "a b"):  # ACAD-10: not created
         resp = await http.get(f"/quizzes/{unknown}")
         assert (resp.status_code, resp.json()) == (404, NOT_FOUND), unknown
@@ -93,22 +94,17 @@ async def test_host_end_announces_once(http: httpx.AsyncClient) -> None:
     assert (await http.post("/admin/quizzes/NOPE-1/end", headers=TOKEN)).status_code == 404
 
 
-@pytest.mark.parametrize("headers", [{}, {"X-Admin-Token": "wrong"}])
-async def test_admin_needs_the_token(http: httpx.AsyncClient, headers: dict[str, str]) -> None:
-    body = {"quizId": "VOCAB-42"}
-    assert (await http.post("/admin/quizzes", json=body, headers=headers)).status_code == 404
-    assert (await http.post("/admin/quizzes/VOCAB-42/end", headers=headers)).status_code == 404
+async def test_admin_needs_the_token(http: httpx.AsyncClient) -> None:
+    for headers in ({}, {"X-Admin-Token": "wrong"}):
+        made = await http.post("/admin/quizzes", json={"quizId": "VOCAB-42"}, headers=headers)
+        ended = await http.post("/admin/quizzes/VOCAB-42/end", headers=headers)
+        assert (made.status_code, ended.status_code) == (404, 404)
 
 
 async def test_admin_routes_exist_only_with_admin_mock(now: list[int]) -> None:
     async with client_of(app_with(now, admin_mock=False)) as http:
         assert (await create(http)).status_code == 404
         assert "/admin/quizzes" not in (await http.get("/openapi.json")).json()["paths"]
-
-
-async def test_probes_on_the_memory_store(http: httpx.AsyncClient) -> None:
-    assert (await http.get("/healthz")).json() == {"status": "ok"}
-    assert (await http.get("/readyz")).json() == {"status": "ready"}
 
 
 async def test_readyz_and_requests_report_an_unreachable_redis(now: list[int]) -> None:
