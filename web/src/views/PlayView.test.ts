@@ -1,4 +1,4 @@
-// AI-ASSISTED: component tests for the intro and question screens (countdown, keys, locking), driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the intro and question screens (countdown, keys, locking), the connection pill and the error messages, driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -88,18 +88,57 @@ it('intro: Start has the focus and asks for question 0; after a rejoin on a clos
   expect(w.get('button:focus').text()).toBe('Continue')
 })
 
-it('while the socket is reconnecting the choices are locked; once joined again a key answers', async () => {
+it('while the socket is reconnecting a pill says so and the choices are locked; after the snapshot the question and score are back', async () => {
   const w = await playing()
+  expect(w.get('[data-test="connection"]').text()).toBe('')
   await receive(status('reconnecting', 1006))
+  expect(w.get('[data-test="connection"]').attributes('role')).toBe('status')
+  expect(w.get('[data-test="connection"]').text()).toBe('Reconnecting…')
   expect(w.text()).toContain('Waiting for the connection…')
   press('1')
   await choice(w, 0).trigger('click')
   expect(port.answer).not.toHaveBeenCalled()
-  await receive(status('open'), joined({ cursor: 0, cursorOpen: true }))
+  await receive(status('open'))
+  expect(w.get('[data-test="connection"]').text()).toBe('Connecting…')
+  await receive(joined({ cursor: 0, cursorOpen: true, score: 140 }))
+  expect(w.get('[data-test="connection"]').text()).toBe('Updating…')
   clock = 8_000
-  await receive(snapshot(0), question(0, 12_000))
+  await receive(snapshot(140), question(0, 12_000))
   await frames(50)
+  expect(w.get('[data-test="connection"]').text()).toBe('')
   expect(w.get('[data-test="ring"]').text()).toBe('12')
+  expect(w.get('[data-test="score"]').text()).toBe('Score 140')
   press('4')
   expect(port.answer.mock.calls).toEqual([[0, 3]])
+})
+
+const error = (code: string, requestType: string | null = null) => ({ type: 'error', code, message: '', requestType }) as Partial<ServerMessage>
+
+it.each([
+  ['ALREADY_ANSWERED', 'That question was already answered; your first answer stands.'],
+  ['QUESTION_NOT_OPEN', 'That question is closed; loading the current one.'],
+  ['RATE_LIMITED', 'Too many requests; trying again in a second.'],
+  ['UNAVAILABLE', 'Server busy, retrying.'],
+  ['INTERNAL', 'Something went wrong; trying again.'],
+])('error %s: a short plain message that goes after a few seconds', async (code, text) => {
+  const w = await playing()
+  await receive(error(code, 'answer'))
+  expect(w.get('[data-test="error"]').attributes('role')).toBe('status')
+  expect(w.get('[data-test="error"]').text()).toBe(text)
+  await frames(6_000)
+  expect(w.get('[data-test="error"]').text()).toBe('')
+})
+
+it('SESSION_REPLACED: the card replaces the quiz, stays, takes the focus, and Use this tab joins again', async () => {
+  const w = await playing()
+  await receive(error('SESSION_REPLACED'))
+  expect(port.stop).toHaveBeenCalled()
+  expect(w.get('[role="alert"]').text()).toContain('This quiz is open in another tab.')
+  expect(w.find('[data-choice="0"]').exists()).toBe(false)
+  await frames(10_000)
+  expect(w.find('[role="alert"]').exists()).toBe(true)
+  expect(document.activeElement?.textContent?.trim()).toBe('Use this tab')
+  await w.get('[role="alert"] button').trigger('click')
+  expect(port.start.mock.calls).toEqual([['VOCAB-42', 'Ana'], ['VOCAB-42', 'Ana']])
+  expect(w.find('[role="alert"]').exists()).toBe(false)
 })
