@@ -1,14 +1,21 @@
-# AI-ASSISTED: slow clients are conflated, then closed with 1013; a second socket closes the first.
+# AI-ASSISTED: slow clients, session replacement, the leave grace and the server heartbeat.
 import asyncio
 import json
+import socket
+import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import partial
 from typing import Any, cast
 
+import uvicorn
 from fastapi import WebSocket
 from starlette.testclient import TestClient
+from websockets.sync.client import connect as ws_connect
+from websockets.typing import Origin, Subprotocol
 
+from quiz.adapters.ws.heartbeat import server_config
 from quiz.adapters.ws.registry import Registry
 from quiz.adapters.ws.sender import Sender
 from quiz.app.service import Connection
@@ -17,6 +24,7 @@ from quiz.contracts import messages as m
 from quiz.contracts.codec import encode
 from quiz.domain.session import Question
 from quiz.main import create_app, services_of
+from quiz.ports.store import Store
 
 ORIGIN, PING = "http://localhost:8080", '{"v":1,"type":"ping"}'
 ROWS = [
@@ -82,7 +90,8 @@ async def test_a_conflated_client_gets_rebase_true_and_sends_no_resync() -> None
 
 async def test_a_client_that_never_reads_is_conflated_then_closed_with_1013() -> None:
     dead, draining, fast = Socket(reading=False), Socket(reading=False), Socket()
-    senders, registry = [sender_of(dead, 0.1), sender_of(draining), sender_of(fast)], Registry()
+    senders = [sender_of(dead, 0.1), sender_of(draining), sender_of(fast)]
+    registry = Registry(cast("Store", None), 10_000)
     for i, sender in enumerate(senders):
         registry.bind(Connection(f"c{i}", f"u{i}", "VOCAB-42"), sender)
     for seq in range(1, 31):
@@ -108,8 +117,8 @@ def tickets(client: TestClient, count: int) -> list[str | None]:  # all for one 
 
 
 @contextmanager
-def quiz_client() -> Iterator[TestClient]:
-    with TestClient(create_app(Settings())) as client:
+def quiz_client(**settings: Any) -> Iterator[TestClient]:  # noqa: ANN401
+    with TestClient(create_app(Settings(**settings))) as client:
         store = services_of(client.app).store  # type: ignore[arg-type]
         create = partial(store.create_quiz, window_ms=60_000, time_limit_ms=20_000)
         client.portal.call(create, "VOCAB-42", (Question("q0", 1),))  # type: ignore[union-attr]
@@ -132,3 +141,61 @@ def test_a_second_socket_of_the_user_closes_the_first_with_4001() -> None:
             assert old.receive()["code"] == 4001
             new.send_text(PING)
             assert new.receive_json()["type"] == "pong"
+
+
+def test_a_drop_leaves_after_the_grace_unless_the_player_comes_back() -> None:
+    calls: list[tuple[str, str, bool]] = []
+    with quiz_client(grace_ms=200) as client:
+        store = services_of(client.app).store  # type: ignore[arg-type]
+        leave = store.leave
+
+        async def spy(*args: str) -> bool:
+            left = await leave(*args)
+            calls.append((args[0], args[1], left))
+            return left
+
+        store.leave = spy  # type: ignore[assignment,method-assign]
+        issued, user_id = tickets(client, 2), ""
+        for ticket in issued:  # the second join comes within the grace of the first socket
+            with open_ws(client, ticket) as ws:
+                ws.send_json(JOIN)
+                user_id = ws.receive_json()["userId"]
+        time.sleep(0.1)
+        assert calls == []
+        time.sleep(0.3)
+    assert calls == [("VOCAB-42", user_id, True)]  # only the second socket's, which is present
+
+
+def test_the_server_pings_and_drops_a_socket_that_never_pongs() -> None:
+    settings = Settings(heartbeat_ms=200)
+    app = create_app(settings)
+    server = uvicorn.Server(server_config(app, settings, "127.0.0.1", 0))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    while not server.started:
+        time.sleep(0.01)
+    port = server.servers[0].sockets[0].getsockname()[1]
+    tickets_ = services_of(app).tickets
+    _, token = asyncio.run(tickets_.create_session("Ann"))
+    first, second = (asyncio.run(tickets_.issue_ticket(token)) for _ in range(2))
+    silent = socket.create_connection(("127.0.0.1", port), timeout=3)
+    silent.sendall(
+        f"GET /ws?ticket={first} HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n"
+        f"Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
+        f"Sec-WebSocket-Protocol: quiz.v1\r\nOrigin: {ORIGIN}\r\n\r\n".encode()
+    )
+    url = f"ws://127.0.0.1:{port}/ws?ticket={second}"
+    with ws_connect(url, subprotocols=[Subprotocol("quiz.v1")], origin=Origin(ORIGIN)) as alive:
+        start, received = time.monotonic(), b""
+        while chunk := silent.recv(4096):  # the server closes it: recv returns b""
+            received += chunk
+        silent.close()
+        assert time.monotonic() - start < 2
+        assert received.startswith(b"HTTP/1.1 101")
+        assert b"\x89" in received  # a ping frame came
+        time.sleep(0.6)  # three more heartbeats: the socket that answers pings stays open
+        alive.send(PING)
+        assert json.loads(alive.recv())["type"] == "pong"
+    server.should_exit = True
+    thread.join(5)
