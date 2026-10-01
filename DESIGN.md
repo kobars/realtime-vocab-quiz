@@ -876,5 +876,6 @@ Every decision is recorded in full (context, decision, alternatives considered, 
 | [ADR-008](docs/DECISIONS.md#adr-008--one-redis-schema-for-scoring-and-fan-out) | One Redis schema: every key of a quiz under the hash tag `quiz:{<quizId>}:*`, one 24 h TTL, ready for a Cluster. |
 | [ADR-009](docs/DECISIONS.md#adr-009--repository-layout-and-the-vue-client-api-web-generated-contracts) | One repository with `api/`, `web/` and generated `contracts/`; a Vue 3, Vite, Pinia and Tailwind client using types generated from the Pydantic models. |
 | [ADR-010](docs/DECISIONS.md#adr-010--a-playful-design-system-of-our-own-clay-replaces-the-neutral-look) | Our own playful design system, "Clay": brand violet with role fills under dark text, a self-hosted rounded font, hard shadows tinted from the primary, and a dark theme that follows the OS; contrast is a test. |
+| [ADR-011](docs/DECISIONS.md#adr-011--images-pinned-by-digest-the-runtime-stages-keep-the-os-package-upgrade) | Every image pinned by digest and updated by Dependabot; the runtime stages keep the OS package upgrade. |
 
 <!-- AI-ASSISTED-END -->

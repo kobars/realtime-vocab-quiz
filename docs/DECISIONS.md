@@ -28,6 +28,7 @@ Each decision uses the format below. ADRs are never renumbered; a later ADR supe
 | ADR-008 | One Redis schema for scoring and fan-out | accepted |
 | ADR-009 | Repository layout and the Vue client: `api/`, `web/`, generated `contracts/` | accepted |
 | ADR-010 | A playful design system of our own ("Clay") replaces the neutral look: self-hosted font, OS-driven dark theme, hard tinted shadows | accepted |
+| ADR-011 | Images pinned by digest; the runtime stages keep the OS package upgrade | accepted |
 
 ## ADR-001 — Build the real-time quiz service, with a Python and FastAPI server; mock identity, questions and admin
 
@@ -315,5 +316,35 @@ The first client used direction "Slate" (`docs/spec/ui.md` §7.1): a neutral sla
 - About 40 kB of font files are served from the app's own origin and cached; text renders in the fallback stack until the font arrives.
 - Every color has a light and a dark value, and a new token needs both rows in the spec table, or `tokens.test.ts` fails.
 - The light input outline (3.14:1 on the page) and focus ring (4.37:1 on the page) pass 3:1 with less margin than Slate's; the contrast test keeps them from slipping below it.
+
+<!-- AI-ASSISTED-END -->
+
+## ADR-011 — Images pinned by digest; the runtime stages keep the OS package upgrade
+
+<!-- AI-ASSISTED-BEGIN: ADR-011 drafted with Claude Code from the Dockerfiles, compose.yaml, the CI workflows and .github/dependabot.yml. -->
+
+- **Status:** accepted
+- **Date:** 2026-10-02
+
+### Context
+
+The Dockerfiles, `compose.yaml`, the CI Redis service and the integration-test fixture named their images by tag only (`python:3.14-slim`, `redis:8-alpine`). A tag moves, so the image that Trivy scanned on a pull request was not necessarily the image a later build used. The runtime stages also run `apt-get upgrade` (API) and `apk upgrade` (web), because the base tags lag behind the distribution's security fixes and the image scan fails on a CRITICAL or HIGH finding that has a fix.
+
+### Decision
+
+- Every image is written as `name:tag@sha256:<digest>`, where the digest is the multi-platform index, so the same line builds on amd64 CI runners and arm64 laptops: each `FROM`, the `COPY --from` uv image, both Redis services of `compose.yaml`, the CI Redis service and the test fixture's Redis. The API and web images that `make build` makes keep their local tag. Redis is pinned to a minor version (`8.10-alpine`).
+- Dependabot (`docker` for both Dockerfiles, `docker-compose` for `compose.yaml`) proposes new digests weekly, after its 7-day cooldown.
+- The runtime stages keep the OS package upgrade.
+
+### Alternatives considered
+
+- **Drop the upgrade and take OS fixes only through Dependabot digest updates:** a fully reproducible image, but a new digest arrives only after the upstream image is rebuilt and the cooldown has passed, often days or weeks after the distribution fix, and the image scan fails in the meantime. Rejected.
+- **Tags only:** no update churn, but the scanned image and the shipped image can differ. Rejected.
+- **Pin each OS package version:** reproducible, but every security fix becomes a hand edit across many packages. Rejected.
+
+### Consequences
+
+- The base layers are fixed per commit. The upgraded OS packages depend on the build day, so two builds of one commit can differ there; the containers workflow scans the image it built in the same job, so the scanned image is the one that run built.
+- A Dependabot `docker-compose` update changes `compose.yaml` only; `.github/workflows/ci.yml` and `api/tests/conftest.py` take the same line in that pull request, which `scripts/tests/test_images.py` enforces.
 
 <!-- AI-ASSISTED-END -->

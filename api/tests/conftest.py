@@ -87,12 +87,18 @@ def _wait_ready(url: str, wait_s: float) -> None:
             return
 
 
+# The Redis of compose.yaml; scripts/tests/test_images.py checks that the copies match.
+_REDIS_IMAGE = (
+    "redis:8.10-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0"
+)
+
+
 def _start_redis(wait_s: float = 30) -> tuple[str, str]:
-    """Run redis:8-alpine on a free host port that Docker picks; return (container, url).
+    """Run ``_REDIS_IMAGE`` on a free host port that Docker picks; return (container, url).
 
     ``--rm`` acts only once the container stops, so any failure after ``docker run`` removes it.
     """
-    run = ["run", "-d", "--rm", "-p", "127.0.0.1::6379", "redis:8-alpine"]
+    run = ["run", "-d", "--rm", "-p", "127.0.0.1::6379", _REDIS_IMAGE]
     container = _docker(*run, "redis-server", "--appendonly", "yes").strip()
     try:
         port = _docker("port", container, "6379/tcp").splitlines()[0].rsplit(":", 1)[1]

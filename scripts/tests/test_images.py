@@ -1,7 +1,7 @@
-# AI-ASSISTED: static guards on the Dockerfiles, the build context and the make build recipe.
-"""The image rules that a build alone does not enforce: the locked install, the non-root user,
-the healthchecks, the uvicorn transport flags, the SPA fallback and a build context without
-local state.
+# AI-ASSISTED: static guards on the Dockerfiles, the image pins, the build context and make build.
+"""The image rules that a build alone does not enforce: images pinned by digest, the locked
+install, the non-root user, the healthchecks, the uvicorn transport flags, the SPA fallback and
+a build context without local state.
 
 The files are read as text, so the tests need no Docker daemon.
 """
@@ -36,10 +36,71 @@ def _stages(dockerfile: Path) -> list[list[str]]:
     return stages
 
 
+def _pulled_images(path: Path) -> list[str]:
+    """Return each image that a Dockerfile or a YAML file pulls: every ``FROM`` image, every
+    ``COPY --from`` image that is not a build stage, and every ``image:`` value except the
+    images that ``make build`` makes here (``elsaquiz-*``)."""
+    if path.name != "Dockerfile":
+        lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
+        images = [
+            line.removeprefix("image:").strip() for line in lines if line.startswith("image:")
+        ]
+        return [image for image in images if not image.startswith("elsaquiz-")]
+    images: list[str] = []
+    stage_names: set[str] = set()
+    for stage in _stages(path):
+        image, *alias = stage[0].split()[1:]
+        images.append(image)
+        for line in stage[1:]:
+            source = line.split()[1].removeprefix("--from=")
+            if line.startswith("COPY --from=") and source not in stage_names:
+                images.append(source)
+        stage_names.update(alias[-1:])
+    return images
+
+
 def _api_cmd() -> list[str]:
     _, runtime = _stages(ROOT / "api" / "Dockerfile")
     cmd: list[str] = json.loads(next(line for line in runtime if line.startswith("CMD "))[3:])
     return cmd
+
+
+DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
+
+
+@pytest.mark.parametrize(
+    "path", ["api/Dockerfile", "web/Dockerfile", "compose.yaml", ".github/workflows/ci.yml"]
+)
+def test_every_pulled_image_is_pinned_by_digest(path: str) -> None:
+    """A tag can move; a digest is the exact image that the scans and the tests ran."""
+    images = _pulled_images(ROOT / path)
+    assert images
+    assert [image for image in images if not DIGEST.search(image)] == []
+
+
+def test_pulled_images_skip_build_stages_and_keep_an_image_without_a_digest(
+    tmp_path: Path,
+) -> None:
+    pinned = f"python:3.14-slim@sha256:{'0' * 64}"
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        f"FROM {pinned} AS builder\nCOPY --from=uv:0.10 /uv /uv\n"
+        "FROM nginx:1.29-alpine\nCOPY --from=builder /dist /html\n",
+        encoding="utf-8",
+    )
+    images = _pulled_images(dockerfile)
+    assert images == [pinned, "uv:0.10", "nginx:1.29-alpine"]
+    assert [image for image in images if not DIGEST.search(image)] == images[1:]
+
+
+def test_the_tests_and_ci_run_the_redis_image_that_compose_runs() -> None:
+    """Dependabot updates compose.yaml only; the CI service and the test fixture follow it."""
+    # Not a host name such as stack-redis:6379.
+    redis = re.compile(r"(?<![\w.-])redis:[\w.-]+(?:@sha256:[0-9a-f]{64})?")
+    paths = ["compose.yaml", ".github/workflows/ci.yml", "api/tests/conftest.py"]
+    found = [set(redis.findall((ROOT / path).read_text(encoding="utf-8"))) for path in paths]
+    assert len(found[0]) == 1
+    assert all(images == found[0] for images in found), dict(zip(paths, found, strict=True))
 
 
 def test_api_image_installs_locked_runtime_dependencies_only() -> None:

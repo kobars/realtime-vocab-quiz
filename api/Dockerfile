@@ -1,8 +1,8 @@
 # AI-ASSISTED: the API image: uv installs the locked runtime dependencies, then a slim non-root runtime.
 # Build from the repository root: docker build -f api/Dockerfile .
 
-FROM python:3.14-slim AS builder
-COPY --from=ghcr.io/astral-sh/uv:0.10.2 /uv /usr/local/bin/uv
+FROM python:3.14-slim@sha256:0741d101873c12ab927e6f8653feb8862b9bd58771177acb1b885b95141f91b4 AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.10.2@sha256:94a23af2d50e97b87b522d3cea24aaf8a1faedec1344c952767434f69585cbf9 /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
@@ -16,7 +16,7 @@ COPY api/src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
-FROM python:3.14-slim AS runtime
+FROM python:3.14-slim@sha256:0741d101873c12ab927e6f8653feb8862b9bd58771177acb1b885b95141f91b4 AS runtime
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
