@@ -8,6 +8,12 @@ describe('Tailwind entry', () => {
     expect(main).not.toContain('prefers-color-scheme')
   })
 
+  it('gives every focus-visible element without ring classes a 2 px solid outline with a 2 px offset', () => {
+    // Headings and panels focused from code have no ring classes; the controls with them set outline-none.
+    const base = main.slice(main.indexOf('@layer base'))
+    expect(base).toContain(':focus-visible { @apply outline-2 outline-solid outline-offset-2 outline-ring; }')
+  })
+
   it.each([
     ['--default-transition-duration', 'var(--motion-base)'],
     ['--default-transition-timing-function', 'var(--ease-standard)'],

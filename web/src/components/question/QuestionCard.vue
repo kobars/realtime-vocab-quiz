@@ -66,7 +66,7 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
         type="button"
         :data-choice="i"
         :aria-disabled="locked"
-        class="flex min-h-11 items-center gap-3 rounded-lg border border-input bg-card px-4 py-3 text-left text-xl transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+        class="flex min-h-11 items-center gap-3 rounded-lg border border-input bg-card px-4 py-3 text-left text-xl transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         @click="choose(i)"
       >
         <kbd class="rounded border px-2 text-sm text-muted-foreground">{{ i + 1 }}</kbd>

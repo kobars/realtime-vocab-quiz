@@ -96,6 +96,11 @@ it('keys 1–4 answer once: the choices lock with Checking… while it is pendin
   expect(choice(w, 0).attributes('aria-disabled')).toBe('true')
 })
 
+it('the focus ring of a choice is offset by the page color', async () => {
+  const w = await playing()
+  expect(choice(w, 0).classes()).toEqual(expect.arrayContaining(['focus-visible:ring-offset-2', 'focus-visible:ring-offset-background']))
+})
+
 it('intro: Start has the focus and asks for question 0; after a rejoin on a closed question it reads Continue', async () => {
   const w = await playing({ type: 'leaderboard', seq: 4, rebase: false, playerCount: 2, onlineCount: 2, entries: [] })
   expect(document.activeElement?.textContent?.trim()).toBe('Start')
@@ -430,6 +435,14 @@ it('phones: Quiz and Leaderboard tabs; the hidden question keeps its countdown a
   await tab(w, 'quiz').trigger('click')
   expect(w.get('[data-test="ring"]').attributes('aria-label')).toBe('13 seconds left')
   expect(port.next).not.toHaveBeenCalled()
+})
+
+it('phones: the one column may shrink below a long name, so the row truncates it and the page never scrolls sideways', async () => {
+  phone()
+  const w = await playing()
+  // happy-dom does no layout. Without a template the implicit column is `auto` and grows to the name's full width;
+  // grid-cols-1 is minmax(0, 1fr).
+  expect(w.get('#panel-quiz').element.parentElement?.classList).toContain('grid-cols-1')
 })
 
 it('phones: arrow keys, Home and End move the selected tab and the focus; only the selected tab is in the tab order', async () => {

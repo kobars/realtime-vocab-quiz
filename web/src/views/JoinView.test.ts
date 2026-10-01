@@ -84,6 +84,11 @@ async function screen(path = '/') {
   return { wrapper, router, id, name, describedBy, submit, button }
 }
 
+it('the header link is a 44 px touch target', async () => {
+  const { wrapper } = await screen()
+  expect(wrapper.get('header a').classes()).toContain('min-h-11')
+})
+
 describe('validation', () => {
   it('upper-cases the quiz ID as it is typed and puts no native length limit on the name', async () => {
     const { id, name } = await screen()
