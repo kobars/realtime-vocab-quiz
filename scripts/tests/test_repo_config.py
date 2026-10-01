@@ -48,3 +48,20 @@ def test_only_the_internal_job_runs_on_an_edit() -> None:
     assert skip_edit in _job("check")
     assert skip_edit in _job("integration")
     assert skip_edit not in _job("internal")
+
+
+def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "containers.yml").read_text(encoding="utf-8")
+    for check in (
+        "hadolint/hadolint:",
+        "shellcheck",
+        "docker compose -f {} config -q",
+        "scan-type: config",
+        "make build",
+        "scripts/smoke_images.sh",
+        "nginx -t",
+    ):
+        assert check in workflow, check
+    # Image scans fail on CRITICAL and HIGH findings that have a fix, for both images.
+    assert workflow.count("ignore-unfixed: true") == workflow.count("image-ref:") == 2
+    assert workflow.count("severity: CRITICAL,HIGH") == 2
