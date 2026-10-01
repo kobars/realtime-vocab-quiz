@@ -1,6 +1,6 @@
 // AI-ASSISTED: tests for QuizClient: connect, reconnect, seq wiring, liveness and answer retries, on a fake socket and fake timers.
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { type ClientEvent, QuizClient, type QuizClientOptions, type QuizSocket } from './client'
+import { type ClientEvent, QuizClient, type QuizClientOptions, type QuizSocket, SNAPSHOT_TIMEOUT_MS } from './client'
 import type { ServerMessage } from './types.generated'
 
 class FakeSocket implements QuizSocket {
@@ -205,6 +205,44 @@ it('retries a resync after UNAVAILABLE with backoff, until the snapshot', async 
   expect(events.filter((event) => event.type === 'leaderboard')).toMatchObject([{ seq: 3 }])
 })
 
+/** The gateway's token bucket drops the frame before parsing it, so its error names no request. */
+const bucketDrop = { type: 'error', code: 'RATE_LIMITED', message: 'message dropped: rate limited', requestType: null } as const
+const leaderboards = () => events.filter((event) => event.type === 'leaderboard').map((event) => event.seq)
+
+it('sends the outstanding resync again 1 s after a RATE_LIMITED that names no request, while frames keep arriving', async () => {
+  start()
+  const socket = await joinedSocket()
+  socket.receive(board(1))
+  socket.receive(board(3))
+  socket.receive(bucketDrop)
+  socket.receive(board(4))
+  socket.receive({ type: 'pong', seq: 4 })
+  await wait(999)
+  expect(socket.sent.slice(1)).toEqual([resync(0), resync(1)])
+  await wait(1)
+  expect(socket.sent.slice(1)).toEqual([resync(0), resync(1), resync(1)])
+  socket.receive({ type: 'snapshot', atSeq: 3, status: 'open' })
+  expect(leaderboards()).toEqual([1, 4])
+})
+
+it('sends a resync again each time its snapshot does not arrive in time, until it does', async () => {
+  start()
+  const socket = await joinedSocket()
+  socket.receive(board(2))
+  const resyncs = () => socket.sent.filter((message) => message.type === 'resync').length
+  for (let seq = 3; seq <= 7; seq++) {
+    await wait(SNAPSHOT_TIMEOUT_MS / 5)
+    socket.receive(board(seq))
+    socket.receive({ type: 'pong', seq })
+  }
+  expect(resyncs()).toBe(3)
+  await wait(SNAPSHOT_TIMEOUT_MS)
+  expect(resyncs()).toBe(4)
+  socket.receive({ type: 'snapshot', atSeq: 2, status: 'open' })
+  await wait(3 * SNAPSHOT_TIMEOUT_MS)
+  expect([resyncs(), leaderboards()]).toEqual([4, [3, 4, 5, 6, 7]])
+})
+
 it('resyncs when the broadcast that a pong announced has not arrived 1 s later', async () => {
   start()
   const socket = await joinedSocket()
@@ -235,6 +273,7 @@ it('drops next() while the socket is still connecting instead of throwing', asyn
   expect(() => client.next(0)).not.toThrow()
   socket.open()
   socket.receive(joined())
+  socket.receive({ type: 'snapshot', atSeq: 0, status: 'open' })
   socket.receive({ type: 'error', code: 'RATE_LIMITED', requestType: null } as Partial<ServerMessage>)
   await wait(5_000)
   expect(socket.types()).toEqual(['join', 'resync'])
@@ -651,4 +690,26 @@ it('cancels a pending next retry on a disconnect and leaves the next request to 
   second.receive(overload('RATE_LIMITED', null))
   await wait(5_000)
   expect([nexts(first), nexts(second)]).toEqual([[4], []])
+})
+
+it('sends a join that got UNAVAILABLE again after the growing backoff, then resends the unsettled answer', async () => {
+  uuids('s-1')
+  const client = start(() => 0.5)
+  const first = await joinedSocket()
+  client.answer(0, 2)
+  first.drop()
+  await wait(125)
+  const second = await connected()
+  second.receive({ type: 'error', code: 'UNAVAILABLE', requestType: 'join' })
+  await wait(124)
+  expect(second.types()).toEqual(['join'])
+  await wait(1)
+  second.receive({ type: 'error', code: 'UNAVAILABLE', requestType: 'join' })
+  second.receive({ type: 'pong', seq: 0 })
+  await wait(249)
+  expect(second.types()).toEqual(['join', 'join'])
+  await wait(1)
+  second.receive(joined())
+  expect(second.types()).toEqual(['join', 'join', 'join', 'resync', 'answer'])
+  expect(answers(second)).toEqual([answerMsg('s-1')])
 })

@@ -107,7 +107,7 @@ What the client does with an incoming `seq` (`L` = its `lastSeq`):
 | `snapshot` | Replace the standings; `L = atSeq`; then apply buffered broadcasts with `seq > L` in order |
 | `snapshot` after `quiz_ended` was applied | `status: open`: ignore it, and keep the final standings and `L`. It was read before the end and only reached the socket after the `quiz_ended` (one writer orders frames by enqueue time, not by Redis read time); an announced end is never undone, even by a store restart (`docs/spec/redis.md` §3.1). `status: ended`: apply it as above |
 
-Between sending `resync` and receiving `snapshot`, the client buffers broadcasts instead of applying them. `quiz_ended` is always applied, whatever its `seq`, and sets `L`; from then on the standings are final, and only a `snapshot` with `status: ended` or a second `quiz_ended` (after a store restart) replaces them.
+Between sending `resync` and receiving `snapshot`, the client buffers broadcasts instead of applying them, at most the newest 64 (the snapshot drops older ones; a gap left after it starts another resync). The client sends the same `resync` again 1 s after a `RATE_LIMITED` that names no request (the token bucket may have dropped it), and whenever no `snapshot` arrives within 5 s of sending it (a silent drop). `quiz_ended` is always applied, whatever its `seq`, and sets `L`; from then on the standings are final, and only a `snapshot` with `status: ended` or a second `quiz_ended` (after a store restart) replaces them.
 
 ## 4. Standings policy
 
