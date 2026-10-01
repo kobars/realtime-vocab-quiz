@@ -8,7 +8,7 @@ import pytest
 from redis.asyncio import Redis
 
 from quiz.adapters.redis import RedisStore
-from quiz.adapters.redis.keys import QuizKeys, quiz_keys
+from quiz.adapters.redis.keys import NO_QUIZ_TTL, QuizKeys, quiz_keys
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.scoring import score_answer
 from quiz.domain.session import Question
@@ -37,6 +37,27 @@ async def serve_at(client: Redis, keys: QuizKeys, i: int, ago_ms: int) -> None:
     await client.hset(keys.serve, "a", json.dumps([i, sec * 1000 + usec // 1000 - ago_ms, 0]))
 
 
+async def data(client: Redis, keys: QuizKeys) -> dict[str, object]:
+    """Read every data key of the quiz (all but the tick token and the channels)."""
+    out: dict[str, object] = {}
+    for name in QuizKeys._fields:
+        if name in NO_QUIZ_TTL:
+            continue
+        key = getattr(keys, name)
+        match await client.type(key):
+            case "hash":
+                out[name] = await client.hgetall(key)
+            case "set":
+                out[name] = await client.smembers(key)
+            case "zset":
+                out[name] = await client.zrange(key, 0, -1, withscores=True)
+            case "string":
+                out[name] = await client.get(key)
+            case kind:  # "none": the key does not exist
+                out[name] = kind
+    return out
+
+
 async def refused(call: Awaitable[object]) -> DomainError:
     with pytest.raises(DomainError) as info:
         await call
@@ -50,6 +71,7 @@ async def test_script_points_match_python_and_land_in_the_standings(
     for i, question in enumerate(QUESTIONS):
         await redis_store.serve_next(quiz_id, "a", i, "c1")
         await serve_at(redis_client, keys, i, ELAPSED[i % len(ELAPSED)])
+        await redis_client.delete(keys.dirty)  # join set it; only the answer may set it again
         choice = question.correct_choice if i < len(ELAPSED) else 3 - question.correct_choice
         r = (await redis_store.apply_answer(quiz_id, "a", i, choice, f"s{i}", "c1")).result
         _, points, elapsed = json.loads(str(await redis_client.hget(keys.answered, f"a|{i}")))
@@ -58,10 +80,11 @@ async def test_script_points_match_python_and_land_in_the_standings(
         total += expected
         assert (r.points, points, r.total, r.correct) == (expected, expected, total, correct)
         assert r.late == (elapsed > LIMIT_MS)
+        assert await redis_client.get(keys.dirty) == ("1" if expected else None)
     assert await redis_client.hget(keys.totals, "a") == str(total)
     assert decode_sort_score(int(await redis_client.zscore(keys.board, "a") or 0))[0] == total
     assert await redis_client.smembers(keys.scored) == {"a"}
-    assert (await redis_client.get(keys.dirty), await redis_client.get(keys.seq)) == ("1", "0")
+    assert await redis_client.get(keys.seq) == "0"
     assert json.loads(str(await redis_client.hget(keys.serve, "a")))[2] == 1  # the last finishes
 
 
@@ -85,7 +108,7 @@ async def test_writes_after_the_deadline_write_nothing_and_a_replay_still_answer
     await redis_store.serve_next(quiz_id, "a", 0, "c1")
     first = await redis_store.apply_answer(quiz_id, "a", 0, 0, "s1", "c1")
     await asyncio.sleep(0.35)
-    state = await redis_client.hgetall(keys.serve), await redis_client.hgetall(keys.subs)
+    state = await data(redis_client, keys)
     for user in ("a", "nobody"):  # the deadline check comes before the player check
         serve = redis_store.serve_next(quiz_id, user, 1, "c1")
         for call in (serve, redis_store.apply_answer(quiz_id, user, 0, 1, "s2", "c1")):
@@ -93,7 +116,7 @@ async def test_writes_after_the_deadline_write_nothing_and_a_replay_still_answer
             assert (error.code, error.end_seq) == (ErrorCode.QUIZ_ENDED, None)
     again = await redis_store.apply_answer(quiz_id, "a", 0, 0, "s1", "c1")
     assert (again.result, again.step_back) == (first.result, False)
-    assert (await redis_client.hgetall(keys.serve), await redis_client.hgetall(keys.subs)) == state
+    assert await data(redis_client, keys) == state
 
 
 async def test_unserved_index_and_stranger_are_refused_and_write_nothing(
