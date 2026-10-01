@@ -1,6 +1,6 @@
 // AI-ASSISTED: tests for the seq rules of the protocol client.
 import { describe, expect, it } from 'vitest'
-import { SeqTracker } from './seq'
+import { PONG_CHECK_MS, SeqTracker } from './seq'
 import type { Leaderboard, QuizEnded } from './types.generated'
 
 const board = (seq: number, rebase = false): Leaderboard => ({
@@ -33,7 +33,7 @@ const trackerAt = (atSeq: number, random = () => 0.5) => {
 describe('SeqTracker', () => {
   it('sends one resync with the last applied seq on joined, then resets to atSeq', () => {
     const tracker = trackerAt(4)
-    expect(tracker.joined(9)).toEqual({ apply: [], resync: { lastSeq: 4, delayMs: 0 } })
+    expect(tracker.joined(9)).toEqual({ apply: [], resync: { lastSeq: 4, delayMs: 0 }, check: null })
     expect(tracker.lastSeq).toBe(9)
   })
 
@@ -57,14 +57,14 @@ describe('SeqTracker', () => {
   it('applies seq = last + 1 and ignores a duplicate', () => {
     const tracker = trackerAt(3)
     expect(seqs(tracker.broadcast(board(4)).apply)).toEqual([4])
-    expect(tracker.broadcast(board(4))).toEqual({ apply: [], resync: null })
+    expect(tracker.broadcast(board(4))).toEqual({ apply: [], resync: null, check: null })
     expect(tracker.lastSeq).toBe(4)
   })
 
   it('waits 0–250 ms on a gap, then asks for one resync and buffers until the snapshot', () => {
     const tracker = trackerAt(3, () => 0.999999)
-    expect(tracker.broadcast(board(6))).toEqual({ apply: [], resync: { lastSeq: 3, delayMs: 250 } })
-    expect(tracker.broadcast(board(7))).toEqual({ apply: [], resync: null })
+    expect(tracker.broadcast(board(6))).toEqual({ apply: [], resync: { lastSeq: 3, delayMs: 250 }, check: null })
+    expect(tracker.broadcast(board(7))).toEqual({ apply: [], resync: null, check: null })
     expect(seqs(tracker.snapshot(5).apply)).toEqual([6, 7])
   })
 
@@ -80,7 +80,7 @@ describe('SeqTracker', () => {
 
   it('accepts a rebase frame after a gap with no resync', () => {
     const tracker = trackerAt(3)
-    expect(tracker.broadcast(board(9, true))).toEqual({ apply: [board(9, true)], resync: null })
+    expect(tracker.broadcast(board(9, true))).toEqual({ apply: [board(9, true)], resync: null, check: null })
     expect(tracker.lastSeq).toBe(9)
   })
 
@@ -91,29 +91,52 @@ describe('SeqTracker', () => {
     expect(tracker.lastSeq).toBe(2)
   })
 
-  it.each([
-    [7, { lastSeq: 6, delayMs: 0 }],
-    [3, { lastSeq: 6, delayMs: 0 }],
-    [6, null],
-    [null, null],
-  ])('on pong.seq %j asks for %j', (seq, resync) => {
-    expect(trackerAt(6).pong(seq)).toEqual({ apply: [], resync })
+  it.each([6, 5, 3, null])('ignores pong.seq %j at or below L = 6', (seq) => {
+    const tracker = trackerAt(6)
+    expect(tracker.pong(seq)).toEqual({ apply: [], resync: null, check: null })
+    expect(tracker.lastSeq).toBe(6)
   })
 
-  it('asks for one resync per gap, also when pongs follow', () => {
+  it('ignores a pong whose counter read is older than a frame already applied', () => {
+    const tracker = trackerAt(10)
+    tracker.broadcast(board(11))
+    expect(tracker.pong(10).resync).toBeNull()
+  })
+
+  it('does not resync at once on a pong.seq above L, but checks again after 1 s', () => {
+    expect(PONG_CHECK_MS).toBe(1000)
+    expect(trackerAt(6).pong(8)).toEqual({ apply: [], resync: null, check: { pongSeq: 8, delayMs: 1000 } })
+  })
+
+  it('resyncs on the pong check when L is still below that pong.seq', () => {
     const tracker = trackerAt(6)
     tracker.pong(8)
-    expect(tracker.pong(8).resync).toBeNull()
+    tracker.broadcast(board(7))
+    expect(tracker.pongCheck(8).resync).toEqual({ lastSeq: 7, delayMs: 0 })
+  })
+
+  it('does nothing on the pong check when the broadcast arrived in time', () => {
+    const tracker = trackerAt(6)
+    tracker.pong(7)
+    tracker.broadcast(board(7))
+    expect(tracker.pongCheck(7)).toEqual({ apply: [], resync: null, check: null })
+  })
+
+  it('asks for one resync per gap, also when pongs and pong checks follow', () => {
+    const tracker = trackerAt(6)
+    tracker.pongCheck(8)
+    expect(tracker.pong(8).check).toBeNull()
+    expect(tracker.pongCheck(8).resync).toBeNull()
     expect(tracker.broadcast(board(9)).resync).toBeNull()
   })
 
   it('always applies quiz_ended and sets lastSeq, even while resyncing', () => {
     const tracker = trackerAt(3)
     tracker.broadcast(board(6))
-    expect(tracker.broadcast(ended(12))).toEqual({ apply: [ended(12)], resync: null })
+    expect(tracker.broadcast(ended(12))).toEqual({ apply: [ended(12)], resync: null, check: null })
     expect(tracker.lastSeq).toBe(12)
     // The snapshot that answers the resync was read before the end: it must not replay frame 6.
-    expect(tracker.snapshot(5)).toEqual({ apply: [], resync: null })
+    expect(tracker.snapshot(5)).toEqual({ apply: [], resync: null, check: null })
     expect(tracker.lastSeq).toBe(12)
   })
 
@@ -121,9 +144,9 @@ describe('SeqTracker', () => {
     'keeps lastSeq at the final seq when an older snapshot (status %j) arrives after quiz_ended',
     (status) => {
       const tracker = trackerAt(4)
-      tracker.pong(6)
+      tracker.pongCheck(6)
       tracker.broadcast(ended(6))
-      expect(tracker.snapshot(4, status)).toEqual({ apply: [], resync: null })
+      expect(tracker.snapshot(4, status)).toEqual({ apply: [], resync: null, check: null })
       expect(tracker.lastSeq).toBe(6)
       expect(tracker.pong(6).resync).toBeNull()
     },
@@ -133,7 +156,7 @@ describe('SeqTracker', () => {
     const tracker = trackerAt(4)
     tracker.broadcast(ended(5))
     tracker.joined(5)
-    expect(tracker.snapshot(7, 'open')).toEqual({ apply: [], resync: null })
+    expect(tracker.snapshot(7, 'open')).toEqual({ apply: [], resync: null, check: null })
     expect(tracker.lastSeq).toBe(5)
   })
 
@@ -141,15 +164,15 @@ describe('SeqTracker', () => {
     const tracker = trackerAt(4)
     tracker.broadcast(ended(5))
     tracker.joined(5)
-    expect(tracker.snapshot(5, 'ended')).toEqual({ apply: [], resync: null })
+    expect(tracker.snapshot(5, 'ended')).toEqual({ apply: [], resync: null, check: null })
     expect(tracker.lastSeq).toBe(5)
   })
 
   it('drops leaderboard frames after quiz_ended instead of resyncing', () => {
     const tracker = trackerAt(3)
     tracker.broadcast(ended(4))
-    expect(tracker.broadcast(board(2))).toEqual({ apply: [], resync: null })
-    expect(tracker.broadcast(board(5))).toEqual({ apply: [], resync: null })
+    expect(tracker.broadcast(board(2))).toEqual({ apply: [], resync: null, check: null })
+    expect(tracker.broadcast(board(5))).toEqual({ apply: [], resync: null, check: null })
     expect(tracker.lastSeq).toBe(4)
   })
 })
