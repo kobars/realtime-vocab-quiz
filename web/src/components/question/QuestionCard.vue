@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the question screen: the countdown, the prompt and four choices (click or keys 1–4), locked while an answer is pending or the socket is down (UI spec §3.3, §6.1, §6.2). -->
+<!-- AI-ASSISTED: the question screen: the countdown, the prompt and four choices (click or keys 1–4), locked while an answer is pending or the socket is down, and Skip, locked while the socket is down (UI spec §3.3, §4.1, §6.1, §6.2). -->
 <script setup lang="ts">
 import { LoaderCircle } from '@lucide/vue'
 import { useEventListener } from '@vueuse/core'
@@ -17,11 +17,18 @@ const msLeft = useCountdown(() => store.msLeft(), () => props.question.deadlineA
 // `resyncing` is a healthy socket: requests go out at once (UI spec §4.1).
 const online = computed(() => store.connection === 'joined' || store.connection === 'resyncing')
 const locked = computed(() => store.pending !== null || !online.value)
+// Only a link that is coming back says so; after a final close or an unknown quiz no reconnect follows (UI spec §3.3).
+const waiting = computed(() => store.connection === 'connecting' || store.connection === 'reconnecting')
 
 watch(() => props.question.questionIndex, () => void nextTick(() => heading.value?.focus()), { immediate: true })
 
 function choose(choiceIndex: number): void {
   if (!locked.value) store.answer(choiceIndex)
+}
+
+// The client drops a `next` sent while the socket is down, so Skip waits for it (UI spec §4.1).
+function skip(): void {
+  if (online.value) store.next()
 }
 
 // Keys 1–4 choose, unless a text field has the focus or a modifier is held.
@@ -75,7 +82,7 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
       </button>
     </div>
     <p
-      v-if="!online"
+      v-if="waiting"
       class="text-sm text-muted-foreground"
     >
       {{ strings.quiz.waiting }}
@@ -91,7 +98,9 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
       <Button
         v-if="store.pending === null"
         variant="secondary"
-        @click="store.next()"
+        :aria-disabled="!online"
+        class="aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+        @click="skip"
       >
         {{ strings.quiz.skip }}
       </Button>

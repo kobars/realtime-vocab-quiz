@@ -1,6 +1,7 @@
-<!-- AI-ASSISTED: the quiz screen after the join: header with progress, score and rank, the connection pill and error messages, then intro, question, feedback or results by the client phase, with the score count-up and the answer announcement (UI spec §2, §3.2–§3.4, §3.6, §3.7, §6.3). -->
+<!-- AI-ASSISTED: the quiz screen after the join: header with progress, score and rank, the connection pill and error messages, then intro, question, feedback or results by the client phase, with the score count-up, the answer and rank announcements and the quiz time left on the intro (UI spec §2, §3.2–§3.4, §3.6, §3.7, §4.1, §6.3). -->
 <script setup lang="ts">
-import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
+import { useIntervalFn } from '@vueuse/core'
+import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import LeaderboardPanel from '@/components/leaderboard/LeaderboardPanel.vue'
 import AnswerFeedback from '@/components/question/AnswerFeedback.vue'
 import { useCountUp } from '@/components/question/motion'
@@ -32,8 +33,45 @@ watch(() => store.lastResult, (result) => {
   announcement.value = strings.quiz.announce(head, result.score)
 })
 
-const intro = computed(() => store.quiz !== null && (store.phase === 'intro' || store.phase === 'join'))
+// My rank, announced only when it changes and at most once every 5 s (UI spec §6.3).
+const RANK_GAP_MS = 5_000
+const rankSpoken = ref('')
+let rankTimer: ReturnType<typeof setTimeout> | null = null
+let rankDue = false
+function sayRank(): void {
+  if (store.myRank === null) return
+  rankSpoken.value = strings.quiz.announceRank(store.myRank, store.playerCount)
+  rankTimer = setTimeout(() => {
+    rankTimer = null
+    if (!rankDue) return
+    rankDue = false
+    sayRank()
+  }, RANK_GAP_MS)
+}
+watch(() => store.myRank, () => {
+  if (rankTimer === null) sayRank()
+  else rankDue = true
+})
+onBeforeUnmount(() => {
+  if (rankTimer !== null) clearTimeout(rankTimer)
+})
+
+// While a question is open the join re-asks for it (UI spec §4.2): no intro, so Continue never sends `cursor`.
+const intro = computed(() => store.quiz !== null && !store.quiz.cursorOpen && (store.phase === 'intro' || store.phase === 'join'))
 watch(intro, (shown) => shown && void nextTick(() => start.value?.$el.focus()), { immediate: true })
+// The client drops a `next` sent while the socket is down (UI spec §4.1); `resyncing` sends at once.
+const online = computed(() => store.connection === 'joined' || store.connection === 'resyncing')
+function begin(): void {
+  if (online.value) store.next()
+}
+
+// The quiz time left on the intro, read again each second; display only.
+const now = ref(store.now())
+useIntervalFn(() => (now.value = store.now()), 1_000)
+const quizLeft = computed(() => {
+  const seconds = Math.ceil(store.quizMsLeft(now.value) / 1_000)
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+})
 </script>
 
 <template>
@@ -64,6 +102,14 @@ watch(intro, (shown) => shown && void nextTick(() => start.value?.$el.focus()), 
     >
       {{ announcement }}
     </p>
+    <p
+      class="sr-only"
+      aria-live="polite"
+      aria-atomic="true"
+      data-test="rank-announce"
+    >
+      {{ rankSpoken }}
+    </p>
     <!-- A blocking card replaces the quiz column and the leaderboard, on every phase (UI spec §3.7). -->
     <ResultsView v-if="store.blocked === null && (store.phase === 'finished' || store.phase === 'results')" />
     <div
@@ -85,12 +131,21 @@ watch(intro, (shown) => shown && void nextTick(() => start.value?.$el.focus()), 
         class="flex flex-col items-start gap-3"
       >
         <p>{{ strings.quiz.intro(store.quiz.questionCount, store.quiz.timeLimitMs / 1_000) }}</p>
+        <p
+          data-test="quiz-left"
+          class="tabular-nums"
+        >
+          {{ strings.quiz.quizLeft(quizLeft) }}
+        </p>
         <p class="text-muted-foreground">
           {{ strings.quiz.rule }}
         </p>
         <Button
           ref="start"
-          @click="store.next()"
+          data-test="start"
+          :aria-disabled="!online"
+          class="aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+          @click="begin"
         >
           {{ store.quiz.cursor < 0 ? strings.quiz.start : strings.quiz.continue }}
         </Button>

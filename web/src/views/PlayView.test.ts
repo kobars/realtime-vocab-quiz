@@ -31,14 +31,20 @@ const choice = (w: VueWrapper, i: number) => w.get(`[data-choice="${i}"]`)
 const press = (key: string) => (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
 const frames = (ms: number) => vi.advanceTimersByTimeAsync(ms)
 
-async function playing(...first: Partial<ServerMessage>[]) {
-  useQuizStore().join('VOCAB-42', 'Ana')
-  await receive(joined(), snapshot(0), ...(first.length > 0 ? first : [question()]))
+async function view() {
   const wrapper = mount(PlayView, { props: { quizId: 'VOCAB-42' }, attachTo: document.body })
   wrappers.push(wrapper)
   await nextTick()
   return wrapper
 }
+
+async function playing(...first: Partial<ServerMessage>[]) {
+  useQuizStore().join('VOCAB-42', 'Ana')
+  await receive(joined(), snapshot(0), ...(first.length > 0 ? first : [question()]))
+  return view()
+}
+const board = (myRank: number, playerCount = 3): Partial<ServerMessage> => ({ type: 'leaderboard', seq: 4, rebase: false, playerCount, onlineCount: playerCount,
+  entries: [{ rank: myRank, userId: 'u1', displayName: 'Ana', score: 0 }] })
 
 function reducedMotion(): void {
   vi.spyOn(window, 'matchMedia').mockImplementation((query: string) =>
@@ -258,4 +264,94 @@ it('reduced motion: the points and the total show their final value at once', as
   await receive(result(2, 133))
   expect(w.get('[data-test="points"]').text()).toBe('+133 points including a speed bonus of +33')
   expect(w.get('[data-test="score"]').text()).toBe('Score 133')
+})
+
+it('while the socket is down, Start, Continue and Skip are locked and send nothing; resyncing leaves them enabled', async () => {
+  const w = await playing(board(1))
+  await receive(status('reconnecting', 1006))
+  expect(w.get('[data-test="start"]').attributes('aria-disabled')).toBe('true')
+  await w.get('[data-test="start"]').trigger('click')
+  await receive(status('open'), joined({ cursor: 2, cursorOpen: false }))
+  expect(w.get('[data-test="start"]').text()).toBe('Continue')
+  expect(w.get('[data-test="start"]').attributes('aria-disabled')).toBe('false')
+  await receive(status('reconnecting', 1006))
+  await w.get('[data-test="start"]').trigger('click')
+  expect(port.next).not.toHaveBeenCalled()
+  await receive(status('open'), joined({ cursor: 2, cursorOpen: false }))
+  await w.get('[data-test="start"]').trigger('click')
+  expect(port.next.mock.calls).toEqual([[3]])
+})
+
+it('Skip is locked while the socket is down', async () => {
+  const w = await playing()
+  clock = 21_000
+  await frames(50)
+  await receive(status('reconnecting', 1006))
+  const skip = w.get('[data-test="time-up"] button')
+  expect(skip.attributes('aria-disabled')).toBe('true')
+  await skip.trigger('click')
+  expect(port.next).not.toHaveBeenCalled()
+})
+
+it('a join on an open question shows no intro and no Continue, and asks for that question once', async () => {
+  useQuizStore().join('VOCAB-42', 'Ana')
+  await receive(joined({ cursor: 3, cursorOpen: true }), snapshot(0))
+  const w = await view()
+  expect(w.findAll('button').map((b) => b.text())).not.toContain('Continue')
+  expect(port.next.mock.calls).toEqual([[3]])
+  await receive(question(3))
+  expect(w.get('[data-test="progress"]').text()).toBe('Question 4 of 10')
+  expect(document.activeElement?.textContent?.trim()).toBe('bright')
+})
+
+it('the intro counts down the time the quiz has left', async () => {
+  const w = await playing(board(1))
+  expect(w.get('[data-test="quiz-left"]').text()).toBe('10:00 left in the quiz')
+  clock = 61_000
+  await frames(1_000)
+  expect(w.get('[data-test="quiz-left"]').text()).toBe('8:59 left in the quiz')
+})
+
+it('the countdown announces 10 s and 5 s left once each, never every second, and starts over on the next question', async () => {
+  const w = await playing()
+  const live = w.get('[data-test="ring-announce"]')
+  expect([live.attributes('aria-live'), live.attributes('aria-atomic')]).toEqual(['polite', 'true'])
+  const heard: string[] = []
+  for (let t = 0; t <= 20_000; t += 250) {
+    clock = t
+    await frames(20)
+    heard.push(live.text())
+  }
+  expect([...new Set(heard)]).toEqual(['', '10 seconds left', '5 seconds left'])
+  await receive(question(1))
+  await frames(20)
+  expect(live.text()).toBe('')
+})
+
+it('the rank is announced in its own polite region only when it changes, at most once every 5 s', async () => {
+  const w = await playing()
+  const rank = w.get('[data-test="rank-announce"]')
+  expect([rank.attributes('aria-live'), rank.attributes('aria-atomic')]).toEqual(['polite', 'true'])
+  expect(w.get('[data-test="announce"]').attributes('aria-atomic')).toBe('true')
+  expect(rank.text()).toBe('')
+  await receive(board(2))
+  expect(rank.text()).toBe('Rank 2 of 3')
+  await frames(1_000)
+  await receive(board(1))
+  expect(rank.text()).toBe('Rank 2 of 3')
+  await frames(4_000)
+  expect(rank.text()).toBe('Rank 1 of 3')
+  await frames(5_000)
+  await receive(board(1, 4))
+  expect(rank.text()).toBe('Rank 1 of 3')
+})
+
+it.each([
+  ['a final close', status('closed', 1008)],
+  ['QUIZ_NOT_FOUND', error('QUIZ_NOT_FOUND')],
+])('after %s no Waiting for the connection note stays, and the choices stay locked', async (_, event) => {
+  const w = await playing()
+  await receive(event as ClientEvent)
+  expect(w.text()).not.toContain('Waiting for the connection…')
+  expect(choice(w, 0).attributes('aria-disabled')).toBe('true')
 })
