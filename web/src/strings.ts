@@ -1,7 +1,18 @@
 // AI-ASSISTED: every piece of UI copy in one module, so a translation can be added later.
 export const strings = {
   appName: 'Vocab Quiz',
-  join: { title: 'Join a quiz' },
+  join: {
+    title: 'Real-time vocabulary quiz',
+    quizIdLabel: 'Quiz ID',
+    quizIdHint: 'For example VOCAB-42',
+    nameLabel: 'Your name',
+    submit: 'Join',
+    joining: 'Joining…',
+    quizIdInvalid: 'Use 3–16 letters, digits or dashes, like VOCAB-42',
+    nameRequired: 'Enter your name',
+    nameTooLong: 'Use at most 32 characters',
+    notFound: 'No quiz with this ID',
+  },
   quiz: { title: (quizId: string) => `Quiz ${quizId}` },
   leaderboard: {
     title: 'Leaderboard',
