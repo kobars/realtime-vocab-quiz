@@ -84,3 +84,61 @@ markers = [
     "acceptance: the locked acceptance tests (set by folder)",
     "slow: tests that take more than a second",
 ]
+
+# The layer rules. main is the composition root: it may import everything, and nothing imports it.
+[tool.importlinter]
+root_package = "quiz"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "The domain imports nothing outside itself"
+type = "forbidden"
+source_modules = ["quiz.domain"]
+forbidden_modules = [
+    "quiz.contracts", "quiz.ports", "quiz.app", "quiz.adapters", "quiz.fanout", "quiz.obs",
+    "quiz.config", "quiz.main",
+    "pydantic", "pydantic_settings", "fastapi", "starlette", "redis", "uvicorn", "structlog",
+    "prometheus_client",
+]
+
+[[tool.importlinter.contracts]]
+name = "Ports depend only on the domain"
+type = "forbidden"
+source_modules = ["quiz.ports"]
+forbidden_modules = [
+    "quiz.app", "quiz.adapters", "quiz.fanout", "quiz.config", "quiz.main", "redis", "fastapi",
+]
+
+[[tool.importlinter.contracts]]
+name = "The use cases depend only on the domain, the ports and the wire contracts"
+type = "forbidden"
+source_modules = ["quiz.app"]
+forbidden_modules = [
+    "quiz.adapters", "quiz.fanout", "quiz.config", "quiz.main", "redis", "fastapi", "starlette",
+]
+
+[[tool.importlinter.contracts]]
+name = "Adapters never import each other"
+type = "independence"
+modules = [
+    "quiz.adapters.memory", "quiz.adapters.redis", "quiz.adapters.mock_auth",
+    "quiz.adapters.mock_questions",
+]
+
+[[tool.importlinter.contracts]]
+name = "Store and mock adapters depend only on the ports, the domain and the wire contracts"
+type = "forbidden"
+source_modules = [
+    "quiz.adapters.memory", "quiz.adapters.redis", "quiz.adapters.mock_auth",
+    "quiz.adapters.mock_questions",
+]
+forbidden_modules = ["quiz.app", "quiz.fanout", "quiz.config", "quiz.main"]
+
+[[tool.importlinter.contracts]]
+name = "Nothing imports the composition root"
+type = "forbidden"
+source_modules = [
+    "quiz.domain", "quiz.contracts", "quiz.ports", "quiz.app", "quiz.adapters", "quiz.fanout",
+    "quiz.obs", "quiz.config",
+]
+forbidden_modules = ["quiz.main"]

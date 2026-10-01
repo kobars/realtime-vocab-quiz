@@ -32,6 +32,7 @@ check: ## Run every check a change must pass
 	$(call step,ruff lint,cd api && uv run --locked ruff check . ../scripts)
 	$(call step,ruff format,cd api && uv run --locked ruff format --check . ../scripts)
 	$(call step,mypy,cd api && uv run --locked mypy)
+	$(call step,import layers,cd api && uv run --locked lint-imports)
 	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance")
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,contracts drift,uv run --project api --locked python scripts/gen_contracts.py --check)
