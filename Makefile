@@ -23,6 +23,7 @@ test-integration: ## Run the tests that need Redis
 	@echo "not yet"
 check: ## Run every check a change must pass
 	uv run --project api --locked python -c "import quiz"
+	pnpm -C web install --frozen-lockfile
 acceptance: ## Run the acceptance tests
 	@echo "not yet"
 load: ## Run the load scenarios with the bot swarm
