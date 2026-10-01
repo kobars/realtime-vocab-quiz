@@ -13,7 +13,7 @@ from functools import cache
 
 from fastapi import FastAPI
 from redis import exceptions as redis_errors
-from redis.asyncio import Redis
+from redis.asyncio import BlockingConnectionPool, Redis
 
 from quiz.adapters.http import HttpDeps, install
 from quiz.adapters.memory import MemoryStore
@@ -89,7 +89,13 @@ def _wire(settings: Settings, clock: Clock | None) -> Services:
             settings, quiz_clock, memory, MemoryTicketStore(wall_clock_ms), bank, service
         )
     # Redis reads its own TIME for quiz time; the monotonic clock only paces the resync limit.
-    client = Redis.from_url(settings.redis_url, decode_responses=True)  # connects on first use
+    pool = BlockingConnectionPool.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        max_connections=settings.redis_max_connections,
+        timeout=settings.redis_pool_timeout_ms / 1000,
+    )
+    client = Redis.from_pool(pool)  # connects on first use; aclose() closes the pool too
     redis, tickets = RedisStore(client, limits=limits), RedisTicketStore(client)
     service = QuizService(redis, bank, monotonic_ms)
     start: list[Hook] = [redis.start]
