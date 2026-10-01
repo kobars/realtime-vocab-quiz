@@ -11,15 +11,20 @@ import { strings } from '@/strings'
 
 let emit: (event: ClientEvent) => void
 let start: ReturnType<typeof vi.fn>
+/** Status 0 stands for a network failure. */
 let preview: { status: number; body: unknown }
 const open = { title: 'Everyday words', questionCount: 10, status: 'open', players: 3 }
+const missing = { error: 'QUIZ_NOT_FOUND', message: 'Quiz not found.' }
 
 beforeEach(() => {
   setActivePinia(createPinia())
   sessionStorage.clear()
   start = vi.fn()
   preview = { status: 200, body: open }
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(preview.body), { status: preview.status })))
+  vi.stubGlobal('fetch', vi.fn(async () => {
+    if (preview.status === 0) throw new TypeError('offline')
+    return new Response(JSON.stringify(preview.body), { status: preview.status })
+  }))
   configureQuizStore({
     createClient: (onEvent) => {
       emit = onEvent
@@ -117,17 +122,62 @@ describe('preview', () => {
     const { wrapper } = await screen('/q/VOCAB-42')
     expect(wrapper.text()).toContain(open.title)
     expect(wrapper.text()).toContain(strings.join.preview.players(3))
-    expect(fetch).toHaveBeenCalledWith('/api/quizzes/VOCAB-42')
+    expect(fetch).toHaveBeenCalledWith('/api/quizzes/VOCAB-42', expect.anything())
   })
 
   it('shows "no quiz" under the field when the preview finds none, and does not join', async () => {
-    preview = { status: 404, body: {} }
+    preview = { status: 404, body: missing }
     const { id, name, describedBy, submit } = await screen()
     await id.setValue('NOPE-1')
     await name.setValue('Ana')
     await submit()
     expect(describedBy(id)).toContain(strings.join.notFound)
     expect(start).not.toHaveBeenCalled()
+  })
+
+  it('keeps "no quiz" when the field is left again without an edit', async () => {
+    preview = { status: 404, body: missing }
+    const { id, describedBy } = await screen()
+    await id.setValue('NOPE-1')
+    await id.trigger('blur')
+    await flushPromises()
+    expect(describedBy(id)).toContain(strings.join.notFound)
+    await id.trigger('blur')
+    await flushPromises()
+    expect(describedBy(id)).toContain(strings.join.notFound)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['a server error', 503, {}],
+    ['a network failure', 0, null],
+    ['a body of the wrong shape', 200, { ...open, status: 'paused' }],
+    ['a 404 from a missing route', 404, { detail: 'Not Found' }],
+  ])('shows no preview after %s and still joins', async (_, status, body) => {
+    preview = { status, body }
+    const { wrapper, id, name, describedBy, submit } = await screen()
+    await id.setValue('VOCAB-42')
+    await name.setValue('Ana')
+    await submit()
+    expect(wrapper.text()).not.toContain(open.title)
+    expect(describedBy(id)).not.toContain(strings.join.notFound)
+    expect(start).toHaveBeenCalledWith('VOCAB-42', 'Ana')
+  })
+
+  it.each([
+    ['a miss', 404, missing],
+    ['a failed lookup', 503, {}],
+  ])('asks again on submit after %s', async (_, status, body) => {
+    preview = { status, body }
+    const { id, name, submit } = await screen()
+    await id.setValue('VOCAB-42')
+    await id.trigger('blur')
+    await flushPromises()
+    preview = { status: 200, body: open }
+    await name.setValue('Ana')
+    await submit()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(start).toHaveBeenCalledWith('VOCAB-42', 'Ana')
   })
 
   it('says when the quiz has ended and offers its results', async () => {
@@ -201,5 +251,53 @@ describe('join', () => {
     const { router } = await joining()
     emit({ v: 1, type: 'error', code: 'QUIZ_ENDED', message: '', requestType: 'join' })
     await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/quiz/VOCAB-42'))
+  })
+
+  describe('while the lookup runs', () => {
+    /** Each lookup waits until the test answers it, in any order. */
+    function heldLookups() {
+      const held: Array<(response: Response) => void> = []
+      vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => held.push(resolve))))
+      return (index: number, status: number, body: unknown) => {
+        held[index]?.(new Response(JSON.stringify(body), { status }))
+        return flushPromises()
+      }
+    }
+
+    async function submitted() {
+      const answer = heldLookups()
+      sessionStorage.setItem('quiz.displayName', 'Ana')
+      const view = await screen('/?quiz=VOCAB-42')
+      await view.submit()
+      expect(view.button()).toBe(strings.join.joining)
+      return { ...view, answer }
+    }
+
+    it('ignores a link opened meanwhile and blocks the quiz that was sent when it is missing', async () => {
+      const { router, id, describedBy, button, answer } = await submitted()
+      await router.push('/?quiz=OTHER-1')
+      await flushPromises()
+      await answer(1, 200, open)
+      await answer(0, 404, missing)
+      expect(id.element.value).toBe('VOCAB-42')
+      expect(describedBy(id)).toContain(strings.join.notFound)
+      expect(button()).toBe(strings.join.submit)
+      expect(start).not.toHaveBeenCalled()
+    })
+
+    it('ignores a link opened meanwhile and joins the quiz that was checked', async () => {
+      const { router, answer } = await submitted()
+      await router.push('/?quiz=OTHER-1')
+      await flushPromises()
+      await answer(0, 200, open)
+      expect(start).toHaveBeenCalledWith('VOCAB-42', 'Ana')
+    })
+
+    it('does not join once the screen has closed', async () => {
+      const { wrapper, answer } = await submitted()
+      wrapper.unmount()
+      await answer(0, 200, open)
+      expect(start).not.toHaveBeenCalled()
+    })
   })
 })

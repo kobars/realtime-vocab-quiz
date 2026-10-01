@@ -56,16 +56,34 @@ describe('quiz preview', () => {
   it('reads the public quiz information', async () => {
     const fetchFn = reply(200, open)
     expect(await fetchQuizPreview('VOCAB-42', fetchFn)).toEqual({ kind: 'found', quiz: open })
-    expect(fetchFn).toHaveBeenCalledWith('/api/quizzes/VOCAB-42')
+    expect(fetchFn).toHaveBeenCalledWith('/api/quizzes/VOCAB-42', expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 
-  it('maps 404 to not found', async () =>
-    expect(await fetchQuizPreview('NOPE-1', reply(404, { title: '' }))).toEqual({ kind: 'not-found' }))
+  it('maps the endpoint\'s own 404 to not found', async () =>
+    expect(await fetchQuizPreview('NOPE-1', reply(404, { error: 'QUIZ_NOT_FOUND', message: 'Quiz not found.' })))
+      .toEqual({ kind: 'not-found' }))
 
   it.each([
     ['a server error', reply(503, {})],
     ['a body of the wrong shape', reply(200, { ...open, status: 'paused' })],
     ['a network failure', vi.fn(async () => Promise.reject(new TypeError('offline')))],
+    ['a 404 from a missing route', reply(404, { detail: 'Not Found' })],
+    ['a 404 without a JSON body', vi.fn(async () => new Response('<h1>Not Found</h1>', { status: 404 }))],
   ])('treats %s as unavailable', async (_, fetchFn) =>
     expect(await fetchQuizPreview('VOCAB-42', fetchFn)).toEqual({ kind: 'unavailable' }))
+
+  it('gives up on a request that never answers and aborts it', async () => {
+    let signal: AbortSignal | undefined
+    const fetchFn = vi.fn((_url: string, init: RequestInit) => {
+      signal = init.signal ?? undefined
+      return new Promise<Response>(() => {})
+    })
+    expect(await fetchQuizPreview('VOCAB-42', fetchFn, '/api', 10)).toEqual({ kind: 'unavailable' })
+    expect(signal?.aborted).toBe(true)
+  })
+
+  it('gives up on a body that never finishes', async () => {
+    const fetchFn = vi.fn(async () => new Response(new ReadableStream({ start: () => {} }), { status: 200 }))
+    expect(await fetchQuizPreview('VOCAB-42', fetchFn, '/api', 10)).toEqual({ kind: 'unavailable' })
+  })
 })
