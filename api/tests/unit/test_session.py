@@ -69,7 +69,7 @@ def test_lateness_is_decided_at_answer_time(elapsed: int, expected: tuple[int, b
 def test_refused_requests() -> None:
     assert refused(SERVED.state, ServeNext("bob", 0), START) == "NOT_JOINED"
     assert refused(SERVED.state, Answer("ann", 1, 0, "s1"), START) == "QUESTION_NOT_OPEN"
-    assert refused(SERVED.state, ServeNext("ann", 2), START) == "INVALID_STATE"
+    assert refused(SERVED.state, ServeNext("ann", 3), START) == "INVALID_STATE"
     for command in (Join("bob"), ServeNext("ann", 1), Answer("ann", 0, 2, "s1")):
         assert refused(SERVED.state, command, DEADLINE) == "QUIZ_ENDED"
 
@@ -83,6 +83,31 @@ def test_skips_the_last_answer_finishes_and_a_repeat_of_next_n() -> None:
     assert finish == Step(done.state, (), ev.PlayerFinished("ann", 150))
     skipped = transition(last, ServeNext("ann", 2), START + 200)
     assert skipped.events == (ev.QuestionSkipped("ann", 1), ev.PlayerFinished("ann", 0))
+
+
+FOUR = new_quiz([Question(f"q{i}", 0) for i in range(4)], start_ms=START, window_ms=60_000)
+JOINED = transition(FOUR, Join("ann"), START).state
+OPEN = transition(transition(JOINED, ServeNext("ann", 0), START).state, ServeNext("ann", 1), START)
+CLOSED = transition(OPEN.state, Answer("ann", 1, 0, "s1"), START + 100)
+
+
+@pytest.mark.parametrize(
+    ("state", "skipped"),
+    [(JOINED, ()), (OPEN.state, (ev.QuestionSkipped("ann", 1),)), (CLOSED.state, ())],
+    ids=["nothing-served", "question-open", "question-closed"],
+)
+def test_next_n_finishes_from_any_cursor(state: QuizState, skipped: tuple[ev.Event, ...]) -> None:
+    total = state.players["ann"].standing.total
+    done = transition(state, ServeNext("ann", 4), START + 200)
+    finished = ev.PlayerFinished("ann", total)
+    assert (done.events, done.reply) == ((*skipped, finished), finished)
+    player = done.state.players["ann"]
+    assert (player.finished, player.cursor_open) == (True, False)
+    assert transition(done.state, ServeNext("ann", 4), START + 300).events == ()
+    after = state.players["ann"].cursor + 1
+    assert refused(done.state, ServeNext("ann", after), START + 300) == "INVALID_STATE"
+    if skipped:
+        assert refused(done.state, Answer("ann", 1, 0, "s9"), START + 300) == "ALREADY_ANSWERED"
 
 
 def test_quiz_ended_is_broadcast_once() -> None:
