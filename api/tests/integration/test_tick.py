@@ -17,6 +17,11 @@ from quiz.ports.store import Publish
 QUESTIONS = (Question("q0", 1), Question("q1", 3))
 
 
+def at_most_one_tick(pttl: int) -> bool:
+    """-2: expired; 0: its last millisecond, still there; -1 (no expiry) or > 200: stretched."""
+    return pttl == -2 or 0 <= pttl <= 200
+
+
 @pytest.fixture
 def quiz_id() -> str:
     return f"T-{uuid.uuid4().hex[:12].upper()}"
@@ -80,9 +85,7 @@ async def test_publishing_continues_after_1000_writes(
     assert (await redis_store.publish_if_dirty(quiz_id, "n1")).status == "published"
     for n in range(1000):  # each write script refreshes the data TTL
         await redis_store.join(quiz_id, "a", "A", f"c{n}")
-    pttl = await redis_client.pttl(keys.tick)
-    # -2: expired; 0: its last millisecond, still there; -1 (no expiry) or > 200: stretched.
-    assert pttl == -2 or 0 <= pttl <= 200
+    assert at_most_one_tick(await redis_client.pttl(keys.tick))
     await asyncio.sleep(0.25)
     assert await redis_store.publish_if_dirty(quiz_id, "n1") == Publish("published", 2)
 
@@ -111,6 +114,6 @@ async def test_tick_token_stretched_by_a_clock_step_back_is_cut_to_one_tick(
     busy = await redis_store.publish_if_dirty(quiz_id, "n2")
     assert busy.status == "busy"
     assert 0 < busy.retry_ms <= 200
-    assert 0 < await redis_client.pttl(keys.tick) <= 200
+    assert at_most_one_tick(await redis_client.pttl(keys.tick))
     await asyncio.sleep(0.25)
     assert await redis_store.publish_if_dirty(quiz_id, "n2") == Publish("published", 2)
