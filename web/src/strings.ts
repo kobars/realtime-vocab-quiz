@@ -16,6 +16,15 @@ export const strings = {
     asOf: (seq: number) => `As of update ${seq}`,
     final: 'Final standings',
   },
+  results: {
+    finished: 'You finished!',
+    provisional: 'Provisional',
+    rank: (rank: number, players: number) => `Rank #${rank} of ${players}`,
+    canChange: (time: string) => `Your rank can still change until the quiz ends in ${time}.`,
+    points: (score: number) => `${score} points`,
+    title: 'Final results',
+    placed: (rank: number, players: number) => `You placed #${rank} of ${players}`,
+  },
   notFound: {
     title: 'Page not found',
     body: 'There is no page at this address.',
