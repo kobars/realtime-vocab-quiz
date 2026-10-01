@@ -1,6 +1,8 @@
 # AI-ASSISTED: the joined sockets of this node per quiz, session replacement and the leave grace.
 """Which socket of this node serves which quiz: a broadcast reaches every local socket of the
 quiz, and a connection that another join replaced is closed here when it lives on this node.
+Sockets are tracked from the accept on, so a replacement also closes a socket whose own join
+reply has not reached the node yet: the store took that join first, its reply comes last.
 
 A joined socket that drops keeps its presence for the grace period, then ``leave`` runs with its
 own connection id. Timers are per connection and nothing cancels them: ``leave`` compares the
@@ -22,9 +24,13 @@ log = logging.getLogger(__name__)
 class Registry:
     def __init__(self, store: Store, grace_ms: int) -> None:
         self._store, self._grace_s = store, grace_ms / 1000
-        self._senders: dict[str, Sender] = {}  # conn_id → its sender
+        self._senders: dict[str, Sender] = {}  # conn_id → its sender, joined or not
         self._quizzes: dict[str, dict[str, Sender]] = {}  # quiz_id → conn_id → sender
         self._leaving: set[asyncio.Task[None]] = set()  # grace timers, held until done
+
+    def track(self, conn_id: str, sender: Sender) -> None:
+        """Record an accepted socket, before its join."""
+        self._senders[conn_id] = sender
 
     def bind(self, conn: Connection, sender: Sender) -> None:
         """Record a joined socket."""

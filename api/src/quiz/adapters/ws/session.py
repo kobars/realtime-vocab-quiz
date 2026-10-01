@@ -86,6 +86,7 @@ async def serve(
     ws: WebSocket, conn: Connection, limiter: RateLimiter, sender: Sender, deps: Deps
 ) -> int:
     """Run until the client leaves or the socket is closed; return the close code."""
+    deps.registry.track(conn.conn_id, sender)
     receiver = asyncio.create_task(_receive(ws, conn, limiter, sender, deps))
     try:
         await asyncio.wait({receiver, sender.task}, return_when=asyncio.FIRST_COMPLETED)
