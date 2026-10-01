@@ -14,8 +14,9 @@ from quiz.contracts.codec import MAX_FRAME_BYTES
 from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
 
 KIB = 1024
-# Docker's default address pools for bridge networks, where the compose network's nginx lives.
-DOCKER_BRIDGE_POOLS = ("172.16.0.0/12", "192.168.0.0/16")
+# The local host only: a proxy elsewhere (nginx on the compose network) is named by its address or
+# its network's subnet, never by a whole private range that clients may share with it.
+LOCAL_PROXIES = ("127.0.0.1/32", "::1/128")
 
 
 def _default_node_id() -> str:
@@ -50,7 +51,7 @@ class Settings(BaseSettings):
     per_ip_conn_cap: PositiveInt = 50  # above it HTTP 429; raised for the demo and load runs
     # X-Forwarded-For is trusted only from these peers.
     trusted_proxies: Annotated[tuple[IPv4Network | IPv6Network, ...], NoDecode] = tuple(
-        ip_network(pool) for pool in DOCKER_BRIDGE_POOLS
+        ip_network(proxy) for proxy in LOCAL_PROXIES
     )
 
     admin_mock: bool = False  # MOCK: the quiz admin endpoints exist only when set

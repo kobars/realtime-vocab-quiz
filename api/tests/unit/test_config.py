@@ -22,7 +22,7 @@ def test_defaults_match_the_spec() -> None:
     assert (s.rate_limit_per_s, s.rate_limit_burst) == (20, 40)
     assert (s.per_ip_conn_cap, s.max_connections) == (50, 10_000)
     assert s.allowed_origins == ("http://localhost:8080", "http://127.0.0.1:8080")
-    assert s.trusted_proxies == (ip_network("172.16.0.0/12"), ip_network("192.168.0.0/16"))
+    assert s.trusted_proxies == (ip_network("127.0.0.1/32"), ip_network("::1/128"))
     assert s.node_id
     assert (s.admin_mock, s.admin_token) == (False, None)
 
