@@ -50,9 +50,10 @@ def _reachable() -> Iterator[None]:
 
 
 async def _messages(pubsub: PubSub) -> AsyncIterator[str]:
-    async for message in pubsub.listen():
-        if message["type"] == "message":
-            yield message["data"]
+    with _reachable():
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                yield message["data"]
 
 
 class RedisStore:
@@ -190,7 +191,9 @@ class RedisStore:
         try:
             with _reachable():
                 await pubsub.subscribe(quiz_keys(quiz_id, self._prefix).events)
-                await pubsub.get_message(timeout=5)  # the confirmation
+                if await pubsub.get_message(timeout=5) is None:
+                    msg = "Redis did not confirm the subscription"
+                    raise ConnectionError(msg)
             yield _messages(pubsub)
         finally:
             await pubsub.aclose()  # type: ignore[no-untyped-call]
