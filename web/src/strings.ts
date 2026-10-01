@@ -14,6 +14,7 @@ export const strings = {
     nameRequired: 'Enter your name',
     nameTooLong: 'Use at most 32 characters',
     notFound: 'No quiz with this ID',
+    failed: 'Could not join, try again',
     ended: 'This quiz has ended. You can still see the final results.',
     preview: {
       open: 'Open',
