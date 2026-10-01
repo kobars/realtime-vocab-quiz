@@ -23,7 +23,7 @@ Switching the look later means replacing the token values in one file (§7.3); n
 |---|---|
 | `/` | Landing and join (§3.1) |
 | `/quiz/:quizId` | Everything after the join: intro, question, feedback, finished and results, chosen by the client state (§4) |
-| `/q/:quizId` | Short share link; redirects to `/quiz/:quizId` |
+| `/q/:quizId` | Short share link; redirects to `/?quiz=:quizId`, the join screen with the quiz ID filled in |
 | any other path | "Page not found" with a link back to `/` |
 
 - **Phones (below 1024 px):** one column. A two-tab switch at the top, "Quiz" and "Leaderboard", with my rank and score always visible in the header, so the leaderboard tab is never needed to know where I stand.
