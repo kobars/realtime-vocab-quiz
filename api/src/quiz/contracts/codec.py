@@ -72,12 +72,14 @@ def parse_client_message(raw: bytes) -> ClientMessage | ProtocolError:  # noqa: 
         return _error(ErrorCode.INVALID_MESSAGE, "not a UTF-8 JSON text")
     if not isinstance(data, dict):
         return _error(ErrorCode.INVALID_MESSAGE, "not a JSON object")
+    kind = data.get("type")
+    known = kind if isinstance(kind, str) and kind in CLIENT_TYPES else None
     if "v" not in data:
-        return _error(ErrorCode.INVALID_MESSAGE, "missing field v")
+        return _error(ErrorCode.INVALID_MESSAGE, "missing field v", known)
     version = data["v"]
     if type(version) is not int or version != 1:
-        return _error(ErrorCode.UNSUPPORTED_VERSION, "only protocol version 1 is supported")
-    kind = data.get("type")
+        msg = "only protocol version 1 is supported"
+        return _error(ErrorCode.UNSUPPORTED_VERSION, msg, known)
     if not isinstance(kind, str):
         return _error(ErrorCode.INVALID_MESSAGE, "missing or non-string field type")
     if kind not in CLIENT_TYPES:
