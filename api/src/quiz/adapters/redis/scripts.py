@@ -3,6 +3,7 @@
 
 from collections.abc import Iterable, Sequence
 from importlib.resources import files
+from importlib.resources.abc import Traversable
 
 from redis.asyncio import Redis
 from redis.exceptions import NoScriptError
@@ -10,8 +11,15 @@ from redis.exceptions import NoScriptError
 from quiz.adapters.redis.keys import NO_QUIZ_TTL, QUIZ_TTL_MS, QuizKeys
 
 _LUA = files("quiz.adapters.redis") / "lua"
-# Every .lua file beside lib/ is one script, named after its file.
-SCRIPTS = tuple(sorted(f.name.removesuffix(".lua") for f in _LUA.iterdir() if f.is_file()))
+
+
+def script_names(folder: Traversable) -> tuple[str, ...]:
+    """Every .lua file beside lib/ is one script, named after its file; other files are not."""
+    lua = (f.name for f in folder.iterdir() if f.is_file() and f.name.endswith(".lua"))
+    return tuple(sorted(name.removesuffix(".lua") for name in lua))
+
+
+SCRIPTS = script_names(_LUA)
 SCORING_LIBS: dict[str, tuple[str, ...]] = {"score_answer": ("points",)}
 
 type Reply = list[str | int | None]
