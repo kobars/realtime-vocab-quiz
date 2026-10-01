@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from functools import partial
 from typing import Any, cast
 
+import pytest
 import uvicorn
 from fastapi import WebSocket
 from starlette.testclient import TestClient
@@ -108,6 +109,20 @@ async def test_a_client_that_never_reads_is_conflated_then_closed_with_1013() ->
     assert [f.get("code") for f in draining.frames][-1] == "UNAVAILABLE"
     assert draining.closed == 1013
     assert (len(fast.frames), fast.closed) == (50, 0)
+
+
+async def test_a_failed_leave_is_logged_and_not_raised(caplog: pytest.LogCaptureFixture) -> None:
+    class Down:
+        async def leave(self, *_: str) -> bool:
+            msg = "redis is down"
+            raise ConnectionError(msg)
+
+    registry = Registry(cast("Store", Down()), 1)
+    conn = Connection("c0", "u0", "VOCAB-42")
+    registry.bind(conn, sender_of(Socket()))
+    registry.drop(conn)
+    await asyncio.sleep(0.05)
+    assert "the leave of a closed connection failed" in caplog.text
 
 
 def tickets(client: TestClient, count: int) -> list[str | None]:  # all for one user
