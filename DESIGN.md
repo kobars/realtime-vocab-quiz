@@ -533,71 +533,7 @@ commands and results are in each AI-LOG entry.
 
 <!-- AI-ASSISTED-END -->
 
-## 16. GenAI roadmap
-
-<!-- AI-ASSISTED-BEGIN: drafted with Claude Code from the ports and the data the store already keeps, checked by hand against the architecture. -->
-
-**One rule for all of it: generative AI stays off the real-time path.** Scoring must stay exact,
-cheap and repeatable (AC-4), and the tick has a 200 ms budget. So a model never decides points
-during a quiz and never runs inside a Lua script or a socket handler. It runs before the quiz
-(content), between quizzes (difficulty) or in its own service with its own latency budget
-(speech). Each feature enters through a port that already exists or a new one beside it, so
-the quiz core does not change.
-
-| Feature | Where it fits | Main risks | How to measure it |
-|---|---|---|---|
-| Question generation with evals | An offline pipeline writes vocabulary items into the content service behind the `QuestionBank` port | Wrong answer keys, ambiguous distractors, items at the wrong level, unsafe or biased content | An eval suite gates every batch; live item statistics after release |
-| Adaptive difficulty | Picks the next quiz's difficulty band for a player or a group, between quizzes | Unfair standings if players in one quiz get different questions; a cold start with no history | Calibration of the predicted against the real correct rate; completion and return rates |
-| Pronunciation feedback | A speaking question type for ELSA's core skill: the player says the word, a speech service scores it | Bias against accents, noisy rooms, latency, privacy of voice recordings | Agreement with human raters, the gap between accent groups, p95 scoring latency |
-
-**Question generation with evals.** A model drafts items (the word, a sentence that uses it, one
-correct meaning and three distractors at a target level) as JSON. Each batch must pass an eval
-suite before an editor sees it: the schema and the bank's existing load checks (four unique
-choices, one answer, valid positions); an independent model that answers each item without the
-key and must agree with it; a duplicate and near-duplicate check against the bank; a safety
-filter; and a fixed golden set of reviewed items that every prompt or model change is scored
-against in CI. Editors approve items before they reach a quiz. After release, the store holds
-each answer's choice, points and elapsed time per (player, question), but every key of a quiz
-expires 24 h after its last write (Redis §2) and nothing exports them yet. So the pipeline adds
-an export step: a job copies the answer rows of each quiz into durable analytics storage before
-that TTL, and the item statistics are computed there. Items whose correct rate is near 0 or 100
-%, or whose wrong answers all land on one distractor, go back to review. The metrics: the share
-of generated items that pass the evals, the share editors reject, and the share later pulled
-after release; the target for wrong keys in released items is zero.
-
-**Adaptive difficulty.** The model estimates each player's level from past answers (an item
-response model or an Elo-style rating per item and player; a language model is not needed for
-this part) and picks the difficulty band of the next quiz. Inside one quiz everyone still gets
-the same questions in the same order, so the shared leaderboard stays fair; mixing levels in one
-quiz would need a handicap in the score, which is a product decision, not a technical one. The
-risks: a wrong estimate that makes quizzes too hard or too easy, and new players with no
-history (start them at a middle band). The metrics: calibration (predicted against real correct
-rate per band), quiz completion rate, and how often players return, compared with fixed
-difficulty in an A/B test.
-
-**Pronunciation feedback.** A new question type: the client records the word, uploads it over
-HTTP to a speech-scoring service, and gets back a score per phoneme. The service returns a
-signed result that binds the user, the quiz, the question index, the serve time and an expiry,
-so it cannot be replayed or reused for another player or question. The player sends that result
-to the quiz service as the answer, and the quiz service checks the signature, so the audio never
-travels over the WebSocket. `score_answer` takes a choice index 0…3 and compares it with the
-answer key, so it cannot score a phoneme result as it is: this question type needs a new scoring
-input or script, with the same rules (one answer per (player, question), and the deadline and
-the time limit on Redis `TIME`). The time limit must allow for recording and scoring, so these
-questions get a longer `T`. The risks: lower scores for some accents, which is unfair and also
-moves players on the leaderboard; background noise; a slow service that makes answers late; and
-voice data, which needs consent, a short retention period and no use for training without
-permission. The metrics: correlation with human raters on a labeled set, the score gap between
-accent groups on that set, the rate of answers scored late because of scoring latency, and p95
-scoring latency against its budget.
-
-**Cost and change control.** Prompts and model versions are pinned and versioned with the eval
-results, so a model upgrade is a reviewed change with numbers, like an ADR. Generation runs in
-batches, so its cost is per item, not per player.
-
-<!-- AI-ASSISTED-END -->
-
-## 17. ADR index
+## 16. ADR index
 
 <!-- AI-ASSISTED-BEGIN: one-line summaries drafted with Claude Code from docs/DECISIONS.md. -->
 
