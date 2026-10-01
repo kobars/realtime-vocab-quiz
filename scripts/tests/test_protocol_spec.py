@@ -23,11 +23,11 @@ def section(text: str, heading: str) -> str:
 
 
 def table_rows(text: str) -> list[list[str]]:
-    rows = []
-    for line in text.splitlines():
-        if line.startswith("|") and not line.startswith("|---"):
-            rows.append([c.strip() for c in line.strip().strip("|").split("|")])
-    return rows
+    return [
+        [c.strip() for c in line.strip().strip("|").split("|")]
+        for line in text.splitlines()
+        if line.startswith("|") and not line.startswith("|---")
+    ]
 
 
 def at_seq_types() -> set[str]:
