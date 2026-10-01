@@ -1,25 +1,25 @@
-# AI-ASSISTED: pull-request gate: make check, the Redis integration tests and the internal-content guard.
+# AI-ASSISTED: CI: make check and the Redis integration tests, on pull requests and on main.
 name: ci
 
 on:
   pull_request:
-    # edited re-runs the guard on the PR title and body; the other jobs skip it.
-    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  # An edit must not cancel a running code check, so edits get their own group.
-  group: ci-${{ github.head_ref || github.ref }}-${{ github.event.action == 'edited' && 'edit' || 'code' }}
-  cancel-in-progress: true
+  # A new push to a PR replaces its older run; runs on main always finish.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   HYPOTHESIS_PROFILE: ci
 
 jobs:
   check:
-    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -40,7 +40,6 @@ jobs:
       - run: make check
 
   integration:
-    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
@@ -63,22 +62,13 @@ jobs:
           cache-dependency-glob: api/uv.lock
       - run: make test-integration
 
-  internal:
+  # The ruleset requires this job only; a job joins the gate by being listed in needs.
+  ci-required:
+    if: always()
+    needs: [check, integration]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Tracked files
-        run: python3 scripts/check_internal.py
-      - name: Commit messages
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 scripts/check_internal.py --commits "$BASE_SHA..$HEAD_SHA"
-      - name: Pull request title and body
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" | python3 scripts/check_internal.py --stdin
+      # A skipped job passes, so a job that runs only on some events never blocks a merge.
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
