@@ -146,8 +146,8 @@ async def test_display_name_is_nfc_normalized(
     store_and_clock: tuple[TicketStore, list[int]],
 ) -> None:
     store, _ = store_and_clock
-    identity, _ = await store.create_session("Café")
-    assert identity.display_name == "Café"
+    identity, _ = await store.create_session("Cafe\u0301")  # e + combining acute accent
+    assert identity.display_name == "Caf\u00e9"
 
 
 async def test_redis_variant_uses_set_ex_and_getdel() -> None:
