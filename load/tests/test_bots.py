@@ -192,6 +192,25 @@ async def test_converse_sends_nothing_once_the_quiz_ended() -> None:
     assert ws.sent == []
 
 
+@pytest.mark.parametrize("timer", ["answer", "retry"])
+async def test_a_timer_at_the_stop_counts_no_missing_answer(timer: str) -> None:
+    p, ws = bot(0.05), Socket()
+    stop = p.deadline + OPTS.timeout_ms / 1000  # as play() sets it
+    p.answer, p.timed = (9, "sub", 0), True
+    if timer == "answer":  # its think time ends at the stop: never sent
+        p.answer_due = stop
+    else:  # sent, and its retry timer runs out at the stop: timed out
+        p.sent, p.sent_at = True, stop - p.board.timeout_s
+    assert await converse(ws, p, Backoff(), OPTS, stop) == NORMAL  # type: ignore[arg-type]
+    p.disconnected()  # as play() does after the socket
+    counts = p.rec.counts
+    assert (ws.sent, counts["answer_missing"], counts["answer_timeout"]) == (
+        ["join"],
+        0,
+        timer == "retry",
+    )
+
+
 async def test_a_swarm_plays_whole_quizzes_against_the_app(app_url: str) -> None:
     flags = "--quizzes 2 --bots 3 --think-ms 0 --duration 1 --ramp 0 --timeout-ms 300"
     opts = parse([*flags.split(), "--url", app_url])
