@@ -1,4 +1,4 @@
-# AI-ASSISTED: the bots' frame shortcut, CLI, reconnect rules and a swarm run against the app.
+# AI-ASSISTED: the bots' frame shortcut, CLI, reconnect rules and swarm runs against the app.
 import asyncio
 import contextlib
 import itertools
@@ -6,6 +6,7 @@ import json
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
+from pathlib import Path
 
 import httpx
 import pytest
@@ -13,7 +14,7 @@ import uvicorn
 from pydantic import SecretStr
 
 import bots
-from bots import BOARD_HEAD, converse, parse, play, swarm
+from bots import BOARD_HEAD, converse, create_quizzes, main, parse, play, swarm
 from player import DEAD_LINK, NORMAL, OVERLOAD, Backoff, BoardWait, Player, Recorder
 from quiz.config import Settings
 from quiz.contracts.codec import encode_broadcast
@@ -83,7 +84,7 @@ def test_the_cli_checks_its_options() -> None:
     opts = parse(["--url", "https://quiz.example/api/", "--quizzes", "2", "--bots", "4"])
     assert opts.quiz_ids == ("VOCAB-42", "BIZ-20")
     assert opts.ws_url == "wss://quiz.example/ws"
-    for bad in ("--quizzes 4", "--bots 0", "--accuracy 1.5", "--duration -1", "--duration 0",
+    for bad in ("--quizzes 4", "--procs 11", "--accuracy 1.5", "--duration -1", "--duration 0",
                 "--ramp nan", "--duration inf", "--think-ms -3", "--timeout-ms 0"):  # fmt: skip
         with pytest.raises(SystemExit):
             parse(bad.split())
@@ -197,9 +198,44 @@ async def test_a_swarm_plays_whole_quizzes_against_the_app(app_url: str) -> None
     async with httpx.AsyncClient(base_url=app_url, headers={"X-Admin-Token": "load-token"}) as http:
         for quiz_id in opts.quiz_ids:
             (await http.post("/admin/quizzes", json={"quizId": quiz_id})).raise_for_status()
-    rec = await swarm(opts)
+    rec, _ = await swarm(opts)
     assert rec.counts["cohorts"] > 3  # a slot starts a new cohort after its player finishes
     assert rec.counts["answers"] >= 30  # the first cohort of each slot answers all ten
     assert len(rec.answer_ms) == rec.counts["answers"]
     for failure in ("answer_timeout", "answer_missing", "failed_opens", "reconnects"):
         assert rec.counts[failure] == 0
+
+
+async def test_quizzes_are_created_or_found_open(app_url: str) -> None:
+    opts = parse(["--quizzes", "2", "--admin-token", "load-token", "--url", app_url])
+    await create_quizzes(opts)
+    await create_quizzes(opts)  # running: 409, then still open
+    async with httpx.AsyncClient(base_url=app_url) as http:
+        headers = {"X-Admin-Token": "load-token"}
+        (await http.post("/admin/quizzes/BIZ-20/end", headers=headers)).raise_for_status()
+    with pytest.raises(RuntimeError, match="BIZ-20 has ended"):
+        await create_quizzes(opts)
+    hour = parse(
+        f"--quiz-ids ACAD-10 --duration 3600 --admin-token load-token --url {app_url}".split()
+    )
+    with pytest.raises(RuntimeError, match="HTTP 422"):
+        await create_quizzes(hour)
+
+
+def test_a_swarm_over_two_processes_writes_its_result(
+    app_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bots, "RESULTS", tmp_path)
+    flags = "--quizzes 2 --bots 3 --procs 2 --think-ms 20 --duration 1 --ramp 0 --timeout-ms 500"
+    assert main([*flags.split(), "--admin-token", "load-token", "--url", app_url]) == 0
+    [path] = tmp_path.iterdir()
+    result = json.loads(path.read_text())
+    counts = result["counts"]
+    assert counts["cohorts"] >= 3
+    assert counts["answers"] >= 30  # the first cohort of each slot answers all ten
+    assert result["answer"]["samples"] == counts["answers"]
+    for failure in ("answer_timeout", "answer_missing", "failed_opens", "reconnects"):
+        assert counts.get(failure, 0) == 0
+    assert len(result["swarm"]["procs"]) == 2
+    assert result["valid"]
+    assert bots.save(result, "run") != bots.save(result, "run")
