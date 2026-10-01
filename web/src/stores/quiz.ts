@@ -45,12 +45,16 @@ const initial = () => ({
   pending: null as { questionIndex: number; choiceIndex: number; submissionId: string } | null,
   lastResult: null as AnswerResult | null,
   entries: [] as Entry[],
+  /** The `seq` of the standings in `entries` (a `leaderboard`, `snapshot` or `quiz_ended`); -1 before the first. */
+  seq: -1,
   playerCount: 0,
   onlineCount: 0,
   myRank: null as number | null,
   myScore: 0,
   /** Rows of "Show all players", by rank; `pageFinal` once they are the final standings. */
   allPlayers: [] as Entry[],
+  /** The `atSeq` of the last `leaderboard_page`: the standings that page was read from. */
+  pageAtSeq: null as number | null,
   pageFinal: false,
   finished: false,
   ended: false,
@@ -121,23 +125,23 @@ export const useQuizStore = defineStore('quiz', () => {
         if (!s.ended) s.phase = 'finished'
         return
       case 'leaderboard':
-        return standings(message.entries, message.playerCount, message.onlineCount)
+        return standings(message.seq, message.entries, message.playerCount, message.onlineCount)
       case 'rank_update':
         Object.assign(s, { myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
         return
       case 'snapshot':
         // A snapshot read before the end never undoes it (protocol §3).
         if (s.ended && message.status === 'open') return
-        standings(message.entries, message.playerCount, message.onlineCount, message.you)
+        standings(message.atSeq, message.entries, message.playerCount, message.onlineCount, message.you)
         if (message.status === 'ended') end()
         if (s.connection === 'resyncing') s.connection = 'joined'
         return
       case 'quiz_ended':
-        standings(message.entries, message.playerCount, s.onlineCount, message.you)
+        standings(message.seq, message.entries, message.playerCount, s.onlineCount, message.you)
         return end()
       case 'leaderboard_page':
         s.allPlayers = [...s.allPlayers.slice(0, message.offset), ...message.entries]
-        s.pageFinal = message.final
+        Object.assign(s, { pageAtSeq: message.atSeq, pageFinal: message.final })
         s.playerCount = message.playerCount
         return
       case 'error':
@@ -173,8 +177,8 @@ export const useQuizStore = defineStore('quiz', () => {
     }
   }
 
-  function standings(rows: Entry[], players: number, online: number, you?: You | null): void {
-    Object.assign(s, { entries: rows, playerCount: players, onlineCount: online })
+  function standings(seq: number, rows: Entry[], players: number, online: number, you?: You | null): void {
+    Object.assign(s, { seq, entries: rows, playerCount: players, onlineCount: online })
     const mine = you ?? rows.find((row) => row.userId === s.quiz?.userId)
     if (mine) Object.assign(s, { myRank: mine.rank, myScore: mine.score })
   }
