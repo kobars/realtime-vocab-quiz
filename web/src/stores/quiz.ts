@@ -8,6 +8,8 @@ import type { AnswerResult, Entry, ErrorCode, Joined, ProtocolError, Question, S
 /** `joined` is the UI spec's `live`: the standings are current. `connecting` also covers the open socket before `joined`. */
 export type Connection = 'idle' | 'connecting' | 'joined' | 'reconnecting' | 'resyncing' | 'closed'
 export type Phase = 'join' | 'intro' | 'question' | 'feedback' | 'finished' | 'results'
+/** The UI spec's `blocked` state: only the player can leave it, because another tab took the session or the client is outdated. */
+export type Blocked = 'replaced' | 'version'
 export type QuizClientPort = Pick<QuizClient, 'start' | 'next' | 'answer' | 'rejoin' | 'getLeaderboard' | 'stop'>
 
 export interface QuizStoreDeps {
@@ -32,6 +34,11 @@ export const PAGE_SIZE = 100
  * here: the client sends that `join` itself and repeats the request.
  */
 const REJOIN_ON: readonly ErrorCode[] = ['QUESTION_NOT_OPEN', 'INVALID_STATE', 'ALREADY_ANSWERED']
+/** The requests the client sends again after `UNAVAILABLE`, and the server message that replies to each. */
+const RETRIED_BY_REPLY: Partial<Record<ServerMessage['type'], string>> = { answer_result: 'answer', question: 'next', finished: 'next', snapshot: 'resync' }
+const RETRIED_ON_UNAVAILABLE: readonly (string | null)[] = Object.values(RETRIED_BY_REPLY)
+/** Close 4001: another tab took the session (protocol §7). */
+const SESSION_REPLACED_CLOSE = 4001
 
 /** The `joined` reply; `cursor` and `cursorOpen` follow later questions and results, `endsAt` is on the `now` clock. */
 export type QuizInfo = Joined & { endsAt: number }
@@ -63,6 +70,9 @@ const initial = () => ({
   finished: false,
   ended: false,
   lastError: null as Omit<ProtocolError, 'v' | 'type'> | null,
+  blocked: null as Blocked | null,
+  /** The request type that got `UNAVAILABLE` and is being retried, until a reply to it arrives (UI spec §3.7). */
+  busy: null as string | null,
 })
 
 export const useQuizStore = defineStore('quiz', () => {
@@ -108,9 +118,13 @@ export const useQuizStore = defineStore('quiz', () => {
     if (event.type !== 'status') return receive(event)
     s.closeCode = event.code
     s.connection = event.status === 'open' ? 'connecting' : event.status
+    // A gap resync keeps the socket; any other status means a new or no socket, which drops the retry.
+    if (event.status !== 'resyncing') s.busy = null
+    if (event.status === 'closed' && event.code === SESSION_REPLACED_CLOSE) s.blocked = 'replaced'
   }
 
   function receive(message: ServerMessage): void {
+    if (s.busy !== null && (RETRIED_BY_REPLY[message.type] === s.busy || message.type === 'quiz_ended')) s.busy = null
     switch (message.type) {
       case 'joined':
         return onJoined(message)
@@ -175,13 +189,18 @@ export const useQuizStore = defineStore('quiz', () => {
 
   function onError({ code, message, requestType }: ProtocolError): void {
     s.lastError = { code, message, requestType }
+    if (code === 'UNAVAILABLE') s.busy = RETRIED_ON_UNAVAILABLE.includes(requestType) ? requestType : s.busy
+    else if (requestType === s.busy) s.busy = null
     // The client settles every answer error but these, so the choices unlock.
     if (requestType === 'answer' && !RETRY_ANSWER_ON.includes(code)) s.pending = null
     if (code === 'QUIZ_NOT_FOUND') idle()
     else if (code === 'QUIZ_ENDED') {
       if (s.connection === 'connecting') s.connection = 'joined'
       end()
-    } else if (code === 'UNSUPPORTED_VERSION' || code === 'SESSION_REPLACED') client.value?.stop()
+    } else if (code === 'UNSUPPORTED_VERSION' || code === 'SESSION_REPLACED') {
+      s.blocked = code === 'SESSION_REPLACED' ? 'replaced' : 'version'
+      client.value?.stop()
+    }
     // A failed first join binds nothing and the client never sends it again (protocol §1): back to idle, to retry.
     else if (requestType === 'join' && s.quiz === null) idle()
     else if (REJOIN_ON.includes(code) && !s.ended) client.value?.rejoin()
