@@ -25,16 +25,18 @@ and the document skeletons exist; the service itself is being built.
 uv sync --project api        # install the server dependencies
 pnpm -C web install          # install the client dependencies
 make help                    # list every make target
+uvx pre-commit install       # run the guard, ruff and ESLint on staged files at each commit
 make check                   # every check a change must pass; stops at the first failing step
-make test                    # the server unit tests
+make test                    # the server and client unit tests
 make test-integration        # the tests that need Redis (set REDIS_URL to use your own)
 ```
 
 `make check` runs, in order: the internal-content guard
 (`scripts/check_internal.py`), ruff (lint and format), mypy (strict), pytest
-(without the `integration` and `acceptance` markers) and the web lock file.
-The guard also scans commit messages (`--commits <range>`) and text on stdin
-(`--stdin`, for a pull request's title and body).
+(without the `integration` and `acceptance` markers), ESLint, vue-tsc and
+Vitest. Every pull request runs the same gate in GitHub Actions
+(`.github/workflows/ci.yml`), plus the Redis integration tests and the guard on
+the commit messages and the PR text.
 
 `make help` lists every target; a target whose work has not landed yet prints
 `not yet`.
