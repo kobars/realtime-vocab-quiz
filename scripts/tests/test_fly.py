@@ -376,6 +376,9 @@ def _lines(path: Path) -> list[str]:
     return [line for line in (raw.split("#")[0].rstrip() for raw in text.splitlines()) if line]
 
 
+HSTS = '            add_header Strict-Transport-Security "max-age=31536000" always;'
+
+
 def test_the_fly_edge_is_the_vm_edge_with_only_the_fly_lines_changed() -> None:
     """A change to the VM edge must reach the Fly edge too, and the VM edge keeps its own
     real-address source: Caddy's X-Forwarded-For from the edge network."""
@@ -405,7 +408,7 @@ def test_the_fly_edge_is_the_vm_edge_with_only_the_fly_lines_changed() -> None:
         "    include /etc/nginx/conf.d/default.conf;",
         "        server 127.0.0.1:8080;",
         "        listen 8081;",
-        '            add_header Strict-Transport-Security "max-age=31536000" always;',
+        *([HSTS] * 3),  # on /, /api/ and /ws: Caddy sends it on the VM
     ]
     assert not any("real_ip" in line or "Fly-Client-IP" in line for line in vm)
     assert _lines(ROOT / "infra" / "nginx" / "real-ip.conf.template") == [
