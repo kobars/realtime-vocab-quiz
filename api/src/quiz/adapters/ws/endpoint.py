@@ -2,7 +2,8 @@
 """``GET /ws?ticket=…`` with the subprotocol ``quiz.v1`` (docs/spec/protocol.md §8).
 
 Before accept, in order: the Origin (403), the subprotocol (400), the ticket (401), then the
-caps (503 per process, 429 per client address). A refusal is a plain HTTP response.
+caps (503 per process, 429 per client address). A refusal is a plain HTTP response; an accepted
+upgrade names the node that serves it in ``X-Node-Id``.
 
 A socket whose close the sender gave up (the peer reads nothing, so not even the close frame
 goes out) leaves the registry at once but keeps its cap slots, and its close frame stays
@@ -59,6 +60,7 @@ class Gateway:
         self, settings: Settings, tickets: TicketStore, service: QuizService, store: Store
     ) -> None:
         self._settings, self._tickets = settings, tickets
+        self._accept_headers = [(b"x-node-id", settings.node_id.encode())]
         self.registry = Registry(store, settings.grace_ms)
         self._deps = Deps(service, self.registry, settings.max_payload_bytes)
         self.caps = ConnectionCaps(settings.max_connections, settings.per_ip_conn_cap)
@@ -95,7 +97,7 @@ class Gateway:
         # the socket's lines carry its connection id as request_id; the join binds quiz_id
         with structlog.contextvars.bound_contextvars(request_id=conn.conn_id, quiz_id=None):
             try:
-                await ws.accept(subprotocol=SUBPROTOCOL)
+                await ws.accept(subprotocol=SUBPROTOCOL, headers=self._accept_headers)
                 with metrics.WS_CONNECTIONS.track_inprogress():
                     rate, burst = settings.rate_limit_per_s, settings.rate_limit_burst
                     soft, hard = settings.send_buffer_soft_bytes, settings.send_buffer_hard_bytes
