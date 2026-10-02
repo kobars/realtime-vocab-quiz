@@ -46,8 +46,9 @@ function go(at: number): void {
 
 function show(): void {
   open.value = true
-  previous.value = null
   load(0)
+  // The stored reply for offset 0, if any, is the fallback too: `page` keeps the same object, so its watcher stays quiet.
+  previous.value = page.value
   void nextTick(() => panel.value?.focus())
 }
 

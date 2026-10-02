@@ -1,4 +1,4 @@
-// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement, one-shot motion behind motion-safe), the phone tabs with the time-left button and the countdown warnings outside them, the keys only from inside the question, no score for an ended-quiz viewer, the connection pill, the error messages and blocking cards, the loading card and the busy and locked next buttons, driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement, one-shot motion behind motion-safe), the phone tabs with the time-left button and the countdown warnings outside them, the keys only from the question, the Quiz tab or no control, one countdown loop that a blocking card stops, no score for an ended-quiz viewer, the connection pill, the error messages and blocking cards, the loading card and the busy and locked next buttons, driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -651,6 +651,48 @@ it('keys 1–4 answer only with the focus in the question: not from a leaderboar
   w.get('h2').element.focus()
   press('1')
   expect(port.answer.mock.calls).toEqual([[0, 0]])
+})
+
+it('keys 1–4 also answer with the focus on no control, such as the main region that a click on empty space focuses', async () => {
+  await playing()
+  const main = document.createElement('main')
+  main.tabIndex = -1
+  document.body.append(main)
+  main.focus()
+  press('2')
+  main.remove()
+  expect(port.answer.mock.calls).toEqual([[0, 1]])
+})
+
+it('phones: after the time-left button leads back to the question, keys 1–4 answer from the focused Quiz tab', async () => {
+  phone()
+  const w = await playing()
+  await tab(w, 'leaderboard').trigger('click')
+  await w.get('[data-test="time-left"]').trigger('click')
+  await nextTick()
+  expect(document.activeElement).toBe(tab(w, 'quiz').element)
+  press('3')
+  expect(port.answer.mock.calls).toEqual([[0, 2]])
+})
+
+it('phones: a blocking card during a question removes the time-left button and silences the warnings', async () => {
+  phone()
+  const w = await playing()
+  await tab(w, 'leaderboard').trigger('click')
+  await receive(error('SESSION_REPLACED'))
+  clock = 10_500
+  await frames(50)
+  expect(w.find('[data-test="time-left"]').exists()).toBe(false)
+  expect(w.get('[data-test="ring-announce"]').text()).toBe('')
+})
+
+it('one countdown loop per open question drives the ring, the time-left button and the warnings', async () => {
+  await playing()
+  const frame = vi.spyOn(globalThis, 'requestAnimationFrame')
+  await frames(160)
+  // About one frame per 16 ms: a second loop on the same deadline would double the count.
+  expect(frame.mock.calls.length).toBeGreaterThan(5)
+  expect(frame.mock.calls.length).toBeLessThanOrEqual(11)
 })
 
 it('a viewer of an ended quiz (you: null) sees the results with no score badge', async () => {

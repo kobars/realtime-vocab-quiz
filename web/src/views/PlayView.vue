@@ -67,11 +67,13 @@ onBeforeUnmount(() => {
   if (rankTimer !== null) clearTimeout(rankTimer)
 })
 
-// The open question's seconds left, also while the phone's Leaderboard tab hides it. The 10 s and 5 s warnings live
-// here, outside the tab panels, so they are heard on either tab: only when the count crosses them, never every second;
-// a new question (the count goes up) clears them (UI spec §6.3).
-const msLeft = useCountdown(() => store.msLeft(), () => store.question?.deadlineAt)
-const secondsLeft = computed(() => (store.phase === 'question' ? Math.ceil(msLeft.value / 1_000) : 0))
+// The one countdown of the open question: the question card's ring reads it, and so do the phone's time-left button
+// and the 10 s and 5 s warnings while the Leaderboard tab hides the question. The warnings live here, outside the tab
+// panels, so they are heard on either tab: only when the count crosses them, never every second; a new question (the
+// count goes up) clears them (UI spec §6.3). A blocking card ends the question on screen, so it stops all three.
+const asking = computed(() => store.phase === 'question' && store.blocked === null)
+const msLeft = useCountdown(() => (asking.value ? store.msLeft() : 0), () => (asking.value ? store.question?.deadlineAt : null))
+const secondsLeft = computed(() => Math.ceil(msLeft.value / 1_000))
 const warned = ref('')
 watch(secondsLeft, (now, before) => {
   if (now > before) warned.value = ''
@@ -114,7 +116,7 @@ function moveTab(event: KeyboardEvent): void {
   selectTab(to(tab.value))
 }
 /** The open question is under the Leaderboard tab: the header shows its time left. */
-const hiddenQuestion = computed(() => !wide.value && tab.value === 'leaderboard' && store.phase === 'question')
+const hiddenQuestion = computed(() => !wide.value && tab.value === 'leaderboard' && asking.value)
 const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labelledby': `tab-${name}` })
 </script>
 
@@ -229,6 +231,7 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
         <QuestionCard
           v-if="store.phase === 'question' && store.question"
           :question="store.question"
+          :ms-left="msLeft"
         />
         <AnswerFeedback
           v-else-if="store.phase === 'feedback' && store.lastResult && store.question && store.quiz"

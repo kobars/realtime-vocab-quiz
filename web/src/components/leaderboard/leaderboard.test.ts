@@ -147,6 +147,16 @@ it('a Loading players status shows until the first page arrives; paging keeps th
   expect([status().text(), pageRanks(w)[0], w.get('[data-test="page-range"]').text()]).toEqual(['', '#101', 'Players 101–200 of 300'])
 })
 
+it('after a close and a reopen on the first page, Next still keeps the shown rows until the next page arrives', async () => {
+  const w = await openAll()
+  await receive(page(7, 0, top(100)))
+  await button(w, 'Close')?.trigger('click')
+  await button(w, 'Show all players')?.trigger('click')
+  expect(pageRanks(w).length).toBe(100)
+  await button(w, 'Next')?.trigger('click')
+  expect([pageRanks(w).length, pageRanks(w)[0], w.get('[data-test="page-range"]').text()]).toEqual([100, '#1', 'Players 1–100 of 300'])
+})
+
 it('a final page is never reloaded', async () => {
   await joinedStore()
   const w = render(LeaderboardPanel)

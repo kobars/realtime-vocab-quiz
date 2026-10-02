@@ -251,7 +251,7 @@ Nothing is lost: every animated change also has a static end state that carries 
 
 | Key | Where | Does |
 |---|---|---|
-| `1`–`4` | Question, while the focus is in the question (or on no control) and the question is shown (not under the phone's Leaderboard tab) | Chooses that answer (the same as clicking it) |
+| `1`–`4` | Question, while the focus is in the question, on the Quiz tab or on no control (the page or the main region), and the question is shown (not under the phone's Leaderboard tab) | Chooses that answer (the same as clicking it) |
 | `←`, `→`, `Home`, `End` | The phone's tab list (§2) | Selects the previous, next, first or last tab and moves the focus to it |
 | `Enter` or `Space` | Feedback | Presses the focused "Next question" button |
 | `Tab`, `Shift+Tab` | Everywhere | Moves through the focus order (§6.2) |
