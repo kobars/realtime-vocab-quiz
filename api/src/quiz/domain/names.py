@@ -18,10 +18,10 @@ NAME_RULE = (
 )
 # What String.prototype.trim removes: ECMAScript white space and line terminators. str.strip()
 # with no argument would also remove U+001C-U+001F and U+0085 but keep U+FEFF.
-_TRIM = "\t\n\v\f\r              "
-_TRIM += "    　﻿"
+_TRIM = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+_TRIM += "\u2028\u2029\u202f\u205f\u3000\ufeff"
 # Letters and symbols that draw as blank space: the Hangul fillers and the blank Braille pattern.
-_BLANK = frozenset("ᅟᅠㅤﾠ⠀")
+_BLANK = frozenset("\u115f\u1160\u3164\uffa0\u2800")
 # Unassigned (Cn) and private-use (Co) code points count as visible: a newer emoji may be
 # unassigned in the server's Unicode tables while the browser draws it.
 _INVISIBLE = frozenset({"Cc", "Cf", "Cs"})
