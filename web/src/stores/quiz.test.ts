@@ -131,6 +131,9 @@ it('reconnect: resends the pending answer, does not re-serve its question, and k
   expect(store.phase).toBe('question')
   second.receive(result(0, 's-1', 140))
   second.receive(snapshot(3))
+  // INVALID_STATE makes the store rejoin; the client ignores a joined with no join in flight.
+  second.receive(error('INVALID_STATE', 'next'))
+  expect(second.sent.at(-1)?.type).toBe('join')
   second.receive(joined({ cursor: 0, cursorOpen: false, score: 140 }))
   expect([store.phase, store.myScore]).toEqual(['feedback', 140])
 })
