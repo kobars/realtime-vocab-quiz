@@ -110,7 +110,7 @@ make load LOAD_ARGS="--quiz-ids $IDS --quizzes 500 --bots 5000 --procs 10 --dura
 Machine: an Apple M4 Pro laptop (12 cores, 24 GB) running Docker Desktop 29.8.1 with a Linux VM
 of 12 CPUs and 7.7 GiB. Everything shares that VM: nginx, the API nodes (one Python process
 each), Redis and the swarm. The stack is the `full` profile with `PER_IP_CONN_CAP=20000`; each
-run starts on a flushed Redis and restarted nodes, built from commit `cbaebd9` of `main` plus the
+run starts on a flushed Redis and restarted nodes, built from commit `145284ba`, which adds the
 Redis command timeouts (`REDIS_SOCKET_TIMEOUT_MS`, default 5 s), and the swarm is the one
 described above. Every run: a 30 s ramp, then 180 s of answering (`--duration 180 --ramp 30`),
 `--think-ms 5000` (one answer per player about every 5 s, the pace the capacity estimate

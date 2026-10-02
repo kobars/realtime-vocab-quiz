@@ -77,10 +77,12 @@ async def test_a_paused_redis_answers_503_within_the_command_timeout(redis_url: 
     settings = Settings(store="redis", redis_url=redis_url, redis_socket_timeout_ms=2_500)
     timeout_s = settings.redis_socket_timeout_ms / 1000
     pause_ms = settings.redis_socket_timeout_ms + 1_500  # CLIENT UNPAUSE would wait for it too
-    transport = httpx.ASGITransport(app=create_app(settings))
+    app = create_app(settings)
+    transport = httpx.ASGITransport(app=app)
     session = {"displayName": "Ana"}
     async with (
         Redis.from_url(redis_url) as admin,
+        app.router.lifespan_context(app),  # its stop hooks close both Redis pools
         httpx.AsyncClient(transport=transport, base_url="http://node") as client,
     ):
         assert (await client.post("/sessions", json=session)).status_code == 201  # connected

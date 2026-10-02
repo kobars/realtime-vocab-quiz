@@ -64,7 +64,8 @@ def test_two_api_nodes_with_distinct_ids_share_one_redis_and_trust_only_the_stac
     assert [env["NODE_ID"] for env in nodes] == ["api-1", "api-2"]
     assert nodes[0] | {"NODE_ID": None} == nodes[1] | {"NODE_ID": None}
     assert nodes[0]["ADMIN_TOKEN"].startswith("${ADMIN_TOKEN:?")
-    for name in ("PER_IP_CONN_CAP", "REDIS_SOCKET_TIMEOUT_MS", "REDIS_CONNECT_TIMEOUT_MS"):
+    redis_waits = ("REDIS_POOL_TIMEOUT_MS", "REDIS_SOCKET_TIMEOUT_MS", "REDIS_CONNECT_TIMEOUT_MS")
+    for name in ("PER_IP_CONN_CAP", *redis_waits):
         assert nodes[0][name] is None  # passed through from .env, unset by default
     assert "${REDIS_PASSWORD:?" in nodes[0]["REDIS_URL"]
     (subnet,) = COMPOSE["networks"]["stack"]["ipam"]["config"]
