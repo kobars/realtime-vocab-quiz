@@ -141,12 +141,12 @@ def _router(deps: HttpDeps, hosting: Hosting) -> APIRouter:
     @api.get("/banks", responses=listed)
     async def banks() -> list[h.Bank]:
         """The bank quizzes a visitor may host."""
-        listed = []
+        offered = []
         for bank_id in hosting.banks:
             if (questions := await deps.bank.questions(bank_id)) is not None:
                 title = await deps.bank.title(bank_id) or bank_id
-                listed.append(h.Bank(id=bank_id, title=title, questionCount=len(questions)))
-        return listed
+                offered.append(h.Bank(id=bank_id, title=title, questionCount=len(questions)))
+        return offered
 
     @api.post(
         "/quizzes",
