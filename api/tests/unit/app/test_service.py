@@ -477,3 +477,16 @@ async def test_a_refused_write_at_the_end_drops_the_cached_pages(
     assert await refused(service, conn, m.Next(questionIndex=0)) == (E.QUIZ_ENDED, None)
     [after] = await send(service, conn, page)
     assert (after.final, after.atSeq, store.pages) == (True, 1, 2)
+
+
+async def test_a_page_read_in_flight_when_the_cache_drops_is_not_kept() -> None:
+    store, now = Pages(), [0]
+    service = QuizService(store, Bank(), lambda: now[0])  # type: ignore[arg-type]
+    conn, page = Connection("c-a", "a", quiz_id=QUIZ), m.GetLeaderboard(offset=0, limit=100)
+    pending = asyncio.create_task(send(service, conn, page))
+    await asyncio.sleep(0)  # the read is in flight
+    service.drop_cache(QUIZ)  # a store restart, or the end, while it runs
+    store.release.set()
+    [old] = await pending
+    [fresh] = await send(service, conn, page)
+    assert (old.atSeq, fresh.atSeq, store.reads) == (1, 2, 2)

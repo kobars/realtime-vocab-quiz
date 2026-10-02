@@ -310,6 +310,8 @@ class QuizService:
         return await _share(self._page_reads, key, partial(self._read_page, key, now))
 
     async def _read_page(self, key: PageKey, now: int) -> m.LeaderboardPage:
+        """Read the page and cache it, unless the quiz's pages were dropped during the read."""
+        read = asyncio.current_task()
         page = await self._store.standings_page(*key)
         reply = m.LeaderboardPage(
             atSeq=page.at_seq,
@@ -318,9 +320,10 @@ class QuizService:
             final=page.final,
             entries=[row.entry() for row in page.rows],
         )
-        for stale in [k for k, (expires_ms, _) in self._pages.items() if expires_ms <= now]:
-            del self._pages[stale]
-        self._pages[key] = (now + self._tick_ms, reply)
+        if self._page_reads.get(key) is read:
+            for stale in [k for k, (expires_ms, _) in self._pages.items() if expires_ms <= now]:
+                del self._pages[stale]
+            self._pages[key] = (now + self._tick_ms, reply)
         return reply
 
     async def _refill(self, quiz_id: str) -> Shared:
