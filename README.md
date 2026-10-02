@@ -80,7 +80,7 @@ A change merges only when these checks pass, whoever wrote it:
 
 - **`make check`, on the laptop and in CI:** lint, types, layer contracts, the tests and the client build ([what it runs](CONTRIBUTING.md#what-make-check-runs)).
 - **Pull-request guards:** frozen acceptance tests, a size limit, the `AI-Assisted:` trailer and the AI-LOG entry.
-- **CI on every push and on a schedule:** Redis, stack, browser, container and security workflows ([details](CONTRIBUTING.md#continuous-integration)).
+- **CI on every push and on a schedule:** `ci` (with the Redis integration tests), `stack` (system and browser tests), `containers`, `security`, CodeQL and Scorecard ([details](CONTRIBUTING.md#continuous-integration)).
 
 ## Documentation
 
