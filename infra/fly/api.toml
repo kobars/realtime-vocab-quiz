@@ -26,6 +26,7 @@ primary_region = "sin"
 
   [[services.ports]]
     port = 8000
+    handlers = []
 
   # Per Machine: MAX_CONNECTIONS is 10,000 per node; above the soft limit the proxy prefers the
   # other node.

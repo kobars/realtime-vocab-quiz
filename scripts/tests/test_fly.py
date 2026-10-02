@@ -322,7 +322,8 @@ def test_the_web_edge_is_public_over_https_and_checked_through_nginx() -> None:
 def test_the_api_is_raw_tcp_on_8000_and_routed_only_when_ready() -> None:
     (service,) = _toml("api")["services"]
     assert (service["internal_port"], service["protocol"]) == (8000, "tcp")
-    assert service["ports"] == [{"port": 8000}]  # no handlers: nginx's headers pass untouched
+    # Raw TCP: nginx's headers and WebSocket frames pass untouched.
+    assert service["ports"] == [{"port": 8000, "handlers": []}]
     assert [check["path"] for check in service["http_checks"]] == ["/readyz"]
     assert _toml("api")["env"]["TRUSTED_PROXIES"] == "172.16.0.0/16"
 
