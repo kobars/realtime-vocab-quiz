@@ -1,11 +1,12 @@
 # AI-ASSISTED: two app instances on one Redis serve one quiz as one: delivery within a tick, seq
-# order, tick rate, the snapshot after a dropped subscription, rank_update, presence, convergence.
+# order, tick rate, the snapshot after a dropped subscription, rank_update, presence, convergence,
+# and a join on one node closing the user's socket on the other.
 import asyncio
 import json
 import time
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,6 +14,7 @@ import pytest
 import uvicorn
 from redis.asyncio import Redis
 from websockets.asyncio.client import ClientConnection, connect
+from websockets.exceptions import ConnectionClosedError
 from websockets.typing import Origin, Subprotocol
 
 from quiz.adapters.mock_questions import MockQuestionBank
@@ -39,11 +41,12 @@ class Player:
         self._reader = asyncio.create_task(self._read())
 
     async def _read(self) -> None:
-        async for text in self.ws:
-            msg = json.loads(text)
-            self.got.append((time.monotonic(), msg))
-            if msg["type"] not in PUSHED:
-                self._replies.put_nowait(msg)
+        with suppress(ConnectionClosedError):  # a close the test expects, such as 4001
+            async for text in self.ws:
+                msg = json.loads(text)
+                self.got.append((time.monotonic(), msg))
+                if msg["type"] not in PUSHED:
+                    self._replies.put_nowait(msg)
 
     async def ask(self, msg: m.ClientMessage) -> dict[str, Any]:
         await self.ws.send(encode(msg).decode())
@@ -225,3 +228,16 @@ async def test_a_player_who_moves_to_the_other_node_within_the_grace_keeps_prese
     assert {(f["playerCount"], f["onlineCount"]) for _, f in later} == {(2, 2)}
     assert later[-1][0] > left + 1.0  # a frame after the grace ran out
     assert moved.applied()[-1]["onlineCount"] == 2
+
+
+async def test_join_on_other_node_closes_old_socket_4001(redis_url: str, quiz_id: str) -> None:
+    async with cluster(redis_url, quiz_id) as (a, b):
+        old, token = await a.player(quiz_id)  # then sends nothing more
+        new = await b.rejoin(quiz_id, old.user_id, token)
+        await asyncio.wait_for(old.ws.wait_closed(), 2)
+        await new.answer(0)
+        await asyncio.sleep(2 * TICK_S)
+        assert new.ws.close_code is None
+    assert (old.got[-1][1]["type"], old.got[-1][1]["code"]) == ("error", "SESSION_REPLACED")
+    assert old.ws.close_code == 4001
+    assert new.applied()[-1]["entries"][0]["userId"] == old.user_id  # the new socket plays on

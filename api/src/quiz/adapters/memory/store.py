@@ -20,7 +20,17 @@ from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.standings import standings
 from quiz.ports import store as port
 from quiz.ports.clock import Clock
-from quiz.ports.store import QUIZ_TTL_MS, Answered, Created, Finished, Joined, Limits, Row, Served
+from quiz.ports.store import (
+    QUIZ_TTL_MS,
+    Answered,
+    Created,
+    Finished,
+    Joined,
+    Limits,
+    Place,
+    Row,
+    Served,
+)
 
 MAX_QUESTIONS, CHOICES = 100, 4
 
@@ -65,6 +75,10 @@ class _Quiz:
         """The user's row in the current state's standings, or None."""
         self.rows()
         return None if user_id is None else self.index.get(user_id)
+
+    def place(self, user_id: str | None) -> Place | None:
+        """The user's own rank and score in the current state's standings, or None."""
+        return None if (row := self.row(user_id)) is None else row.place()
 
 
 async def _drain(feed: asyncio.Queue[str]) -> AsyncGenerator[str]:
@@ -227,7 +241,7 @@ class MemoryStore:
     async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> port.Ranks:
         quiz = self._quiz(quiz_id)
         async with quiz.lock:
-            asked = {user_id: quiz.row(user_id) for user_id in user_ids}  # none asked: no ranking
+            asked = {user_id: quiz.place(user_id) for user_id in user_ids}  # none asked: no ranking
             count = len(quiz.state.players)
             return port.Ranks(quiz.state.seq, self._status(quiz), count, asked)
 
@@ -243,7 +257,7 @@ class MemoryStore:
     async def snapshot(self, quiz_id: str, user_id: str | None) -> port.Snapshot:
         quiz = self._quiz(quiz_id)
         async with quiz.lock:
-            rows, you = quiz.rows(), quiz.row(user_id)
+            rows, you = quiz.rows(), quiz.place(user_id)
             status = self._status(quiz)
             shown = self._shown(rows)
             online = len(quiz.present)

@@ -88,3 +88,13 @@ async def test_a_read_after_leaving_ends_the_feed(store: FeedStore, quiz_id: str
         pass
     with pytest.raises(StopAsyncIteration):
         await asyncio.wait_for(anext(messages), READ_TIMEOUT_S)
+
+
+async def test_the_redis_feed_also_carries_session_replaced(
+    redis_store: RedisStore, quiz_id: str
+) -> None:
+    await create(redis_store, quiz_id)
+    async with redis_store.subscribe(quiz_id) as messages:
+        await redis_store.join(quiz_id, "a", "A", "c-1")
+        await redis_store.join(quiz_id, "a", "A", "c-2")  # replaces c-1, on any node
+        assert await read(messages) == {"type": "session_replaced", "uid": "a", "connId": "c-1"}

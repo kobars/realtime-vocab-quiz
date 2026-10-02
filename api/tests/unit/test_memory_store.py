@@ -9,7 +9,7 @@ from quiz.adapters.memory import store as memory_store
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.session import Question
 from quiz.domain.standings import RankedStanding, Standing, standings
-from quiz.ports.store import QUIZ_TTL_MS, Limits, Row
+from quiz.ports.store import QUIZ_TTL_MS, Limits, Place
 
 
 async def one_question_quiz() -> tuple[MemoryStore, list[int]]:
@@ -35,7 +35,7 @@ async def test_join_after_clock_step_back_clamps_reached_time() -> None:
     await store.join("VOCAB-1", "a", "A", "c1")  # reached at 0 ms
     now[0] -= 50
     await store.join("VOCAB-1", "z", "Z", "c2")  # -50 ms is clamped to 0: a tie, so a ranks first
-    assert (await store.ranks_of("VOCAB-1", ["z"])).rows == {"z": Row(2, "z", "Z", 0)}
+    assert (await store.ranks_of("VOCAB-1", ["z"])).rows == {"z": Place(2, 0)}
 
 
 async def test_snapshot_and_tick_follow_the_configured_limits() -> None:
@@ -95,7 +95,7 @@ async def test_rankings_are_computed_once_per_state_change(
     assert calls == [1]
     await store.apply_answer("VOCAB-1", "b", 0, 1, "s-b", "c-b")
     ranks = await store.ranks_of("VOCAB-1", ("b",))
-    assert (calls, ranks.rows) == ([2], {"b": Row(2, "b", "B", 150)})
+    assert (calls, ranks.rows) == ([2], {"b": Place(2, 150)})
     await store.join("VOCAB-1", "d", "D", "c-d")
     assert ((await store.ranks_of("VOCAB-1", ("d",))).player_count, calls) == (4, [3])
 

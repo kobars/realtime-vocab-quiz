@@ -20,6 +20,7 @@ from quiz.ports.store import FeedStore, Publish
 
 log = logging.getLogger(__name__)
 SHIFT_S = 1.0  # a rank that only shifted is sent at most this often
+END_GRACE_S = 0.5  # how long an end seen at the subscribe seq waits for its quiz_ended
 BACKOFF_BASE_MS, BACKOFF_CAP_MS = 250, 10_000  # full jitter, as the client reconnects (protocol §7)
 
 
@@ -99,6 +100,10 @@ class Ticker:
                 end_seq = ticking.result()
                 if end_seq is not None and end_seq > subscribed_at:
                     await relaying  # quiz_ended was published after the subscribe
+                else:  # at or before the seq read: in the feed already if after the subscribe
+                    await asyncio.wait({relaying}, timeout=END_GRACE_S)
+                    if relay.ending:  # it holds quiz_ended: let it reach every local player
+                        await relaying
             finally:
                 ticking.cancel()
                 await asyncio.gather(ticking, return_exceptions=True)

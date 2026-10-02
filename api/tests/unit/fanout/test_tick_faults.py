@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import Any, cast, override
 from unittest.mock import Mock, call
 
 import pytest
@@ -15,7 +15,7 @@ from quiz.domain.errors import DomainError, ErrorCode
 from quiz.fanout import tick
 from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
-from quiz.ports.store import End, FeedStore, Limits, Publish, Ranks, Row, Store
+from quiz.ports.store import End, FeedStore, Limits, Place, Publish, Ranks, Store
 
 SEQ = 3  # the quiz's seq when the loop subscribes
 
@@ -53,7 +53,7 @@ class ScriptedStore:
     async def ranks_of(self, _quiz_id: str, _user_ids: Sequence[str]) -> Ranks:
         if self.ranks_error is not None:
             raise self.ranks_error
-        return Ranks(SEQ, "ended", 1, {"u": Row(1, "u", "U", 100)})
+        return Ranks(SEQ, "ended", 1, {"u": Place(1, 100)})
 
     @asynccontextmanager
     async def subscribe(self, _quiz_id: str) -> AsyncIterator[AsyncIterator[str]]:
@@ -163,12 +163,57 @@ async def test_a_quiz_lost_during_the_drop_ends_the_loop_at_the_repair(
     assert (backoffs, service.standings.call_count) == ([0], 1)
 
 
-async def test_an_end_published_before_the_subscribe_ends_the_loop_without_waiting(
+async def test_an_end_published_before_the_subscribe_ends_the_loop_after_the_grace(
     sockets: Mock,
 ) -> None:
     store = ScriptedStore(Publish("ended", SEQ))  # its quiz_ended never arrives on the feed
-    await run(store, sockets)
+    await run(store, sockets)  # within the 1 s of run: the grace is shorter
     assert store.calls == 1
+    assert tick.END_GRACE_S < 1
+
+
+class EndDuringTheSeqRead(ScriptedStore):
+    """The end lands between the subscribe and the seq read: the read already returns its seq,
+    and the relay is still reading the final ranks when the tick reports the end."""
+
+    @override
+    async def read_seq(self, _quiz_id: str) -> int:
+        await asyncio.sleep(0)
+        return SEQ
+
+    @override
+    async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> Ranks:
+        await asyncio.sleep(0.01)
+        return await super().ranks_of(quiz_id, user_ids)
+
+
+async def test_an_end_published_during_the_seq_read_still_reaches_every_local_player(
+    sockets: Mock,
+) -> None:
+    store = EndDuringTheSeqRead(Publish("ended", SEQ), messages=[ended(SEQ)])
+    await run(store, sockets)
+    assert (last_sent(sockets)["type"], last_sent(sockets)["you"]) == (
+        "quiz_ended",
+        {"rank": 1, "score": 100},
+    )
+
+
+class SlowEndDuringTheSeqRead(EndDuringTheSeqRead):
+    """As ``EndDuringTheSeqRead``, but the final-rank read outlasts the grace."""
+
+    @override
+    async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> Ranks:
+        await asyncio.sleep(0.1)
+        return await super().ranks_of(quiz_id, user_ids)
+
+
+async def test_a_held_end_frame_still_reaches_every_local_player_after_the_grace(
+    sockets: Mock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tick, "END_GRACE_S", 0.01)
+    store = SlowEndDuringTheSeqRead(Publish("ended", SEQ), messages=[ended(SEQ)])
+    await run(store, sockets)
+    assert last_sent(sockets)["type"] == "quiz_ended"
 
 
 async def test_an_unannounced_host_mark_is_confirmed_and_announced_by_the_tick(

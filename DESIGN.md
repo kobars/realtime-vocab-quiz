@@ -303,10 +303,10 @@ Redis load per second (computed, a subtotal of the main calls):
   `PUBLISH` per tick per quiz;
 - one `GET` per `ping` for `pong.seq`: sockets / 25 s, 400 per second for 10,000 sockets
   (ADR-004);
-- above 200 players, one `read_standings` per node per quiz per second for players whose rank
-  only shifted ([redis spec](docs/spec/redis.md), "Reads at one `seq`").
+- above 200 players, one `read_standings` per 1,000 local players per node per quiz per second
+  for players whose rank only shifted ([redis spec](docs/spec/redis.md), "Reads at one `seq`").
 
-5,000 players in one quiz on two nodes cost 1,000 + 1,000 + 10 + 2 script calls and 200 `GET`s
+5,000 players in one quiz on two nodes cost 1,000 + 1,000 + 10 + 6 script calls (3 reads of up to 1,000 players per node) and 200 `GET`s
 per second, plus up to 2,000 calls inside the tick script at A11's pace. Not counted: snapshots (1 to 3
 script calls each; concurrent misses of the cached standings share one read), the presence renew every 3 s per node and quiz, joins and reconnects, and
 clients that send faster than A11 (up to 20 messages per second per socket, A6).
@@ -376,8 +376,8 @@ every quiz runs there.
      about 8,000 `ZRANK` and `HGET` calls inside one blocking script, and a `ranks` array of
      about 135 KB in every `PUBLISH`, 5 times a second, to every node. These run in a write
      script, so read replicas cannot take them; the tick would rank only the top band and leave
-     the rest to the once-per-second reads. Those reads (`read_standings`, one per node per
-     second) only read, so they could move to read replicas once the loader also loads the
+     the rest to the once-per-second reads. Those reads (`read_standings`, one per 1,000
+     local players per node per second) only read, so they could move to read replicas once the loader also loads the
      script there, if ranks that lag behind the primary under asynchronous replication are
      acceptable; coarser rank bands are the other option.
 

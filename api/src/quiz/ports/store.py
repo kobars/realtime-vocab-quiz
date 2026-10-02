@@ -78,10 +78,21 @@ class Row:
     display_name: str
     score: int
 
+    def place(self) -> Place:
+        return Place(self.rank, self.score)
+
     def entry(self) -> Entry:
         return Entry(
             rank=self.rank, userId=self.user_id, displayName=self.display_name, score=self.score
         )
+
+
+@dataclass(frozen=True, slots=True)
+class Place:
+    """A player's own rank and score, without the name: what a read of given users returns."""
+
+    rank: int
+    score: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +108,7 @@ class Ranks:
     at_seq: int
     status: Literal["open", "ended"]
     player_count: int
-    rows: Mapping[str, Row | None]  # per asked user id; None if that user is not a player
+    rows: Mapping[str, Place | None]  # per asked user id; None if that user is not a player
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +118,7 @@ class Snapshot:
     player_count: int
     online_count: int
     rows: tuple[Row, ...]  # every player up to full_list_max, else the top_n
-    you: Row | None
+    you: Place | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,7 +212,9 @@ class Store(Protocol):
 
 class Feed(Protocol):
     def subscribe(self, quiz_id: str) -> AbstractAsyncContextManager[AsyncIterator[str]]:
-        """The quiz's broadcasts as published, ``{"frame": …, "ranks": [[uid, rank, score], …]}``.
+        """The quiz's broadcasts as published, ``{"frame": …, "ranks": [[uid, rank, score], …]}``,
+        and, from a store shared by several nodes, its control messages
+        ``{"type": "session_replaced", "uid": …, "connId": …}``.
 
         Subscribed once entered: every later broadcast arrives, in ``seq`` order. The quiz need
         not exist yet: its broadcasts arrive once it is created. Read the iterator in the task

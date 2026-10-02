@@ -1,6 +1,6 @@
 -- AI-ASSISTED: read_standings of docs/spec/redis.md §3: every standings read at one seq.
 -- ARGV: offset, limit (0: the broadcast rows; -1: no rows), topN, fullListMax, then user ids. Returns ok, seq,
--- playerCount, onlineCount, status, the rows, then per user {rank, name, total} or nil. Writes nothing.
+-- playerCount, onlineCount, status, the rows, then per user {rank, total} or nil. Writes nothing.
 -- The status is ended once quiz_ended is announced or the deadline passed: a host mark alone is not
 -- durable yet, and clients act on ended for good (redis.md §3.1).
 local meta = redis.call('HMGET', KEYS[K.meta], 'deadlineMs', 'endSeq')
@@ -20,8 +20,7 @@ local asked = {}
 for n = 5, #ARGV do
   local uid = ARGV[n]
   local rank = redis.call('ZRANK', KEYS[K.board], uid)
-  asked[n - 4] = rank and {rank + 1, redis.call('HGET', KEYS[K.names], uid),
-    tonumber(redis.call('HGET', KEYS[K.totals], uid))} or false
+  asked[n - 4] = rank and {rank + 1, tonumber(redis.call('HGET', KEYS[K.totals], uid))} or false
 end
 return {'ok', tonumber(redis.call('GET', KEYS[K.seq])) or 0, count,
   redis.call('HLEN', KEYS[K.present]), status, rows, asked}

@@ -6,6 +6,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from itertools import pairwise
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -21,7 +22,7 @@ from quiz.app.service import Connection, QuizService
 from quiz.domain.session import Question
 from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
-from quiz.ports.store import FeedStore, Limits, Publish, Ranks, Row, Store
+from quiz.ports.store import FeedStore, Limits, Place, Publish, Ranks, Store
 
 QUESTIONS = (Question("q0", 1), Question("q1", 3), Question("q2", 0))
 
@@ -43,6 +44,9 @@ class Sink:
 
     def send_to(self, _quiz_id: str, user_id: str, data: bytes) -> None:
         self.updates[user_id].append((time.monotonic(), json.loads(data)))
+
+    def replace(self, conn_id: str) -> None:
+        raise AssertionError(conn_id)  # no join here replaces a connection
 
 
 @pytest.fixture(params=["memory", "redis"])
@@ -133,7 +137,7 @@ async def test_the_tick_runs_only_while_the_quiz_has_local_sockets(
     quiz_id = await quiz_with(store, "a")
     sink, registry = Sink(), Registry(store, 0)  # no grace: a dropped player leaves at once
     registry.watcher = ticker_of(store, sink)
-    sender = cast("Sender", object())  # the registry only stores it here
+    sender = cast("Sender", SimpleNamespace(close_code=None))  # the registry only stores it
     first, second = Connection("c1", "a", quiz_id), Connection("c2", "b", quiz_id)
     await asyncio.sleep(0.3)
     assert sink.frames == []  # no local socket: no tick
@@ -257,7 +261,7 @@ class Reads:
 
     async def ranks_of(self, _quiz_id: str, _user_ids: list[str]) -> Ranks:
         await self.during()
-        return Ranks(1, "open", 300, {"u": Row(120, "u", "U", 0)})
+        return Ranks(1, "open", 300, {"u": Place(120, 0)})
 
 
 def leaderboard(seq: int, *ranks: tuple[str, int, int]) -> str:

@@ -14,7 +14,7 @@ from quiz.contracts import messages as m
 from quiz.domain import errors as domain
 from quiz.domain.session import Question
 from quiz.ports.questions import BankQuestion
-from quiz.ports.store import End, Limits, Page, Ranks, Row, Snapshot
+from quiz.ports.store import End, Limits, Page, Place, Ranks, Row, Snapshot
 
 QUIZ, N = "VOCAB-1", 3
 E, SID = m.ErrorCode, "-0000-4000-8000-000000000000"
@@ -410,8 +410,8 @@ class Lagging:
         self.stale, self.rank_reads, self.full_reads = stale, 0, list[str | None]()
 
     @staticmethod
-    def row(user_id: str, seq: int) -> Row:
-        return Row(int(user_id[1:]) + 1, user_id, user_id.upper(), 10 * seq)
+    def row(user_id: str, seq: int) -> Place:
+        return Place(int(user_id[1:]) + 1, 10 * seq)
 
     async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> Ranks:
         del quiz_id
