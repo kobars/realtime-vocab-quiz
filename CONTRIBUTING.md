@@ -112,9 +112,9 @@ layers need more:
 - `make ui-check`: the visual and accessibility specs (`web/e2e/visual.spec.ts`,
   `web/e2e/a11y.spec.ts`, and `web/e2e/gallery.visual.spec.ts` for the design system's gallery) on
   the production build, with no backend: `web/e2e/fixtures/` mocks the
-  HTTP calls and the quiz socket and pauses the page clock. Eleven screens, from the join form to
-  the final results, run at 320, 768 and 1280 px wide in light and dark with reduced motion (the
-  Leaderboard tab only below 1024 px; wider, the leaderboard sits beside every play screen). Each
+  HTTP calls and the quiz socket and pauses the page clock. Fifteen screens, the player's from the
+  join form to the final results plus the four host screens and the not-found page, run at 320,
+  768 and 1280 px wide in light and dark with reduced motion (the Leaderboard tab only below 1024 px; wider, the leaderboard sits beside every play screen). Each
   must match its screenshot baseline in `web/e2e/__screenshots__/` (at most 50 pixels differ) and
   pass axe for WCAG 2.2 A and AA, with no sideways scroll (also at 640 px, a 1280 px window at
   200% zoom), controls of at least 44 × 44 px and a visible focus ring at every Tab stop. The
@@ -194,8 +194,8 @@ layers need more:
 In order, stopping at the first failing step:
 
 1. The client install from the lock file (`pnpm install --frozen-lockfile`).
-2. Every pre-commit hook on every file: ruff lint and format, ESLint, typos, and lychee (in
-   Docker) on the relative links and anchors of the tracked Markdown.
+2. Every pre-commit hook on every file: ruff lint and format, ESLint, shellcheck, typos, and
+   lychee (in Docker) on the relative links and anchors of the tracked Markdown.
 3. The test citations: each test that the tracked Markdown cites as a file path, `::` and a
    test name, outside the AI-LOG entries, exists (`scripts/check_citations.py`).
 4. actionlint and zizmor on the workflows: zizmor fails on a finding of medium severity or
