@@ -2,7 +2,8 @@
 """Fill quizzes with bots and measure what a player sees.
 
 Each ``--bots`` slot plays one player at a time, then the next cohort's player, until the run
-ends or the slot has played ``--cohorts`` players; ``--procs`` splits the slots over processes. ``player.py`` holds the protocol rules.
+ends or the slot has played ``--cohorts`` players; ``--procs`` splits the slots over processes.
+``player.py`` holds the protocol rules.
 """
 
 import argparse

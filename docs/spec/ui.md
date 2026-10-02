@@ -27,9 +27,9 @@ Switching the look later still means replacing the token values in one file (§7
 | `/q/:quizId` | Short share link; redirects to `/?quiz=:quizId`, the join screen with the quiz ID filled in |
 | any other path | "Page not found" with a link back to `/` |
 
-- **Phones (below 1024 px):** one column. A two-tab switch at the top, "Quiz" and "Leaderboard", with my rank and score always visible in the header, so the leaderboard tab is never needed to know where I stand. The switch is a WAI-ARIA tab list: each tab controls its panel, only the selected tab is in the tab order, and the arrow keys, `Home` and `End` move the selection and the focus (§6.1). Both panels stay mounted, so a question on the hidden Quiz tab keeps its countdown and its pending answer. "Quiz" is selected when the screen opens.
+- **Phones (below 1024 px):** one column. A two-tab switch at the top, "Quiz" and "Leaderboard", with my rank and score always visible in the header, so the leaderboard tab is never needed to know where I stand. The switch is a WAI-ARIA tab list: each tab controls its panel, only the selected tab is in the tab order, and the arrow keys, `Home` and `End` move the selection and the focus (§6.1). Both panels stay mounted, so a question on the hidden Quiz tab keeps its countdown and its pending answer. While a question is open under the Leaderboard tab, the header shows its time left as a button ("13 s left") that selects the Quiz tab and moves the focus to it. "Quiz" is selected when the screen opens.
 - **Desktops (1024 px and up):** two columns: the quiz on the left (at most 640 px wide), the live leaderboard on the right (360 px), both visible at once.
-- **Header (every quiz screen):** the quiz ID, the question counter ("Question 3 of 10"), my score, my rank ("#12 of 340"; its sources are in §3.5), and the connection pill (§3.7) while the connection is not `live`.
+- **Header (every quiz screen):** the quiz ID, the question counter ("Question 3 of 10"), my score (not for a viewer of an ended quiz who is not a player), my rank ("#12 of 340"; its sources are in §3.5), and the connection pill (§3.7) while the connection is not `live`.
 - All copy lives in one strings module in `web/src/`, so a translation can be added later.
 
 ## 3. Screens
@@ -39,7 +39,7 @@ Switching the look later still means replacing the token values in one file (§7
 - A short headline ("Real-time vocabulary quiz"), a quiz ID field and a display name field, and a "Join" button.
 - The quiz ID field upper-cases what is typed and accepts `^[A-Z0-9-]{3,16}$`. The display name is 1–32 characters after trim and NFC normalization, like the server counts it, and the field has no native length limit. Both are checked on blur and on submit; the message sits under the field, linked with `aria-describedby`.
 - A link `/?quiz=VOCAB-42` fills the quiz ID and puts the focus in the name field. The last display name is remembered in the tab (`sessionStorage`).
-- A valid quiz ID (on blur, from a link, or on submit) is looked up with `GET /quizzes/{id}`, and a preview card shows the title, the question count, the player count and whether the quiz is open or ended. A 404 with the error code `QUIZ_NOT_FOUND` puts "No quiz with this ID" under the quiz ID field, where it stays until the ID is edited, and the join is not sent. An ended quiz reads "This quiz has ended. You can still see the final results." and the button reads "See results". A failed lookup (network, 5xx, an unexpected body, any other 404, or no answer within 3 s) shows no preview and does not block the join: the socket `join` decides. A share link opened while a join is in progress is ignored.
+- A valid quiz ID (on blur, from a link, or on submit) is looked up with `GET /quizzes/{id}`, and a preview card shows the title, the question count, the player count and whether the quiz is open or ended. A 404 with the error code `QUIZ_NOT_FOUND` puts "No quiz with this ID" under the quiz ID field, where it stays until the ID is edited, and the join is not sent; the polite region of the preview announces it too, since the lookup may end after the focus has left the field. An ended quiz reads "This quiz has ended. You can still see the final results." and the button reads "See results". A failed lookup (network, 5xx, an unexpected body, any other 404, or no answer within 3 s) shows no preview and does not block the join: the socket `join` decides. A share link opened while a join is in progress is ignored.
 - On submit: the button shows a spinner and "Joining…", the fields stay readable. The client creates the mock session once (`POST /sessions`), fetches a ticket, opens the socket and sends `join` (protocol §8). `joined` routes to `/quiz/:quizId`. An `UNAVAILABLE` reply keeps the spinner and adds "Server busy, retrying" under the fields while the client sends the `join` again after the backoff.
 - `QUIZ_NOT_FOUND` puts "No quiz with this ID" under the quiz ID field; the user may try again. A join after the quiz ended gets the final `snapshot` first, then `QUIZ_ENDED` (protocol §7), and routes to the results screen at `/quiz/:quizId` (§3.6).
 - A join that ends in a blocked state (`UNSUPPORTED_VERSION`, close 1008, close 4001, or 10 connects without a `joined`) unlocks the form and shows the blocking card of §3.7 above it, with its action ("Reload", "Use this tab" or "Try again"); "Use this tab" and "Try again" join again from this screen.
@@ -76,7 +76,7 @@ Shown on `answer_result`.
 A panel on every quiz screen (intro, question, feedback, finished).
 
 - **Rows:** rank, display name, score (tabular numerals, right-aligned). At most 50 rows are rendered: the top 50 of the latest `leaderboard` or `snapshot` (frames up to 200 players carry everyone; the client still renders 50).
-- **My row:** highlighted with the `--highlight` tint inside a 3 px `--primary` outline, and "(you)". If I am not in the top 50, a pinned row under the list shows my rank and score.
+- **My row:** highlighted with the `--highlight` tint inside a 3 px `--primary` outline, and "(you)". If I am not in the top 50, a pinned row under the list shows my rank and score; it sticks to the bottom of the window, so it stays in view below up to 50 rows.
 - **Look:** each row is at least 48 px tall with a 2 px outline. The rank sits in a round chip: first place on `--sun`, second on a silver tint (`--muted` with a `--border` outline), third on a bronze tint (`--warning-soft`), all under dark text; the others on `--muted`. A long name is cut with an ellipsis and keeps the full name in its `title`.
 - **Where my rank and score come from** (the pinned row and the header): each `snapshot.you` and `quiz_ended.you` sets them, because no `rank_update` follows a join or a reconnect while the standings stay the same (protocol §4). A `snapshot` with `you: null` clears them: the user is not a player. A `quiz_ended` with `you: null` and no row of mine means the node could not read my rank, so the last values stay and the client sends one `resync` after the same random 0–250 ms wait as a gap (protocol §3), with its reply deadline and retries; the final `snapshot` it gets sets them. After that, a `leaderboard` frame updates them from its `entries` up to 200 players; above 200, each `rank_update` does. My score never moves backward: a `leaderboard` frame with `seq`, or a `rank_update` with `atSeq`, at or below the `atSeq` of my last `answer_result` was built before that answer was scored, so it never lowers the score the answer gave (nor my row in a live "Show all players" page read at or before that `atSeq`), while `you` (read fresh), the rows of a `snapshot` or `quiz_ended`, and `joined.score` always set it, also lower after a store restart. My row in the list shows the same rank and score as the header, also when a `snapshot`'s `you` is newer than its rows: my row moves to the rank of `you` and the rows it passes shift by one.
 - **Header:** "340 players · 312 online" (`playerCount`, `onlineCount`).
@@ -86,7 +86,7 @@ A panel on every quiz screen (intro, question, feedback, finished).
 ### 3.6 Finished and results
 
 - **Finished** (`finished`, or `joined` with `finished: true`): "You finished!", my score, my provisional rank, and "Your rank can still change until the quiz ends in 4:12" (from `quizRemainingMs`). The live leaderboard keeps updating next to it.
-- **Results** (`quiz_ended`, or a `snapshot` with `status: "ended"`): a podium for ranks 1–3 (the first place in the middle and highest, each step with a decorative medal emoji hidden from assistive tech, the name, the score and the rank as text, on the place fills of §3.5; it rises once, §5.5), my final rank and score from `you` in a card under it ("You placed #12 of 340"), then the rest of the top 50 as a list. "Show all players" loads `get_leaderboard` pages of 100 rows, with the result in `leaderboard_page` (`final: true`). A viewer with no player (`you: null`) sees the podium and the list only.
+- **Results** (`quiz_ended`, or a `snapshot` with `status: "ended"`): a podium for ranks 1–3 (the first place in the middle and highest, each step with a decorative medal emoji hidden from assistive tech, the name, the score and the rank as text, on the place fills of §3.5; it rises once, §5.5), my final rank and score from `you` in a card under it ("You placed #12 of 340"), then the rest of the top 50 as a list. "Show all players" loads `get_leaderboard` pages of 100 rows, with the result in `leaderboard_page` (`final: true`); until a page arrives a `role="status"` line reads "Loading players…", and Previous or Next keeps the rows on screen until the next page arrives. A viewer with no player (`you: null`) sees the podium and the list only, and no score in the header. An ended quiz with no players shows "No one played this quiz." instead of the podium, the list and "Show all players".
 - With fewer than 3 players the podium shows only the steps it has.
 
 ### 3.7 Connection and error states
@@ -184,7 +184,7 @@ After a reconnect, the new `joined` keeps the current screen when it agrees with
 | `leaderboard` | — | — | Rows move (FLIP); counts update; applied by the `seq` rules of protocol §3 |
 | `rank_update` | — | — | Pinned "my row" updates |
 | `snapshot` | → results if `status: "ended"`; ignored with `status: "open"` once `quiz_ended` was applied (protocol §3) | `resyncing` → `live`; in `joining` it answers a join after the end and the connection waits for the `QUIZ_ENDED` that follows | Standings replaced without animation; my rank and score from `you` |
-| `leaderboard_page` | — | — | Rows appended to "Show all players" |
+| `leaderboard_page` | — | — | The page's rows replace those in "Show all players" |
 | `quiz_ended` | → results (from any phase) | — | Podium; my final rank from `you`; the pill and any pending request are dropped |
 | `pong` | — | `live` → `resyncing` if `seq` is still above `lastSeq` 1 s later (protocol §3) | None |
 | `INVALID_MESSAGE`, `UNSUPPORTED_TYPE` | — | — | None (logged to the console; a client bug) |
@@ -251,7 +251,7 @@ Nothing is lost: every animated change also has a static end state that carries 
 
 | Key | Where | Does |
 |---|---|---|
-| `1`–`4` | Question, while no text field has the focus and the question is shown (not under the phone's Leaderboard tab) | Chooses that answer (the same as clicking it) |
+| `1`–`4` | Question, while the focus is in the question (or on no control) and the question is shown (not under the phone's Leaderboard tab) | Chooses that answer (the same as clicking it) |
 | `←`, `→`, `Home`, `End` | The phone's tab list (§2) | Selects the previous, next, first or last tab and moves the focus to it |
 | `Enter` or `Space` | Feedback | Presses the focused "Next question" button |
 | `Tab`, `Shift+Tab` | Everywhere | Moves through the focus order (§6.2) |
@@ -261,7 +261,7 @@ The key hints are visible on the choice buttons, so the shortcut is discoverable
 
 ### 6.2 Focus order and focus moves
 
-- Focus order on a quiz screen: the skip link "Skip to quiz", the header, on phones the selected tab (then only its panel), the quiz column (prompt, choices 1–4 in reading order, then "Skip" when shown), the leaderboard.
+- Focus order on a quiz screen: the skip link "Skip to content" (the first focusable element of every screen; it moves the focus to the main region, `<main id="main" tabindex="-1">`), the header, on phones the selected tab (then only its panel), the quiz column (prompt, choices 1–4 in reading order, then "Skip" when shown), the leaderboard.
 - When the screen changes, focus moves on purpose: to the "Start" button on the intro, to the prompt heading (`tabindex="-1"`) on a new question, to "Next question" on feedback, and to the results heading on results. Focus is never left on an element that disappeared.
 - Every focusable element shows the focus ring (§7.2): a 2 px solid ring with a 2 px offset, at least 3:1 against both backgrounds, drawn with `:focus-visible`.
 
@@ -269,7 +269,7 @@ The key hints are visible on the choice buttons, so the shortcut is discoverable
 
 - My score and my rank are each in a polite live region (`aria-live="polite"`, `aria-atomic="true"`). The rank is announced only when it changes, at most once every 5 s ("Rank 12 of 340").
 - The answer result is announced through the same region ("Correct, plus 133 points" or "Wrong, the answer was 'bright'").
-- The countdown announces only at 10 s and 5 s left, never every second.
+- The countdown announces only at 10 s and 5 s left, never every second, from a region outside the phone's tab panels, so the warnings are heard on the Leaderboard tab too.
 - The leaderboard list is not live: 50 rows changing five times a second would drown everything else.
 - Connection pills use `role="status"`; blocking cards use `role="alert"` and take the focus.
 

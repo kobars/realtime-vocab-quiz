@@ -224,7 +224,9 @@ async def test_a_cohort_limit_stops_each_slot_after_its_players(app_url: str) ->
     opts = parse([*flags.split(), "--url", app_url])
     async with httpx.AsyncClient(base_url=app_url) as http:
         admin = {"X-Admin-Token": "load-token"}
-        (await http.post("/admin/quizzes", json={"quizId": "VOCAB-42"}, headers=admin)).raise_for_status()
+        (
+            await http.post("/admin/quizzes", json={"quizId": "VOCAB-42"}, headers=admin)
+        ).raise_for_status()
         t0 = time.monotonic()
         rec, _ = await swarm(opts)
         quiz = (await http.get("/quizzes/VOCAB-42")).raise_for_status().json()
