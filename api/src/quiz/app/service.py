@@ -6,7 +6,6 @@
 
 import asyncio
 import logging
-import unicodedata
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from contextlib import AbstractContextManager, nullcontext
@@ -15,6 +14,7 @@ from functools import partial
 from typing import Any
 
 from quiz.contracts import messages as m
+from quiz.domain import names
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.obs import metrics
 from quiz.obs.logs import Throttle
@@ -25,7 +25,7 @@ from quiz.ports.store import Snapshot as Shared
 
 log = logging.getLogger(__name__)
 
-RESYNC_INTERVAL_MS, NAME_MAX = 1_000, 32
+RESYNC_INTERVAL_MS = 1_000
 STANDINGS_TRIES = 3  # a tick or a join between the two reads of ``standings`` makes them differ
 type Standing = tuple[m.Snapshot] | tuple[m.Snapshot, m.RankUpdate]
 OUTAGE_LOG_INTERVAL_MS = 1_000  # at most one store outage line per interval; the counter has all
@@ -210,9 +210,9 @@ class QuizService:
         return out if isinstance(out, Outcome) else Outcome((out,))
 
     async def _on_join(self, conn: Connection, msg: m.Join) -> Outcome:
-        name, quiz_id = unicodedata.normalize("NFC", msg.displayName.strip()), msg.quizId
-        if not 1 <= len(name) <= NAME_MAX:
-            raise Refused(m.ErrorCode.INVALID_MESSAGE, f"displayName must be 1-{NAME_MAX} chars")
+        name, quiz_id = names.display_name(msg.displayName), msg.quizId
+        if name is None:
+            raise Refused(m.ErrorCode.INVALID_MESSAGE, names.NAME_RULE)
         if conn.quiz_id not in {None, quiz_id}:
             raise Refused(m.ErrorCode.INVALID_STATE, f"this socket serves {conn.quiz_id}")
         j, snapshot = None, None  # read only: the final standings need no live updates

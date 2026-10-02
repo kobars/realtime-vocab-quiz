@@ -8,8 +8,8 @@ secret itself; the digest found is then checked again with a constant-time compa
 import hashlib
 import hmac
 import secrets
-import unicodedata
 
+from quiz.domain import names
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.session import MAX_WINDOW_MS
 
@@ -18,7 +18,7 @@ from quiz.domain.session import MAX_WINDOW_MS
 SESSION_TTL_S = 2 * MAX_WINDOW_MS // 1000
 TICKET_TTL_S = 30
 TOKEN_BYTES = 32
-RAW_NAME_MAX, NAME_MAX = 128, 32
+RAW_NAME_MAX = 128
 
 
 def new_token() -> str:
@@ -39,8 +39,8 @@ def same_digest(stored: str, token: str) -> bool:
 
 
 def display_name(raw: str) -> str:
-    """Trim and NFC-normalize; 1-32 characters after that, at most 128 before."""
-    name = unicodedata.normalize("NFC", raw.strip())
-    if len(raw) > RAW_NAME_MAX or not 1 <= len(name) <= NAME_MAX:
-        raise DomainError(ErrorCode.INVALID_MESSAGE, "displayName must be 1-32 characters")
+    """At most 128 characters before ``names.display_name`` normalizes it."""
+    name = names.display_name(raw) if len(raw) <= RAW_NAME_MAX else None
+    if name is None:
+        raise DomainError(ErrorCode.INVALID_MESSAGE, names.NAME_RULE)
     return name

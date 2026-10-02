@@ -167,8 +167,9 @@ async def test_join_errors_and_requests_before_join(service: QuizService) -> Non
         assert await refused(service, conn, msg) == (E.NOT_JOINED, None)
     assert await send(service, conn, m.Ping()) == [m.Pong(seq=None)]
     assert await refused(service, conn, unknown) == (E.QUIZ_NOT_FOUND, None)
-    blank = m.Join(quizId=QUIZ, displayName="   ")
-    assert await refused(service, conn, blank) == (E.INVALID_MESSAGE, None)
+    for name in ("   ", "\u200b\u200e"):
+        blank = m.Join(quizId=QUIZ, displayName=name)
+        assert await refused(service, conn, blank) == (E.INVALID_MESSAGE, None)
     conn = await joined(service)  # the failed joins bound nothing
     assert (await send(service, conn, m.Join(quizId=QUIZ, displayName="A")))[0].cursor == -1
     assert await refused(service, conn, unknown) == (E.INVALID_STATE, None)
