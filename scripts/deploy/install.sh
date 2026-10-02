@@ -76,7 +76,7 @@ check_root() {
 }
 
 check_os() {
-  local file=${1:-/etc/os-release} release
+  local file=$1 release
   [[ -r $file ]] || die "unsupported OS: no $file (Ubuntu 22.04 or 24.04 needed)"
   # shellcheck disable=SC1090 # os-release is plain shell assignments
   release=$(. "$file" && printf '%s %s' "${ID:-}" "${VERSION_ID:-}")
@@ -226,7 +226,7 @@ main() {
   [[ $dns_wait =~ ^[0-9]+$ ]] || die "--dns-wait takes whole seconds, not '$dns_wait'"
 
   check_root
-  check_os
+  check_os /etc/os-release
   check_ports
   install_packages
 
