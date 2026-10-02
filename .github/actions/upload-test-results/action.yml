@@ -1,0 +1,22 @@
+# AI-ASSISTED: uploads one job's JUnit reports and coverage data for the coverage job.
+name: Upload test results
+description: Uploads reports/*.xml as reports-<name> and reports/.coverage.* as coverage-<name>.
+inputs:
+  name:
+    description: The artifact suffix, unique within the run
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/upload-artifact@v7
+      with:
+        name: reports-${{ inputs.name }}
+        path: reports/*.xml
+        retention-days: 7
+    # The coverage data files are dotfiles, which upload-artifact skips by default.
+    - uses: actions/upload-artifact@v7
+      with:
+        name: coverage-${{ inputs.name }}
+        path: reports/.coverage.*
+        include-hidden-files: true
+        retention-days: 7

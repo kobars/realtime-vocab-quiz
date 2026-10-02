@@ -1,5 +1,5 @@
-# AI-ASSISTED: CI: make check and the Redis integration tests, on pull requests and on main;
-# the PR guards and the review budget on pull requests.
+# AI-ASSISTED: CI: make check, the Redis integration tests and the combined coverage gate, on pull
+# requests and on main; the PR guards and the review budget on pull requests.
 name: ci
 
 on:
@@ -20,11 +20,15 @@ concurrency:
 
 env:
   HYPOTHESIS_PROFILE: ci
+  # The Makefile writes each test step's JUnit report here; upload-test-results uploads them.
+  REPORTS: reports
 
 jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      COVERAGE_FILE: ${{ github.workspace }}/reports/.coverage.unit
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
@@ -41,6 +45,10 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       # make check includes the contract drift step.
       - run: make check
+      - if: always()
+        uses: ./.github/actions/upload-test-results
+        with:
+          name: unit
 
   integration:
     runs-on: ubuntu-latest
@@ -57,6 +65,9 @@ jobs:
           --health-retries 15
     env:
       REDIS_URL: redis://localhost:6379/0
+      COVERAGE_FILE: ${{ github.workspace }}/reports/.coverage.integration
+      # The combined report holds the floor, so this partial run has none.
+      PYTEST_ADDOPTS: --cov --cov-report= --cov-fail-under=0
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
@@ -64,6 +75,48 @@ jobs:
           enable-cache: true
           cache-dependency-glob: api/uv.lock
       - run: make test-integration
+      - if: always()
+        uses: ./.github/actions/upload-test-results
+        with:
+          name: integration
+
+  # Combines the coverage-* artifacts; a job that uploads one joins the report by being listed in
+  # needs. On a PR it also gates the changed lines.
+  coverage:
+    needs: [check, integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # diff-cover diffs against the base branch
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: api/uv.lock
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-*
+          path: reports
+          merge-multiple: true
+      # fail_under in api/pyproject.toml is the floor; the summary is written before the check.
+      - name: Combined coverage
+        working-directory: api
+        run: |
+          uv run --locked coverage combine ../reports
+          uv run --locked coverage xml -o ../coverage.xml --fail-under=0
+          echo "Combined coverage: $(uv run --locked coverage report --format=total --fail-under=0)%" >> "$GITHUB_STEP_SUMMARY"
+          uv run --locked coverage report
+      - name: Diff coverage
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          rc=0
+          uv run --project api --locked diff-cover coverage.xml --compare-branch="origin/$BASE_REF" \
+            --fail-under=90 --format markdown:diff-cover.md || rc=$?
+          cat diff-cover.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
 
   # The rules of AGENTS.md (scripts/check_pr.py); a label lets a PR past the frozen-path or size rule.
   guards:
@@ -115,7 +168,7 @@ jobs:
   # The ruleset requires this job only; a job joins the gate by being listed in needs.
   ci-required:
     if: always()
-    needs: [check, integration, guards, review-budget]
+    needs: [check, integration, coverage, guards, review-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

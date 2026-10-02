@@ -5,6 +5,7 @@ The workflows and the Makefile are read as text; the hook test uses pre-commit's
 config loader.
 """
 
+import os
 import re
 import shlex
 import subprocess
@@ -72,7 +73,7 @@ GATE_FAILS = "- if: contains(needs.*.result, 'failure') || contains(needs.*.resu
 @pytest.mark.parametrize(
     ("workflow", "gate", "needs"),
     [
-        ("ci.yml", "ci-required", "[check, integration, guards, review-budget]"),
+        ("ci.yml", "ci-required", "[check, integration, coverage, guards, review-budget]"),
         ("security.yml", "security-required", "[secrets, dependency-review]"),
         ("containers.yml", "containers-required", "[config, images]"),
     ],
@@ -86,6 +87,53 @@ def test_each_workflow_has_one_gate_job_over_its_required_jobs(
     assert "if: always()" in job
     assert GATE_FAILS in job
     assert not any(line.startswith("name:") for line in job)
+
+
+def _job_ids(path: Path) -> list[str]:
+    """Return the ids of a workflow's jobs, in file order."""
+    jobs = path.read_text(encoding="utf-8").split("\njobs:\n", 1)[1]
+    return re.findall(r"^  ([\w-]+):$", jobs, re.MULTILINE)
+
+
+def test_coverage_job_combines_every_job_that_uploads_test_results() -> None:
+    path = WORKFLOWS / "ci.yml"
+    coverage = _section(path, "coverage", 2)
+    uploaders = [
+        job
+        for job in _job_ids(path)
+        if "uses: ./.github/actions/upload-test-results" in _section(path, job, 2)
+    ]
+    assert uploaders == ["check", "integration"]
+    assert f"needs: [{', '.join(uploaders)}]" in coverage
+    assert "pattern: coverage-*" in coverage
+    assert "uv run --locked coverage combine ../reports" in coverage
+    assert "uv run --locked coverage report" in coverage
+    assert "--fail-under=90 --format markdown:diff-cover.md || rc=$?" in coverage
+    assert "fetch-depth: 0" in [line.split(" #")[0] for line in coverage]
+
+
+def _make_dry_run(target: str, *variables: str) -> str:
+    """Return the commands ``make -n`` prints for ``target``, unaffected by an outer REPORTS."""
+    env = {k: v for k, v in os.environ.items() if k not in {"REPORTS", "MAKEFLAGS", "MAKELEVEL"}}
+    return subprocess.run(
+        ["make", "-n", target, *variables],  # noqa: S607
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_test_steps_write_junit_reports_only_when_reports_is_set(tmp_path: Path) -> None:
+    reports = tmp_path / "reports"
+    commands = "".join(
+        _make_dry_run(target, f"REPORTS={reports}") for target in ("check", "test-integration")
+    )
+    assert f"--junitxml={reports}/unit.xml" in commands
+    assert f"--junitxml={reports}/integration.xml" in commands
+    assert f"--reporter=junit --outputFile.junit={reports}/vitest.xml" in commands
+    assert "junit" not in _make_dry_run("check") + _make_dry_run("test-integration")
 
 
 @pytest.mark.parametrize(

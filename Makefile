@@ -6,6 +6,12 @@ SHELL := /bin/bash
 step = @printf '==> %s\n' '$(1)'; $(2) || { printf 'make: step "%s" failed\n' '$(1)' >&2; exit 1; }
 PYTEST = cd api && uv run --locked pytest
 VITEST = pnpm -C web exec vitest run
+# With REPORTS set to a folder (CI sets it), each test step also writes a JUnit report there.
+pytest_junit = $(if $(REPORTS),--junitxml=$(abspath $(REPORTS))/$(1).xml)
+vitest_junit = $(if $(REPORTS),--reporter=default --reporter=junit --outputFile.junit=$(abspath $(REPORTS))/vitest.xml)
+# make check's floor for the unit run alone; CI gates the combined coverage of its test jobs on
+# pyproject's fail_under.
+UNIT_COVERAGE_FLOOR = 84
 # Tests and dev tools import dev-group packages and use few of the service's runtime ones, so
 # only their missing (DEP001) and transitive (DEP003) imports are checked. --exclude replaces
 # deptry's default, which skips every folder named tests. pydantic pins pydantic-core to one
@@ -41,7 +47,7 @@ test: ## Run unit, property and contract tests (no Redis)
 	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance")
 	$(call step,vitest,$(VITEST))
 test-integration: ## Run the tests that need Redis (REDIS_URL or a container per run)
-	$(call step,pytest integration,$(PYTEST) tests/integration tests/contract -m integration)
+	$(call step,pytest integration,$(PYTEST) tests/integration tests/contract -m integration $(call pytest_junit,integration))
 check: ## Run every check a change must pass
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,pre-commit hooks,uv run --project api --locked pre-commit run --all-files)
@@ -49,10 +55,10 @@ check: ## Run every check a change must pass
 	$(call step,import layers,cd api && uv run --locked lint-imports)
 	$(call step,dependencies,cd api && uv run --locked deptry src)
 	$(call step,tool dependencies,$(DEPTRY_TOOLS))
-	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance" --cov)
+	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance" --cov --cov-fail-under=$(UNIT_COVERAGE_FLOOR) $(call pytest_junit,unit))
 	$(call step,contracts drift,uv run --project api --locked python scripts/gen_contracts.py --check)
 	$(call step,vue-tsc,pnpm -C web exec vue-tsc --noEmit)
-	$(call step,vitest,$(VITEST) --coverage)
+	$(call step,vitest,$(VITEST) --coverage $(vitest_junit))
 	$(call step,web build,pnpm -C web build)
 audit: audit-python audit-web audit-secrets ## Run the dependency audits and the secret scan (needs the network)
 audit-python: ## Audit the locked Python dependencies with pip-audit

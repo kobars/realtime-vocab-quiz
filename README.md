@@ -46,11 +46,15 @@ lint and format, ESLint, typos, and lychee in Docker on the relative links and
 anchors of the tracked Markdown); mypy (strict); import-linter; deptry (every
 import in `api/src` is a declared dependency and every runtime dependency is
 used; `api/tests`, `scripts/` and `load/` import only declared packages); pytest
-(without the `integration` and `acceptance` markers) with a branch-coverage
-floor (`api/pyproject.toml`); the contract drift check; vue-tsc; Vitest with coverage thresholds
+(without the `integration` and `acceptance` markers) with a unit branch-coverage
+floor (`UNIT_COVERAGE_FLOOR` in the `Makefile`); the contract drift check; vue-tsc; Vitest with coverage thresholds
 (`web/vitest.config.ts`); and the client build (`pnpm -C web build`). Every pull
 request and every push to `main` runs the same gate in GitHub Actions
-(`.github/workflows/ci.yml`), plus the Redis integration tests. The CI, security and
+(`.github/workflows/ci.yml`), plus the Redis integration tests. Its `coverage` job
+combines the coverage data of the test jobs and fails below the combined floor
+(`fail_under` in `api/pyproject.toml`) and, on a pull request, when less than 90% of the
+changed lines are covered (diff-cover). Each run keeps the JUnit reports (`reports-*`)
+and the coverage data (`coverage-*`) as artifacts for 7 days. The CI, security and
 container workflows each end in one gate job (`ci-required`, `security-required`,
 `containers-required`) that fails when a job it needs fails or is cancelled. On pull
 requests, CI also runs `scripts/check_pr.py` (the size limit, the frozen acceptance
