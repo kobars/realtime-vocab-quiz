@@ -471,16 +471,14 @@ def test_the_rendered_fly_edge_passes_nginx_t_and_trusts_only_flys_proxy() -> No
 
 
 def git_ignores(root: Path, name: str) -> bool:
-    """Whether the ``.gitignore`` at ``root`` ignores ``name``, by git's own matching; the user's
-    global excludes file is left out. ``git check-ignore`` needs a work tree and the test image's
-    build context drops ``.git``, so a root without one is checked in a new empty repository that
-    holds a copy of its ``.gitignore``."""
+    """Whether the ``.gitignore`` at ``root`` ignores ``name``, by git's own matching. It is checked
+    in a new empty repository holding a copy of that file, so neither the clone's ``info/exclude``
+    nor the user's global excludes file can stand in for the committed rule, and the check also
+    runs where there is no work tree (the test image's build context drops ``.git``)."""
     with tempfile.TemporaryDirectory() as scratch:
-        work = root
-        if not (root / ".git").exists():
-            work = Path(scratch)
-            shutil.copy(root / ".gitignore", work / ".gitignore")
-            subprocess.run(["git", "init", "-q"], cwd=work, check=True)  # noqa: S607
+        work = Path(scratch)
+        shutil.copy(root / ".gitignore", work / ".gitignore")
+        subprocess.run(["git", "init", "-q"], cwd=work, check=True)  # noqa: S607
         ignored = subprocess.run(
             ["git", "-c", f"core.excludesFile={os.devnull}", "check-ignore", "-q", name],  # noqa: S607
             cwd=work,
@@ -495,6 +493,15 @@ def test_the_git_ignore_check_works_without_a_git_work_tree(tmp_path: Path) -> N
     shutil.copy(ROOT / ".gitignore", tmp_path / ".gitignore")
     assert git_ignores(tmp_path, ".env.fly")
     assert not git_ignores(tmp_path, "fly.toml")
+
+
+def test_the_git_ignore_check_reads_only_the_root_gitignore(tmp_path: Path) -> None:
+    # A rule in the clone's own info/exclude must not stand in for the committed one.
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)  # noqa: S607
+    (tmp_path / ".git" / "info").mkdir(exist_ok=True)
+    (tmp_path / ".git" / "info" / "exclude").write_text(".env.fly\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    assert not git_ignores(tmp_path, ".env.fly")
 
 
 def test_the_fly_secrets_file_stays_out_of_git_and_the_images() -> None:
