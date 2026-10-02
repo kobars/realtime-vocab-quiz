@@ -11,6 +11,7 @@ import shlex
 import shutil
 import subprocess
 import tomllib
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import pytest
@@ -379,8 +380,12 @@ def test_the_fly_edge_is_the_vm_edge_with_only_the_fly_lines_changed() -> None:
     real-address source: Caddy's X-Forwarded-For from the edge network."""
     vm = _lines(ROOT / "infra" / "nginx" / "nginx.conf")
     fly = _lines(FLY / "nginx.conf.template")
-    removed = [line for line in vm if line not in fly]
-    added = [line for line in fly if line not in vm]
+    # In order, so a dropped repeat of a line (a second limit_req, an include) shows up too.
+    removed, added = [], []
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, vm, fly, autojunk=False).get_opcodes():
+        if tag != "equal":
+            removed += vm[i1:i2]
+            added += fly[j1:j2]
     assert removed == [
         "    include /tmp/edge/*.conf;",
         "    resolver 127.0.0.11 valid=5s ipv6=off;",
