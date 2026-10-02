@@ -8,7 +8,7 @@ export const SUBPROTOCOL = 'quiz.v1'
 export const PING_INTERVAL_MS = 25_000
 export const LIVENESS_TIMEOUT_MS = 50_000
 export const RETRY_AFTER_MS = 1_000
-/** A resync, `next` or answer whose reply has not arrived by then is sent again: the token bucket may have dropped it silently. */
+/** A resync, `join`, `next` or answer whose reply has not arrived by then is sent again: the token bucket may have dropped it silently. */
 export const REPLY_TIMEOUT_MS = 5_000
 /** A failed or slow open, a failed ticket request and a silent link all count as this close code. */
 const DEAD_LINK = 1006
@@ -81,8 +81,10 @@ export class QuizClient {
   private joined = false
   /** True from a `join` sent on the current socket until its `joined` or its error, through its retries after `UNAVAILABLE`. */
   private joining = false
-  /** The reply deadline of each answer in flight, by `submissionId`; an error reply replaces it with its own retry. */
-  private readonly answerDeadlines = new Map<string, Timer>()
+  /** The one timer of the `join` in flight: its retry after an error, or else its reply deadline. */
+  private joinRetry: Timer | undefined
+  /** The one timer of each unsettled answer, by `submissionId`: its retry after an error, or else its reply deadline. */
+  private readonly answerRetries = new Map<string, Timer>()
   /** `UNAVAILABLE` retries so far, by `submissionId`: the backoff attempt of the next one. */
   private readonly unavailable = new Map<string, number>()
   /** Timers of the current connection; a disconnect cancels them all. */
@@ -138,10 +140,15 @@ export class QuizClient {
     return submissionId
   }
 
-  /** Sends `join` again on the open socket; the `joined` reply carries the stored `cursor` and `score`. */
+  /**
+   * Sends `join` again on the open socket; the `joined` reply carries the stored `cursor` and `score`. The same `join`
+   * goes out again 1 s after a `RATE_LIMITED` that names no request, after the backoff after `UNAVAILABLE` and
+   * REPLY_TIMEOUT_MS after a send with no reply, until `joined` or another join error.
+   */
   rejoin(): void {
     this.joining = this.open
     this.send({ v: 1, type: 'join', quizId: this.quizId, displayName: this.displayName })
+    this.retryJoin(REPLY_TIMEOUT_MS)
   }
 
   /** Asks for a fresh `snapshot` after a random 0–250 ms wait, with the resync's reply deadline and retries. */
@@ -199,6 +206,7 @@ export class QuizClient {
         this.backoff.joined(this.o.now())
         this.run(this.tracker.joined())
         this.joining = false
+        this.cancel(this.joinRetry)
         this.joinFailures = 0
         if (!this.joined) {
           this.joined = true
@@ -253,6 +261,7 @@ export class QuizClient {
         if (message.code === 'RATE_LIMITED' && message.requestType === null) {
           this.resendInFlight()
           this.retryResync(RETRY_AFTER_MS)
+          this.retryJoin(RETRY_AFTER_MS)
         }
         if (message.requestType === 'answer') this.answerFailed(message.code)
         // A bucket RATE_LIMITED comes before parsing, so its requestType is null: it may be the dropped `next`.
@@ -290,8 +299,16 @@ export class QuizClient {
 
   /** Sends a `join` that got `UNAVAILABLE` again after the backoff (a failed join binds nothing, spec §1). */
   private joinFailed(code: ErrorCode): void {
-    if (code !== 'UNAVAILABLE') return void (this.joining = false)
-    this.after(backoffDelay(this.joinFailures++, this.o.random), () => this.rejoin())
+    if (code === 'UNAVAILABLE') return this.retryJoin(backoffDelay(this.joinFailures++, this.o.random))
+    this.joining = false
+    this.cancel(this.joinRetry)
+  }
+
+  /** Sends the `join` in flight, if any, again after `wait` ms instead of at its earlier retry or deadline. */
+  private retryJoin(wait: number): void {
+    if (!this.joining) return
+    this.cancel(this.joinRetry)
+    this.joinRetry = this.after(wait, () => this.rejoin())
   }
 
   /**
@@ -319,31 +336,32 @@ export class QuizClient {
     if (answer === undefined || !this.joined) return
     this.inFlight.push(submissionId)
     this.send(answer)
-    this.cancelAnswerDeadline(submissionId)
-    // The first send keeps its place in `inFlight`: a slow reply to it still arrives first.
-    const deadline = this.after(REPLY_TIMEOUT_MS, () => {
-      this.answerDeadlines.delete(submissionId)
-      this.sendAnswer(submissionId)
-    })
-    this.answerDeadlines.set(submissionId, deadline)
+    // The deadline replaces any retry still waiting. The first send keeps its place in `inFlight`: a slow reply to it still arrives first.
+    this.retryAnswer(submissionId, REPLY_TIMEOUT_MS)
   }
 
   private settle(submissionId: string): void {
-    this.cancelAnswerDeadline(submissionId)
+    this.cancelAnswerRetry(submissionId)
     this.unsettled.delete(submissionId)
     this.unavailable.delete(submissionId)
   }
 
-  private cancelAnswerDeadline(submissionId: string): void {
-    this.cancel(this.answerDeadlines.get(submissionId))
-    this.answerDeadlines.delete(submissionId)
+  /** Sends an unsettled answer again after `wait` ms instead of at its earlier retry or deadline. */
+  private retryAnswer(submissionId: string, wait: number): void {
+    this.cancelAnswerRetry(submissionId)
+    this.answerRetries.set(submissionId, this.after(wait, () => this.sendAnswer(submissionId)))
+  }
+
+  private cancelAnswerRetry(submissionId: string): void {
+    this.cancel(this.answerRetries.get(submissionId))
+    this.answerRetries.delete(submissionId)
   }
 
   /** An answer error carries no `submissionId`: the server replies in order, so it belongs to the oldest in flight. */
   private answerFailed(code: ErrorCode): void {
     const submissionId = this.inFlight.shift()
     if (submissionId === undefined) return
-    this.cancelAnswerDeadline(submissionId)
+    this.cancelAnswerRetry(submissionId)
     if (!RETRY_ANSWER_ON.includes(code)) return this.settle(submissionId)
     if (code === 'NOT_JOINED') return
     let wait = RETRY_AFTER_MS
@@ -352,7 +370,7 @@ export class QuizClient {
       this.unavailable.set(submissionId, attempt + 1)
       wait = backoffDelay(attempt, this.o.random)
     }
-    this.after(wait, () => this.sendAnswer(submissionId))
+    this.retryAnswer(submissionId, wait)
   }
 
   /**
@@ -372,8 +390,7 @@ export class QuizClient {
   private resendInFlight(): void {
     const resend = this.inFlight
     this.inFlight = []
-    resend.forEach((id) => this.cancelAnswerDeadline(id))
-    if (resend.length > 0) this.after(RETRY_AFTER_MS, () => resend.forEach((id) => this.sendAnswer(id)))
+    for (const submissionId of resend) this.retryAnswer(submissionId, RETRY_AFTER_MS)
   }
 
   /**
@@ -407,8 +424,8 @@ export class QuizClient {
   private dropRequests(): void {
     this.cancelNextRetry()
     this.pendingNext = null
-    for (const deadline of this.answerDeadlines.values()) this.cancel(deadline)
-    this.answerDeadlines.clear()
+    for (const timer of this.answerRetries.values()) this.cancel(timer)
+    this.answerRetries.clear()
     this.unsettled.clear()
     this.unavailable.clear()
     this.inFlight = []
@@ -461,7 +478,7 @@ export class QuizClient {
     this.resyncFailures = 0
     this.joinFailures = 0
     this.inFlight = []
-    this.answerDeadlines.clear()
+    this.answerRetries.clear()
     this.pendingNext = null
     for (const timer of this.timers) clearTimeout(timer)
     this.timers.clear()
