@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import Any, cast, override
 from unittest.mock import Mock
 
 import pytest
@@ -153,12 +153,39 @@ async def test_a_quiz_lost_during_the_drop_ends_the_loop_at_the_repair(
     assert (backoffs, service.standings.call_count) == ([0], 1)
 
 
-async def test_an_end_published_before_the_subscribe_ends_the_loop_without_waiting(
+async def test_an_end_published_before_the_subscribe_ends_the_loop_after_the_grace(
     sockets: Mock,
 ) -> None:
     store = ScriptedStore(Publish("ended", SEQ))  # its quiz_ended never arrives on the feed
-    await run(store, sockets)
+    await run(store, sockets)  # within the 1 s of run: the grace is shorter
     assert store.calls == 1
+    assert tick.END_GRACE_S < 1
+
+
+class EndDuringTheSeqRead(ScriptedStore):
+    """The end lands between the subscribe and the seq read: the read already returns its seq,
+    and the relay is still reading the final ranks when the tick reports the end."""
+
+    @override
+    async def read_seq(self, _quiz_id: str) -> int:
+        await asyncio.sleep(0)
+        return SEQ
+
+    @override
+    async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> Ranks:
+        await asyncio.sleep(0.01)
+        return await super().ranks_of(quiz_id, user_ids)
+
+
+async def test_an_end_published_during_the_seq_read_still_reaches_every_local_player(
+    sockets: Mock,
+) -> None:
+    store = EndDuringTheSeqRead(Publish("ended", SEQ), messages=[ended(SEQ)])
+    await run(store, sockets)
+    assert (last_sent(sockets)["type"], last_sent(sockets)["you"]) == (
+        "quiz_ended",
+        {"rank": 1, "score": 100},
+    )
 
 
 async def test_a_malformed_broadcast_is_skipped_and_the_next_one_relayed(
