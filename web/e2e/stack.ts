@@ -7,6 +7,8 @@ import { strings } from '../src/strings'
 
 /** The full stack's nginx; `make test-browser` passes the Makefile's STACK_URL. */
 export const STACK_URL = (process.env.STACK_URL ?? 'http://localhost:8080').replace(/\/$/, '')
+/** The component gallery's preview server in the visual and accessibility suite (`make ui-check` runs it in a container). */
+export const GALLERY_URL = 'http://127.0.0.1:4174'
 /** Open for the whole run (global setup starts it), and one the setup has ended. */
 export const OPEN_QUIZ = 'VOCAB-42'
 export const ENDED_QUIZ = 'ACAD-10'
