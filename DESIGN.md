@@ -410,7 +410,7 @@ on by default).
 1. At the deadline there is no timer: once `TIME` passes it, `publish_leaderboard.lua` returns
    `ended`, and the first write refused at the deadline (a join, a serve or an answer gets
    `QUIZ_ENDED`) also leads the use case to call `end_quiz.lua` with the reason `deadline`.
-2. The mock host end (`POST /admin/quizzes/{quizId}/end`, or the host token's
+2. The host end (the mock admin's `POST /admin/quizzes/{quizId}/end`, or the host token's
    `POST /quizzes/{quizId}/end`) runs `RedisStore.end_by_host`: an end
    mark, `WAITAOF 1 0 2000` until the mark is on disk (else 503 `UNAVAILABLE`, retry), then
    `end_quiz.lua` with the reason `host`.
@@ -972,8 +972,8 @@ it.
 | Self-service hosting | `GET /banks`, `POST /quizzes {bankQuizId}` (a fresh run ID and a host token, kept as its SHA-256) and the host-token end `POST /quizzes/{quizId}/end`; a creation limit per client address on each node and a cap on the open self-hosted quizzes across nodes; on unless `PUBLIC_HOSTING=0` (§12) |
 
 **Mocked.** The identity and question-bank mocks sit behind ports (`TicketStore`,
-`QuestionBank`); quiz admin is a token-gated mock admin API in the HTTP adapter, off unless
-`ADMIN_MOCK=1`. All three say `MOCK:` in their code: the adapters' module docstrings, the
+`QuestionBank`); quiz admin for the make targets is a token-gated mock admin API in the HTTP
+adapter, off unless `ADMIN_MOCK=1`, beside the self-service hosting above. All three say `MOCK:` in their code: the adapters' module docstrings, the
 `/admin` routes and the `ADMIN_MOCK` setting in `quiz/config.py`.
 
 | Mock | What this build does | What production would use instead |
