@@ -1,10 +1,9 @@
+<!-- AI-ASSISTED: the ADR index: how records are kept, a one-line summary of each ADR drafted from its file, and the template. -->
 # Architecture decision records
 
 Each decision has its own file, `docs/adr/NNN-<short-slug>.md`, in the format at the end of this page. ADRs are never renumbered; a later ADR supersedes an earlier one, and each new ADR adds one row to the index. An accepted ADR that a later one changes in part stays accepted and names that change after a semicolon, in its file and in the index.
 
 ## Index
-
-<!-- AI-ASSISTED-BEGIN: one-line summaries drafted with Claude Code from the ADRs. -->
 
 | ADR | Decision | Status |
 |---|---|---|
@@ -23,14 +22,12 @@ Each decision has its own file, `docs/adr/NNN-<short-slug>.md`, in the format at
 | [ADR-013](adr/013-clay-workspace-package.md) | The Clay design system is the pnpm workspace package `@quiz/clay` with a typed entry point, its own tests and a Vite gallery page instead of Storybook. | accepted |
 | [ADR-014](adr/014-flyio-second-target.md) | A second target on Fly.io: web, API and Redis as three apps in one region; Fly's proxy terminates HTTPS and nginx trusts its `Fly-Client-IP`; nginx reaches the two API Machines through Flycast; Redis on a volume, not managed. | accepted |
 
-<!-- AI-ASSISTED-END -->
-
 ## Template
 
 ```markdown
 # ADR-NNN — <decision>
 
-- **Status:** proposed | accepted | superseded by ADR-NNN
+- **Status:** proposed | accepted | accepted; <change> by ADR-NNN | superseded by ADR-NNN
 - **Date:** YYYY-MM-DD
 
 ## Context
