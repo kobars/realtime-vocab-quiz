@@ -121,6 +121,26 @@ async def test_a_quiz_serves_the_bank_quiz_it_was_created_from() -> None:
     assert (first.prompt, second.prompt, asked) == ("word 0?", "word 1?", [QUIZ, QUIZ])
 
 
+@pytest.mark.parametrize("bank_ids", [("q0", "other", "q2"), ("q0",)], ids=["changed", "shorter"])
+async def test_a_question_the_bank_no_longer_has_at_its_index_is_not_served(
+    service: QuizService, caplog: pytest.LogCaptureFixture, bank_ids: tuple[str, ...]
+) -> None:
+    class Changed(Bank):  # the bank the node started with after the quiz was created
+        @override
+        async def questions(self, quiz_id: str) -> tuple[BankQuestion, ...] | None:
+            return tuple(BankQuestion(i, f"{i}?", ("a", "b", "c", "d"), 1) for i in bank_ids)
+
+    conn = await joined(service)
+    await send(service, conn, m.Next(questionIndex=0))
+    await send(service, conn, answer(0))
+    service._bank = Changed()  # noqa: SLF001
+    with caplog.at_level(logging.ERROR):
+        assert await refused(service, conn, m.Next(questionIndex=1)) == (E.INTERNAL, 1011)
+    [record] = caplog.records
+    assert record.exc_info is not None
+    assert str(record.exc_info[1]) == "bank quiz VOCAB-1 has no question q1 at index 1"
+
+
 async def test_a_failed_bank_quiz_read_starts_no_question_timer(
     service: QuizService, store: SpyStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

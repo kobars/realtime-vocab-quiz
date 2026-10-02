@@ -239,7 +239,11 @@ class QuizService:
         if (questions := await self._bank.questions(conn.bank_quiz_id)) is None:
             text = f"the question bank has no quiz {conn.bank_quiz_id}"
             raise LookupError(text)
-        q = questions[s.question_index]
+        # the bank is read from files at start: a changed bank must not serve another question
+        index, bank = s.question_index, conn.bank_quiz_id
+        if index >= len(questions) or (q := questions[index]).question_id != s.question_id:
+            text = f"bank quiz {bank} has no question {s.question_id} at index {index}"
+            raise LookupError(text)
         return m.Question(
             atSeq=s.at_seq,
             questionIndex=s.question_index,
