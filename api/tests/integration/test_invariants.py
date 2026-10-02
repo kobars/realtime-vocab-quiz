@@ -1,12 +1,13 @@
 # AI-ASSISTED: the scoring and seq invariants on a real Redis under 200 joins and 1,000 answers.
 import asyncio
+import contextlib
 import json
 import uuid
 from collections import Counter
 from collections.abc import AsyncIterator
 
 import pytest
-from redis.asyncio import BlockingConnectionPool, Redis
+from redis.asyncio import Redis
 
 from quiz.adapters.redis import RedisStore
 from quiz.adapters.redis.keys import quiz_keys
@@ -15,24 +16,20 @@ from quiz.contracts.messages import FULL_LIST_MAX
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.events import AnswerScored
 from quiz.domain.session import Question
+from quiz.main import connect_redis
 from quiz.ports.store import Answered, Served
 
 PLAYERS = FULL_LIST_MAX  # every player is in each leaderboard frame
 QUESTIONS = (Question("q0", 1), Question("q1", 3))
 NODES = ("n1", "n2")
 
+pytestmark = pytest.mark.usefixtures("redis_client")  # it deletes this test's keys afterwards
+
 
 @pytest.fixture
 async def store(redis_url: str, redis_prefix: str) -> AsyncIterator[RedisStore]:
     """A store on the service's default connection pool, so the bursts queue as they do there."""
-    defaults = Settings.model_fields
-    pool = BlockingConnectionPool.from_url(
-        redis_url,
-        decode_responses=True,
-        max_connections=defaults["redis_max_connections"].default,
-        timeout=defaults["redis_pool_timeout_ms"].default / 1000,
-    )
-    client = Redis.from_pool(pool)
+    client = connect_redis(Settings(redis_url=redis_url))
     store = RedisStore(client, prefix=redis_prefix)
     await store.start()
     yield store
@@ -94,12 +91,13 @@ async def answer_wave(
     for user, results in by_user.items():
         answered = [r.result for r in results if isinstance(r, Answered)]
         refused = [r for r in results if not isinstance(r, Answered)]
-        (result,) = set(answered)  # every copy of the submission that won: one stored result
+        stored = set(answered)  # every copy of the submission that won: one stored result
+        assert len(stored) == 1, f"{user} scored more than once: {stored}"
         assert len(answered) in {2, 3}
         for error in refused:
             assert isinstance(error, DomainError), error
             assert error.code is ErrorCode.ALREADY_ANSWERED
-        scored[user] = result
+        scored[user] = stored.pop()
     return scored
 
 
@@ -108,43 +106,51 @@ async def test_seq_has_no_gaps_under_concurrent_answers(
 ) -> None:
     keys = quiz_keys(quiz_id, redis_prefix)
     events = redis_client.pubsub()
-    await events.subscribe(keys.events)
-    confirm = await events.get_message(timeout=5)  # subscribed before the first tick publishes
-    assert confirm is not None
-    assert confirm["type"] == "subscribe"
-    events.ignore_subscribe_messages = True
     stop = asyncio.Event()
-    ticker = asyncio.create_task(ticking(store, quiz_id, stop))
-    waves = []
-    for index in range(len(QUESTIONS)):
-        served = await asyncio.gather(
-            *(store.serve_next(quiz_id, u, index, f"c-{u}") for u in users)
+    ticker: asyncio.Task[None] | None = None
+    try:
+        await events.subscribe(keys.events)
+        confirm = await events.get_message(timeout=5)  # subscribed before the first tick publishes
+        assert confirm is not None
+        assert confirm["type"] == "subscribe"
+        events.ignore_subscribe_messages = True
+        ticker = asyncio.create_task(ticking(store, quiz_id, stop))
+        waves = []
+        for index in range(len(QUESTIONS)):
+            served = await asyncio.gather(
+                *(store.serve_next(quiz_id, u, index, f"c-{u}") for u in users)
+            )
+            assert all(isinstance(s, Served) for s in served)
+            waves.append(await answer_wave(store, quiz_id, users, index))
+        last = len(QUESTIONS) - 1
+        retries = await asyncio.gather(  # a late retry of the last scored submission replays it
+            *(
+                store.apply_answer(quiz_id, u, last, r.choice_index, r.submission_id, f"c-{u}")
+                for u, r in waves[-1].items()
+            )
         )
-        assert all(isinstance(s, Served) for s in served)
-        waves.append(await answer_wave(store, quiz_id, users, index))
-    retries = await asyncio.gather(  # a late retry of the last scored submission replays it
-        *(
-            store.apply_answer(quiz_id, u, 1, r.choice_index, r.submission_id, f"c-{u}")
-            for u, r in waves[-1].items()
-        )
-    )
-    assert [(a.result, a.replay) for a in retries] == [(waves[-1][u], True) for u in users]
-    stop.set()
-    await asyncio.wait_for(ticker, timeout=10)
+        assert [(a.result, a.replay) for a in retries] == [(waves[-1][u], True) for u in users]
+        stop.set()
+        await asyncio.wait_for(ticker, timeout=10)
 
-    expected = {u: sum(wave[u].points for wave in waves) for u in users}
-    assert {u: waves[-1][u].total for u in users} == expected
-    totals = await redis_client.hgetall(keys.totals)
-    assert {u: int(totals.get(u, 0)) for u in users} == expected
-    assert await redis_client.hlen(keys.answered) == PLAYERS * len(QUESTIONS)  # scored once each
-    page = await store.standings_page(quiz_id, 0, PLAYERS)
-    assert {row.user_id: row.score for row in page.rows} == expected
-    assert Counter(row.rank for row in page.rows) == Counter(range(1, PLAYERS + 1))
+        expected = {u: sum(wave[u].points for wave in waves) for u in users}
+        assert {u: waves[-1][u].total for u in users} == expected
+        totals = await redis_client.hgetall(keys.totals)
+        assert {u: int(totals.get(u, 0)) for u in users} == expected
+        assert await redis_client.hlen(keys.answered) == PLAYERS * len(QUESTIONS)  # scored once
+        page = await store.standings_page(quiz_id, 0, PLAYERS)
+        assert {row.user_id: row.score for row in page.rows} == expected
+        assert Counter(row.rank for row in page.rows) == Counter(range(1, PLAYERS + 1))
 
-    frames = []
-    while message := await events.get_message(timeout=0.2):
-        frames.append(json.loads(message["data"])["frame"])
-    await events.aclose()  # type: ignore[no-untyped-call]
+        frames = []
+        while message := await events.get_message(timeout=0.2):
+            frames.append(json.loads(message["data"])["frame"])
+    finally:
+        if ticker is not None and not ticker.done():
+            ticker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await ticker
+        await events.aclose()  # type: ignore[no-untyped-call]
     assert [frame["seq"] for frame in frames] == list(range(1, len(frames) + 1))
     assert await store.read_seq(quiz_id) == len(frames)
     final = {entry["userId"]: entry["score"] for entry in frames[-1]["entries"]}

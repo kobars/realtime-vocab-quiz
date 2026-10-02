@@ -81,6 +81,17 @@ def services_of(app: FastAPI) -> Services:
     return services
 
 
+def connect_redis(settings: Settings) -> Redis:
+    """A client whose pool makes a burst above its size wait for a free connection."""
+    pool = BlockingConnectionPool.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        max_connections=settings.redis_max_connections,
+        timeout=settings.redis_pool_timeout_ms / 1000,
+    )
+    return Redis.from_pool(pool)  # connects on first use; aclose() closes the pool too
+
+
 def _wire(settings: Settings, clock: Clock | None) -> Services:
     bank = MockQuestionBank.load()
     limits = Limits(settings.tick_ms, settings.top_n, settings.full_list_max)
@@ -92,13 +103,7 @@ def _wire(settings: Settings, clock: Clock | None) -> Services:
             settings, quiz_clock, memory, MemoryTicketStore(wall_clock_ms), bank, service
         )
     # Redis reads its own TIME for quiz time; the monotonic clock only paces the resync limit.
-    pool = BlockingConnectionPool.from_url(
-        settings.redis_url,
-        decode_responses=True,
-        max_connections=settings.redis_max_connections,
-        timeout=settings.redis_pool_timeout_ms / 1000,
-    )
-    client = Redis.from_pool(pool)  # connects on first use; aclose() closes the pool too
+    client = connect_redis(settings)
     redis, tickets = RedisStore(client, limits=limits), RedisTicketStore(client)
     service = QuizService(redis, bank, monotonic_ms)
     start: list[Hook] = [redis.start]
