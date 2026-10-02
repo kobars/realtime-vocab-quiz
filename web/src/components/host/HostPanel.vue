@@ -41,11 +41,9 @@ async function poll(): Promise<void> {
 }
 
 const visibility = useDocumentVisibility()
-const polling = useIntervalFn(() => void poll(), POLL_MS, { immediateCallback: true })
-watch(visibility, (state) => {
-  if (state !== 'visible') return polling.pause()
-  polling.resume()
-})
+// Resuming reads at once, so a tab that comes back into view shows the current count.
+const polling = useIntervalFn(() => void poll(), POLL_MS, { immediate: false, immediateCallback: true })
+watch(visibility, (state) => (state === 'visible' ? polling.resume() : polling.pause()), { immediate: true })
 onMounted(() => heading.value?.focus())
 onBeforeUnmount(() => {
   mounted = false
@@ -107,7 +105,7 @@ async function end(): Promise<void> {
           </p>
           <p
             data-test="host-quiz-id"
-            class="text-title font-extrabold tracking-wide break-all text-primary sm:text-display"
+            class="text-2xl font-extrabold tracking-wide break-all text-primary sm:text-display"
           >
             {{ quiz.quizId }}
           </p>

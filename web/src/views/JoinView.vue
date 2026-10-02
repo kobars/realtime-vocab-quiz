@@ -292,13 +292,13 @@ watch(
     <p
       v-if="hostable"
       data-test="host-entry"
-      class="flex flex-wrap items-center gap-x-1 text-muted-foreground"
+      class="flex flex-wrap items-center gap-x-2 text-muted-foreground"
     >
       {{ strings.join.hostPrompt }}
       <Button
         as-child
         variant="link"
-        class="px-2"
+        class="px-0"
       >
         <RouterLink :to="{ name: 'host' }">
           {{ strings.join.host }}

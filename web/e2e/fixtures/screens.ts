@@ -121,6 +121,9 @@ export const SCREENS: Screen[] = [
       await hostQuiz(page)
       await page.getByTestId('end').click()
       await expect(page.getByTestId('keep-open')).toBeFocused()
+      // The click leaves the pointer over the box that replaced the button, and the focus scrolled it into view.
+      await page.mouse.move(0, 0)
+      await page.evaluate(() => window.scrollTo(0, 0))
     },
   },
   {
