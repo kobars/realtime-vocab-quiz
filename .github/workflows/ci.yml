@@ -1,8 +1,11 @@
-# AI-ASSISTED: CI: make check and the Redis integration tests, on pull requests and on main.
+# AI-ASSISTED: CI: make check and the Redis integration tests, on pull requests and on main;
+# the PR guards and the review budget on pull requests.
 name: ci
 
 on:
   pull_request:
+    # A label change runs the workflow again, so the guards read the new labels.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
   workflow_dispatch:
@@ -62,10 +65,57 @@ jobs:
           cache-dependency-glob: api/uv.lock
       - run: make test-integration
 
+  # The rules of AGENTS.md (scripts/check_pr.py); a label lets a PR past the frozen-path or size rule.
+  guards:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: api/uv.lock
+      - run: |
+          mapfile -t labels < <(jq -r '.[]' <<< "$PR_LABELS")
+          uv run --project api --locked python scripts/check_pr.py \
+            --base "$BASE_SHA" --head "$HEAD_SHA" --pr "$PR_NUMBER" --labels "${labels[@]}"
+
+  # The PR's review input in tokens (scripts/review_budget.py); it fails at the limit.
+  review-budget:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      TIKTOKEN_CACHE_DIR: /tmp/tiktoken
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: api/uv.lock
+      - uses: actions/cache@v6
+        with:
+          path: ${{ env.TIKTOKEN_CACHE_DIR }}
+          key: tiktoken-o200k_base
+      - run: make review-budget
+
   # The ruleset requires this job only; a job joins the gate by being listed in needs.
   ci-required:
     if: always()
-    needs: [check, integration]
+    needs: [check, integration, guards, review-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

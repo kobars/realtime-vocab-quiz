@@ -27,6 +27,7 @@ make check                   # every check a change must pass; stops at the firs
 make test                    # the server and client unit tests
 make test-integration        # the tests that need Redis (set REDIS_URL to use your own)
 make audit                   # the dependency audits and the secret scan (needs the network and gitleaks 8.25+)
+make review-budget           # the branch's review input in tokens (diff plus changed files, against origin/main)
 make acceptance              # the acceptance tests; ACCEPTANCE_STORE=redis runs them on a Redis of their own
 make build                   # the API and web images, elsaquiz-api and elsaquiz-web (IMAGE_TAG=dev)
 make dev-api                 # one API node on 127.0.0.1:8001 (memory store) that allows the :5173 origins
@@ -51,7 +52,13 @@ floor (`api/pyproject.toml`); the contract drift check; vue-tsc; Vitest with cov
 request and every push to `main` runs the same gate in GitHub Actions
 (`.github/workflows/ci.yml`), plus the Redis integration tests. The CI, security and
 container workflows each end in one gate job (`ci-required`, `security-required`,
-`containers-required`) that fails when a job it needs fails or is cancelled. A weekly job (`.github/workflows/links.yml`)
+`containers-required`) that fails when a job it needs fails or is cancelled. On pull
+requests, CI also runs `scripts/check_pr.py` (the size limit, the frozen acceptance
+tests, the commit trailer and the AI-LOG entry of `AGENTS.md`; the labels `size-exception`
+and `acceptance-change` waive the first two) and the review budget, which fails a PR whose
+review input reaches the `limit` in `api/pyproject.toml`. Neither counts the paths that
+`.gitattributes` marks `linguist-generated` (lock files, generated contracts, shadcn-vue
+components). A weekly job (`.github/workflows/links.yml`)
 also checks the external links.
 Another workflow (`.github/workflows/containers.yml`) checks the container and
 infrastructure files: hadolint (settings in `.hadolint.yaml`), shellcheck,
