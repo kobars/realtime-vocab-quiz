@@ -88,12 +88,16 @@ def services_of(app: FastAPI) -> Services:
 
 
 def connect_redis(settings: Settings) -> Redis:
-    """A client whose pool makes a burst above its size wait for a free connection."""
+    """A client whose pool makes a burst above its size wait for a free connection, and whose
+    commands fail with ``TimeoutError`` when Redis stops answering. Pub/sub's blocking reads wait
+    for the next message without the command timeout."""
     pool = BlockingConnectionPool.from_url(
         settings.redis_url,
         decode_responses=True,
         max_connections=settings.redis_max_connections,
         timeout=settings.redis_pool_timeout_ms / 1000,
+        socket_timeout=settings.redis_socket_timeout_ms / 1000,
+        socket_connect_timeout=settings.redis_connect_timeout_ms / 1000,
     )
     return Redis.from_pool(pool)  # connects on first use; aclose() closes the pool too
 

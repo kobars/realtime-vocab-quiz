@@ -21,6 +21,7 @@ def test_defaults_match_the_spec() -> None:
     assert (s.send_buffer_soft_bytes, s.send_buffer_hard_bytes) == (64 * 1024, 256 * 1024)
     assert (s.rate_limit_per_s, s.rate_limit_burst) == (20, 40)
     assert (s.per_ip_conn_cap, s.max_connections) == (50, 10_000)
+    assert (s.redis_socket_timeout_ms, s.redis_connect_timeout_ms) == (5_000, 2_000)
     assert s.allowed_origins == ("http://localhost:8080", "http://127.0.0.1:8080")
     assert s.trusted_proxies == (ip_network("127.0.0.1/32"), ip_network("::1/128"))
     assert s.node_id
@@ -57,6 +58,7 @@ def test_explicit_origins_replace_the_defaults(monkeypatch: pytest.MonkeyPatch) 
         {"tick_ms": 0},
         {"max_payload_bytes": 32 * 1024},  # above the parser's 16 KiB: no close 1009
         {"admin_mock": True},  # the mock admin endpoints need a token
+        {"redis_socket_timeout_ms": 2_000},  # must outlast the host end's WAITAOF wait
     ],
 )
 def test_invalid_settings_are_refused(fields: dict[str, object]) -> None:
