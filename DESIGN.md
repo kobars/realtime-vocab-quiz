@@ -722,8 +722,13 @@ total, with missing and timed-out samples counted as misses.
 - `/healthz`: liveness, 200 `{"status":"ok"}` while the process answers HTTP.
 - `/readyz`: readiness, 200 `{"status":"ready"}`, or 503 `{"status":"unavailable"}` when Redis is
   unreachable.
-- `/metrics` (Prometheus text format, `obs/metrics.py`): `ws_connections` (open sockets),
-  `answers_total{result}` (correct, wrong, late), `leaderboard_frames_total` (frames this node
+- `/metrics` (Prometheus text format, `obs/metrics.py`): `ws_connections` (sockets holding a
+  connection cap slot, from the cap check until the slot is freed), `ws_pending_close` (those of
+  them whose close frame the sender gave up on, waiting for the peer to read or go),
+  `ws_closes_total{code}` (closes by close code: 1013 for a slow client, 1008 for abuse),
+  `ws_send_delay_seconds` (histogram, observed by each socket's sender on each frame it writes:
+  the time from queueing the frame to the end of its write), `event_loop_lag_seconds` (how late
+  the node's event loop ran its latest 100 ms timer), `answers_total{result}` (correct, wrong, late), `leaderboard_frames_total` (frames this node
   published), `leaderboard_publish_lag_seconds` (histogram, observed by the tick on each frame
   it publishes: the time from the first change the frame carries, an answer that scored, a join
   or a leave, to its publication, on the Redis clock), `leaderboard_frames_conflated_total`
@@ -742,9 +747,11 @@ histogram_quantile(0.99, sum by (le) (rate(leaderboard_publish_lag_seconds_bucke
 ```
 
 It is per frame, not per answer: a frame's lag is that of its oldest change, so every answer it
-carries waited at most that long. It stays near the 200 ms tick on a healthy stack. It cannot see
-the relay to each node, the socket writes or the network, so true client delivery still needs
-client-side timings, which this build does not export; the bot swarm measures them in load runs.
+carries waited at most that long. It stays near the 200 ms tick on a healthy stack. The node's part
+after the publish, a frame's wait in a socket's send queue and its write, is
+`ws_send_delay_seconds`. Neither sees the relay to each node or the network, so true client
+delivery still needs client-side timings, which this build does not export; the bot swarm
+measures them in load runs.
 
 **Alerts a production setup would add.** `/readyz` failing on any node; the p99 of
 `leaderboard_publish_lag_seconds` above 300 ms (the store part leaves 200 ms of the 500 ms budget
@@ -753,8 +760,10 @@ timings; the p99 of
 `tick_duration_seconds` above 50 ms; `sum(rate(leaderboard_frames_total))` over all nodes at 0
 while `sum(rate(answers_total{result="correct"}))` grows (only a correct answer on time scores
 and sets `dirty`, so wrong and late answers alone publish nothing; and only the node that wins a
-tick publishes, so one node's counter can stay flat on a healthy stack); `ws_connections` near the 10,000 cap; any increase of
-`redis_clock_step_total`; a rise in 1013 and 1008 closes in the logs.
+tick publishes, so one node's counter can stay flat on a healthy stack); `ws_connections` near the
+10,000 cap, or a growing `ws_pending_close`; the p99 of `ws_send_delay_seconds` above 100 ms;
+`event_loop_lag_seconds` above 50 ms for minutes; any increase of `redis_clock_step_total`; a rise
+in `ws_closes_total{code="1013"}` or `ws_closes_total{code="1008"}`.
 
 **Diagnosis: "the leaderboard is slow".**
 
@@ -765,10 +774,12 @@ tick publishes, so one node's counter can stay flat on a healthy stack); `ws_con
    in the logs.
 3. Check the tick time: a high `tick_duration_seconds` points at Redis (`SLOWLOG GET`,
    `INFO commandstats` for the scripts; a quiz above 200 players ranks every scorer in the tick).
-4. Check the sockets: a growing `leaderboard_frames_conflated_total`, or many 1013 closes, means
-   slow clients or a saturated node (CPU of the node's one event loop; `ws_connections`). A
-   `leaderboard_publish_lag_seconds` p99 near 200 ms with slow clients puts the delay here, after
-   the publish.
+4. Check the sockets: a growing `leaderboard_frames_conflated_total`, a rising
+   `ws_closes_total{code="1013"}` or a high `ws_send_delay_seconds` p99 means slow clients or a
+   saturated node. A high `event_loop_lag_seconds` says it is the node: its one event loop runs
+   late, so every socket's writes wait (CPU of the node; `ws_connections`, `ws_pending_close`).
+   A `leaderboard_publish_lag_seconds` p99 near 200 ms with a high send delay puts the delay here,
+   after the publish.
 5. Check the clients: a growing `resyncs_total` means clients that see gaps, which points at lost
    frames, for example repeated pub/sub drops on their node (§11).
 6. Reproduce with the bot swarm against the stack and compare its answer → leaderboard

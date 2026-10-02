@@ -7,6 +7,10 @@ from quiz.main import create_app
 
 METRICS = {
     "ws_connections": "gauge",
+    "ws_pending_close": "gauge",
+    "ws_closes_total": "counter",
+    "ws_send_delay_seconds": "histogram",
+    "event_loop_lag_seconds": "gauge",
     "answers_total": "counter",
     "ws_errors_total": "counter",
     "leaderboard_frames_total": "counter",
@@ -33,3 +37,4 @@ async def test_metrics_scrape_finds_each_name() -> None:
     series = {line.rpartition(" ")[0] for line in lines}
     assert {f'answers_total{{result="{r}"}}' for r in ("correct", "wrong", "late")} <= series
     assert 'ws_errors_total{code="UNAVAILABLE",request="answer"}' in series
+    assert 'ws_closes_total{code="1013"}' in series

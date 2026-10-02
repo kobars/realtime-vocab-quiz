@@ -1,10 +1,12 @@
 # AI-ASSISTED: the Prometheus metrics of one node, on a registry of their own.
 """Every metric the service exports. ``/metrics`` serves ``REGISTRY``. Each metric is registered
 here up front, and a labelled counter starts with each label value at 0 (``ws_errors_total``: its
-``UNAVAILABLE`` series), so a scrape shows those series before their first event. The scoring
-service counts answers, error replies, resyncs and clock steps, the gateway open sockets and the
-leaderboard frames conflation dropped, the fan-out tick its frames, durations and publish lags, the
-log pipeline the lines it dropped."""
+``UNAVAILABLE`` series; ``ws_closes_total``: its slow-client series, which the sender adds with its
+close code), so a scrape shows those series before their first event. The scoring
+service counts answers, error replies, resyncs and clock steps; the gateway its sockets, pending
+closes and closes by code; each socket's sender its send delays and the leaderboard frames
+conflation dropped; the fan-out tick its frames, durations and publish lags; the log pipeline the
+lines it dropped; a timer the event loop's lag."""
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -19,7 +21,31 @@ from quiz.contracts import messages as m
 
 REGISTRY = CollectorRegistry()
 
-WS_CONNECTIONS = Gauge("ws_connections", "Open WebSocket connections", registry=REGISTRY)
+WS_CONNECTIONS = Gauge(
+    "ws_connections", "WebSocket connections holding a connection cap slot", registry=REGISTRY
+)
+WS_PENDING_CLOSE = Gauge(
+    "ws_pending_close",
+    "WebSocket connections whose given-up close frame waits for the peer to read or go",
+    registry=REGISTRY,
+)
+WS_CLOSES = Counter(
+    "ws_closes_total",
+    "WebSocket closes by close code: the server's, or the peer's when it closed first",
+    ["code"],
+    registry=REGISTRY,
+)
+WS_SEND_DELAY = Histogram(
+    "ws_send_delay_seconds",
+    "Time from queueing a frame in a socket's send queue to the end of its write",
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+    registry=REGISTRY,
+)
+EVENT_LOOP_LAG = Gauge(
+    "event_loop_lag_seconds",
+    "How late the event loop ran its latest lag timer",
+    registry=REGISTRY,
+)
 ANSWERS = Counter("answers_total", "Scored answers by result", ["result"], registry=REGISTRY)
 for _result in ("correct", "wrong", "late"):
     ANSWERS.labels(_result)

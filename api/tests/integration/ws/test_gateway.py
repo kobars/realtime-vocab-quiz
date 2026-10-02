@@ -110,6 +110,20 @@ def test_ws_connections_counts_accepted_sockets_until_each_closes(
         assert metric("ws_connections") == before  # the session failed
 
 
+def test_ws_closes_total_counts_each_close_by_its_code(metric: Callable[..., float]) -> None:
+    before = {code: metric("ws_closes_total", code=code) for code in ("1009", "1013")}
+    with client_of(send_buffer_soft_bytes=1, send_buffer_hard_bytes=2) as client:
+        with connect(client, ticket(client)) as ws:
+            ws.send_text(PING)  # its pong passes the hard limit: the slow-client close
+            frames, code = until_close(ws)
+        assert ([f["code"] for f in frames], code) == (["UNAVAILABLE"], 1013)
+    with client_of() as client, connect(client, ticket(client)) as ws:
+        ws.send_text("x" * 16_385)
+        assert until_close(ws)[1] == 1009
+    after = {code: metric("ws_closes_total", code=code) for code in before}
+    assert after == {code: count + 1 for code, count in before.items()}
+
+
 def test_x_forwarded_for_counts_real_clients_only_behind_the_trusted_proxy() -> None:
     def via(ip: str) -> dict[str, str]:
         return {**ORIGIN, "x-forwarded-for": f"6.6.6.6, {ip}"}  # nginx appends its peer

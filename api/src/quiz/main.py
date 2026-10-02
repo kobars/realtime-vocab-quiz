@@ -28,6 +28,7 @@ from quiz.config import Settings
 from quiz.fanout.presence import PresenceRenewer
 from quiz.fanout.tick import Ticker
 from quiz.obs.logs import configure_logging
+from quiz.obs.loop_lag import LoopLag
 from quiz.ports.clock import Clock
 from quiz.ports.questions import QuestionBank
 from quiz.ports.store import FeedStore, Limits
@@ -164,6 +165,9 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
     renewer = PresenceRenewer(services.store, gateway.registry, services.settings.grace_ms)
     services.startup.append(renewer.start)
     services.shutdown.append(renewer.stop)
+    lag = LoopLag()
+    services.startup.append(lag.start)
+    services.shutdown.append(lag.stop)
     s, ttl_ms = services.settings, TICKET_TTL_S * 1000
     token = s.admin_token.get_secret_value() if s.admin_mock and s.admin_token else None
     limit = address_limiter(s.per_ip_conn_cap, monotonic_ms)

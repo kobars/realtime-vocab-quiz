@@ -6,7 +6,7 @@ import logging
 import socket
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from functools import partial
 from typing import Any, NamedTuple, cast, override
@@ -787,12 +787,18 @@ async def given_up_close(
 
 
 async def test_a_given_up_close_keeps_the_cap_slot_until_the_transport_is_gone(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, metric: Callable[..., float]
 ) -> None:
+    gauges = ("ws_connections", "ws_pending_close")
+    before, closes = [metric(name) for name in gauges], metric("ws_closes_total", code="1009")
     gateway, inbound, handler, closed = await given_up_close(monkeypatch, asyncio.Event())
+    held = [metric(name) - start for name, start in zip(gauges, before, strict=True)]
+    assert held == [gateway.caps.total, 1] == [1, 1]  # still connected while the slot is held
+    assert metric("ws_closes_total", code="1009") == closes + 1
     inbound.put_nowait({"type": "websocket.disconnect", "code": 1006})
     await asyncio.wait_for(handler, 1)
     assert (gateway.caps.total, closed) == (0, [])
+    assert [metric(name) for name in gauges] == before
 
 
 async def test_a_given_up_close_still_goes_out_once_the_peer_reads_again(
