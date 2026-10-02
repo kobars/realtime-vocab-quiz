@@ -242,12 +242,17 @@ What keeps the code easy to change, and the check behind each point:
 
 - **Layers.** The import-linter contracts in `api/pyproject.toml` fail `make check` when an
   import crosses a layer:
-  - the domain imports nothing else in the package and no framework or I/O library;
-  - the ports and the use cases never import the adapters, the fan-out, the settings or the web
-    framework;
-  - the memory, Redis, mock and HTTP adapters never import each other (the WebSocket gateway and
-    the fan-out are outside the contracts);
-  - wiring happens only in `quiz/main.py`, by convention: no contract checks it.
+  - the domain imports nothing else in the package and none of Pydantic, FastAPI, Starlette,
+    uvicorn, redis-py, structlog or the Prometheus client;
+  - the ports and the use cases never import the adapters, the fan-out, the settings, the
+    composition root (`quiz/main.py`), redis-py or the web framework, and the ports never import
+    the use cases;
+  - the memory, Redis, mock and HTTP adapters never import each other, and all but the HTTP
+    adapter never import the use cases, the fan-out, the settings or the web framework;
+  - no module imports the composition root.
+
+  The WebSocket gateway and the fan-out are outside these contracts. That only `quiz/main.py`
+  builds the adapters is a convention: no contract stops another module from building one.
 - **One protocol source.** The wire messages are Pydantic models in `quiz/contracts/`;
   `scripts/gen_contracts.py` generates the JSON Schema (`contracts/schema/protocol.json`) and the
   client's TypeScript types (`web/src/protocol/types.generated.ts`) from them, and its `--check`
