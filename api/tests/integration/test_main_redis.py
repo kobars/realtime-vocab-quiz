@@ -11,8 +11,10 @@ from contextlib import AsyncExitStack, ExitStack
 from functools import partial
 
 import httpx
+import pytest
 from redis.asyncio import Redis
 from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from quiz.adapters.mock_auth import tokens
 from quiz.adapters.mock_auth.redis_store import SESSION_KEY
@@ -104,7 +106,7 @@ def test_a_join_to_a_quiz_past_the_subscription_limit_is_unavailable(
 ) -> None:
     settings = Settings(store="redis", redis_url=redis_url, redis_max_connections=1)
     app = create_app(settings)
-    services, replies = services_of(app), []
+    services, replies, opened = services_of(app), [], []
     quizzes = [f"F-{uuid.uuid4().hex[:8].upper()}" for _ in range(2)]
     create = partial(services.store.create_quiz, window_ms=60_000, time_limit_ms=20_000)
 
@@ -114,7 +116,7 @@ def test_a_join_to_a_quiz_past_the_subscription_limit_is_unavailable(
     with TestClient(app) as client, ExitStack() as sockets:
         portal = client.portal
         assert portal is not None
-        before = metric("feed_subscribe_failures_total")
+        before = metric("feed_subscribe_failures_total", reason="limit")
         for quiz_id in quizzes:  # both sockets stay open: the first quiz keeps its subscription
             portal.call(create, quiz_id, (Question("q0", 1),))
             url, origin = f"/ws?ticket={portal.call(ticket)}", {"origin": "http://localhost:8080"}
@@ -123,6 +125,10 @@ def test_a_join_to_a_quiz_past_the_subscription_limit_is_unavailable(
                 json.dumps({"v": 1, "type": "join", "quizId": quiz_id, "displayName": "A"})
             )
             replies.append(ws.receive_json())
+            opened.append(ws)
+        with pytest.raises(WebSocketDisconnect) as closed:  # to reconnect, maybe to another node
+            opened[-1].receive_json()
+    assert closed.value.code == 1013
     assert replies[0]["type"] == "joined"
     assert (replies[1]["type"], replies[1]["code"]) == ("error", "UNAVAILABLE")
-    assert metric("feed_subscribe_failures_total") == before + 1
+    assert metric("feed_subscribe_failures_total", reason="limit") == before + 1

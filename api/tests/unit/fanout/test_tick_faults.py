@@ -303,7 +303,7 @@ async def test_a_writable_join_restarts_the_loop_of_a_quiz_whose_loop_ended() ->
     ended_loop = ticker._loops["Q"]  # noqa: SLF001 - the loop under test
     await asyncio.wait_for(ended_loop, 1)  # quiz_ended relayed; the socket stays bound
     registry.bind(Connection("c2", "u2", quiz_id="Q", read_only=True), sender)
-    assert ticker._loops["Q"] is ended_loop  # noqa: SLF001 - a read-only join needs no tick
+    assert "Q" not in ticker._loops  # noqa: SLF001 - an ended loop leaves; read only needs none
     registry.bind(Connection("c3", "u3", quiz_id="Q", present=True), sender)  # the id was reused
     assert ticker._loops["Q"] is not ended_loop  # noqa: SLF001
     await ticker.stop()
@@ -314,9 +314,14 @@ async def test_a_failed_subscribe_is_counted_and_retried(
 ) -> None:
     store = ScriptedStore(Publish("ended", SEQ + 1), messages=[ended(SEQ + 1)])
     store.subscribe_errors = [ConnectionError("No connection available.")]
-    before = metric("feed_subscribe_failures_total")
+    before = metric("feed_subscribe_failures_total", reason="error")
     await run(store, sockets, repairing())
-    assert (metric("feed_subscribe_failures_total"), backoffs) == (before + 1, [0])
+    assert (metric("feed_subscribe_failures_total", reason="error"), backoffs) == (before + 1, [0])
+
+
+def admits(ticker: Ticker, quiz_id: str) -> bool:
+    with ticker.admission(quiz_id) as admitted:
+        return admitted
 
 
 async def test_a_node_at_its_subscription_limit_admits_only_the_quizzes_it_follows(
@@ -324,10 +329,33 @@ async def test_a_node_at_its_subscription_limit_admits_only_the_quizzes_it_follo
 ) -> None:
     store = cast("FeedStore", ScriptedStore())
     ticker = Ticker(store, sockets, Mock(spec=QuizService), "n1", lambda: 0, max_quizzes=1)
-    before = metric("feed_subscribe_failures_total")
-    assert ticker.admits("A")
+    before = metric("feed_subscribe_failures_total", reason="limit")
+    assert admits(ticker, "A")
     ticker.open("A")
-    assert (ticker.admits("A"), ticker.admits("B")) == (True, False)
-    assert metric("feed_subscribe_failures_total") == before + 1
+    assert (admits(ticker, "A"), admits(ticker, "B")) == (True, False)
+    assert metric("feed_subscribe_failures_total", reason="limit") == before + 1
     await ticker.stop()
-    assert ticker.admits("B")
+    assert admits(ticker, "B")
+
+
+async def test_a_join_in_flight_holds_its_subscription_until_the_bind_opens_the_loop(
+    sockets: Mock,
+) -> None:
+    store = cast("FeedStore", ScriptedStore())
+    ticker = Ticker(store, sockets, Mock(spec=QuizService), "n1", lambda: 0, max_quizzes=1)
+    with ticker.admission("A") as a:  # the join's store write awaits here
+        assert (a, admits(ticker, "A"), admits(ticker, "B")) == (True, True, False)
+    ticker.open("A")  # the bind, right after the join returned
+    assert admits(ticker, "B") is False
+    await ticker.stop()
+
+
+async def test_no_loop_starts_past_the_limit_for_a_join_that_was_not_admitted(
+    sockets: Mock,
+) -> None:
+    store = cast("FeedStore", ScriptedStore())
+    ticker = Ticker(store, sockets, Mock(spec=QuizService), "n1", lambda: 0, max_quizzes=1)
+    ticker.open("A")
+    ticker.open("B")  # a refused join on a bound socket, or a read-only join, still binds
+    assert list(ticker._loops) == ["A"]  # noqa: SLF001 - the loops under test
+    await ticker.stop()

@@ -169,7 +169,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         max_quizzes=max_quizzes,
     )
     gateway.registry.watcher = ticker
-    services.service.admits = ticker.admits
+    services.service.admission = ticker.admission
     services.shutdown.append(ticker.stop)  # stop hooks run in reverse: before the store closes
     renewer = PresenceRenewer(services.store, gateway.registry, services.settings.grace_ms)
     services.startup.append(renewer.start)

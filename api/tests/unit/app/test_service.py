@@ -2,7 +2,9 @@
 import asyncio
 import logging
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from typing import Any, Literal, override
+from unittest.mock import Mock
 
 import pytest
 from redis import exceptions as redis_errors
@@ -13,6 +15,7 @@ from quiz.app.service import Connection, QuizService
 from quiz.contracts import messages as m
 from quiz.domain import errors as domain
 from quiz.domain.session import Question
+from quiz.fanout.tick import Ticker
 from quiz.ports.questions import BankQuestion
 from quiz.ports.store import End, Limits, Page, Place, Ranks, Row, Snapshot
 
@@ -175,10 +178,23 @@ async def test_join_errors_and_requests_before_join(service: QuizService) -> Non
 async def test_a_join_this_node_cannot_follow_is_unavailable_and_writes_nothing(
     service: QuizService, store: SpyStore
 ) -> None:
-    service.admits = lambda quiz_id: quiz_id != QUIZ
+    service.admission = lambda quiz_id: nullcontext(quiz_id != QUIZ)
     join = m.Join(quizId=QUIZ, displayName="A")
-    assert await refused(service, Connection("c-a", "a"), join) == (E.UNAVAILABLE, None)
+    # close 1013: the client reconnects, maybe through the load balancer to another node
+    assert await refused(service, Connection("c-a", "a"), join) == (E.UNAVAILABLE, 1013)
     assert (await store.snapshot(QUIZ, None)).player_count == 0
+
+
+async def test_a_join_this_node_cannot_follow_still_gets_the_final_standings_of_an_ended_quiz(
+    service: QuizService, store: SpyStore
+) -> None:
+    ticker = Ticker(store, Mock(), service, "n1", lambda: 0, max_quizzes=0)  # every slot taken
+    service.admission = ticker.admission
+    store.now[0] += 60_000
+    conn = Connection("c-a", "a")
+    for _ in range(2):  # a new socket, then the same socket now read only
+        snapshot, error = await send(service, conn, m.Join(quizId=QUIZ, displayName="A"))
+        assert (snapshot.status, error.code, conn.read_only) == ("ended", E.QUIZ_ENDED, True)
 
 
 async def test_join_after_end_is_read_only(service: QuizService, store: SpyStore) -> None:
@@ -282,6 +298,29 @@ async def test_a_snapshot_read_in_flight_when_the_cache_drops_is_not_kept(
     await old
     later = await service.snapshot(QUIZ, "a")
     assert new.entries[0].score == later.entries[0].score == 150
+
+
+async def test_a_drop_of_another_quiz_keeps_a_snapshot_read_in_flight_cached(
+    service: QuizService, store: SpyStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await joined(service)
+    read, started, release, reads = store.snapshot, asyncio.Event(), asyncio.Event(), [0]
+
+    async def counted(quiz_id: str, user_id: str | None) -> Snapshot:
+        reads[0] += 1
+        if not started.is_set():
+            started.set()
+            await release.wait()
+        return await read(quiz_id, user_id)
+
+    monkeypatch.setattr(store, "snapshot", counted)
+    first = asyncio.create_task(service.snapshot(QUIZ, "a"))
+    await started.wait()
+    service.drop_cache("OTHER-1")  # e.g. another quiz's loop starts or ends
+    release.set()
+    await first
+    await service.snapshot(QUIZ, "a")
+    assert reads[0] == 1  # the second snapshot came from the cache
 
 
 async def test_resync_adds_rank_update_outside_the_shown_entries(service: QuizService) -> None:

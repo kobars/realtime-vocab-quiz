@@ -11,7 +11,9 @@ failure in a row and starts over after a tick that went through."""
 import asyncio
 import logging
 import random
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
+from functools import partial
 
 from quiz.app.service import OUTAGE_LOG_INTERVAL_MS, QuizService
 from quiz.contracts.codec import encode
@@ -50,24 +52,54 @@ class Ticker:
         self._node_id, self._max_quizzes = node_id, max_quizzes
         self._outage_log = Throttle(clock, OUTAGE_LOG_INTERVAL_MS)
         self._tick_s = store.limits.tick_ms / 1000
-        self._loops: dict[str, asyncio.Task[None]] = {}
+        self._loops: dict[str, asyncio.Task[None]] = {}  # the running loops
+        self._holds: dict[str, int] = {}  # per quiz this node does not follow: joins in flight
 
-    def admits(self, quiz_id: str) -> bool:
-        """Whether this node can follow the quiz: it does, or a subscription is free; a refusal
-        is counted. A join it refuses would be answered but never get a live update."""
+    @contextmanager
+    def admission(self, quiz_id: str) -> Iterator[bool]:
+        """Whether this node can follow the quiz: it does, or a subscription is free, which the
+        join then holds while it runs, so concurrent joins never pass the limit together. The bind
+        that follows the join, with no await in between, opens the loop. A refusal is counted."""
         if self._max_quizzes is None or self._following(quiz_id):
-            return True
-        if sum(self._following(other) for other in self._loops) < self._max_quizzes:
-            return True
-        metrics.FEED_SUBSCRIBE_FAILURES.inc()
-        return False
+            yield True
+            return
+        if quiz_id not in self._holds and self._taken() >= self._max_quizzes:
+            metrics.FEED_SUBSCRIBE_FAILURES.labels("limit").inc()
+            yield False
+            return
+        self._holds[quiz_id] = self._holds.get(quiz_id, 0) + 1
+        try:
+            yield True
+        finally:
+            if left := self._holds[quiz_id] - 1:
+                self._holds[quiz_id] = left
+            else:
+                del self._holds[quiz_id]
+
+    def _taken(self) -> int:
+        """The subscriptions in use or held by a join in flight: a loop leaves ``_loops`` when
+        it ends (or is closed), so this needs no scan of the loops."""
+        return len(self._loops) + sum(quiz_id not in self._loops for quiz_id in self._holds)
 
     def _following(self, quiz_id: str) -> bool:
         return (task := self._loops.get(quiz_id)) is not None and not task.done()
 
     def open(self, quiz_id: str) -> None:
-        if not self._following(quiz_id):
-            self._loops[quiz_id] = asyncio.create_task(self._run(quiz_id))
+        """Start the quiz's loop unless it runs. Past the limit (a read-only join of an ended
+        quiz, or a refused join on a bound socket) no loop starts: neither needs live updates."""
+        if (task := self._loops.get(quiz_id)) is not None:
+            if not task.done():
+                return
+            del self._loops[quiz_id]  # ended; its done callback may not have run yet
+        if self._max_quizzes is not None and self._taken() >= self._max_quizzes:
+            log.info("quiz %s: every subscription is taken, so no loop starts", quiz_id)
+            return
+        task = self._loops[quiz_id] = asyncio.create_task(self._run(quiz_id))
+        task.add_done_callback(partial(self._ended, quiz_id))
+
+    def _ended(self, quiz_id: str, task: asyncio.Task[None]) -> None:
+        if self._loops.get(quiz_id) is task:  # not a newer loop of the same quiz
+            del self._loops[quiz_id]
 
     def close(self, quiz_id: str) -> None:
         if (task := self._loops.pop(quiz_id, None)) is not None:
@@ -103,7 +135,7 @@ class Ticker:
                     await self._serve(quiz_id, relay, messages, progress)
             except Exception as error:
                 if not subscribed:
-                    metrics.FEED_SUBSCRIBE_FAILURES.inc()
+                    metrics.FEED_SUBSCRIBE_FAILURES.labels("error").inc()
                 if isinstance(error, DomainError) and error.code is ErrorCode.QUIZ_NOT_FOUND:
                     return  # expired, or lost by the store: also from the repair's read (§5)
                 log.exception("fan-out of quiz %s failed: subscribing again", quiz_id)

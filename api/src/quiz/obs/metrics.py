@@ -47,9 +47,12 @@ TICK_DURATION = Histogram(
 FEED_SUBSCRIBE_FAILURES = Counter(
     "feed_subscribe_failures_total",
     "Quiz feeds this node could not subscribe to: a join refused because every subscription"
-    " connection is taken, or a subscribe attempt that failed",
+    " connection is taken (reason limit), or a subscribe attempt that failed (reason error)",
+    ["reason"],
     registry=REGISTRY,
 )
+for _reason in ("limit", "error"):
+    FEED_SUBSCRIBE_FAILURES.labels(_reason)
 WS_ERRORS = Counter(
     "ws_errors_total",
     "WebSocket error replies of the use cases by request type and code",
