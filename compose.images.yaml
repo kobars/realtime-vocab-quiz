@@ -1,0 +1,15 @@
+# AI-ASSISTED: the public host's stack on the images that CI publishes to GitHub Container Registry
+# instead of images built here: an override of compose.yaml and compose.prod.yaml that the prod
+# targets add when IMAGE_TAG is set (docs/operations.md, "Image tags").
+
+x-api-image: &api-image
+  image: ghcr.io/kobars/realtime-vocab-quiz-api:${IMAGE_TAG:-main}
+x-web-image: &web-image
+  image: ghcr.io/kobars/realtime-vocab-quiz-web:${IMAGE_TAG:-main}
+
+services:
+  api-1: *api-image
+  api-2: *api-image
+  seed: *api-image
+  web: *web-image
+  nginx: *web-image

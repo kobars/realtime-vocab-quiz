@@ -35,10 +35,12 @@ run() {
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--domain NAME] [--ref REF] [--ip ADDRESS] [--dns-wait SECONDS] [--dir PATH]
-                  [--repo URL] [--dry-run]
+Usage: install.sh [--domain NAME] [--ref REF] [--build] [--ip ADDRESS] [--dns-wait SECONDS]
+                  [--dir PATH] [--repo URL] [--dry-run]
   --domain NAME        host name whose DNS A record points at this VM (default: <ip>.sslip.io)
   --ref REF            branch or tag to deploy (default: main)
+  --build              build the images on this VM instead of pulling the published ones, which
+                       exist for main and the vX.Y.Z tags only
   --ip ADDRESS         this VM's public IPv4 (default: detected)
   --dns-wait SECONDS   wait up to this long for --domain to point at this VM (default: 0)
   --dir PATH           install folder (default: /opt/realtime-vocab-quiz)
@@ -191,21 +193,43 @@ new_secret() { od -An -tx1 -N24 /dev/urandom | tr -d ' \n'; }
 # The last value of KEY in an env file.
 env_value() { sed -n "s/^$1=//p" "$2" | tail -n 1; }
 
-# Writes the env file DEST from SRC: DOMAIN set to the domain when one is given, and each empty
-# secret filled. A secret that has a value is never changed, so running it again keeps them.
+# Writes the env file DEST from SRC: DOMAIN set to the domain when one is given, each empty secret
+# filled, and, when TAG is given, IMAGE_TAG set to it with COMPOSE_FILE to match (an empty TAG:
+# images built here). A secret that has a value is never changed, so running it again keeps them.
 render_env() {
-  local src=$1 dest=$2 domain=$3 line
+  local src=$1 dest=$2 domain=$3 tag=${4-} line files=compose.yaml:compose.prod.yaml seen=""
+  [[ $# -ge 4 ]] || seen=" files tag" # no TAG: both lines stay as they are
+  [[ -z $tag ]] || files+=:compose.images.yaml
   (
     umask 077
-    while IFS= read -r line || [[ -n $line ]]; do
-      case $line in
-        DOMAIN=*) [[ -z $domain ]] || line="DOMAIN=$domain" ;;
-        ADMIN_TOKEN= | REDIS_PASSWORD=) line="$line$(new_secret)" ;;
-      esac
-      printf '%s\n' "$line"
-    done <"$src" >"$dest.tmp"
+    {
+      while IFS= read -r line || [[ -n $line ]]; do
+        case $line in
+          DOMAIN=*) [[ -z $domain ]] || line="DOMAIN=$domain" ;;
+          ADMIN_TOKEN= | REDIS_PASSWORD=) line="$line$(new_secret)" ;;
+          COMPOSE_FILE=*) seen+=" files" && { [[ $# -lt 4 ]] || line="COMPOSE_FILE=$files"; } ;;
+          IMAGE_TAG=*) seen+=" tag" && { [[ $# -lt 4 ]] || line="IMAGE_TAG=$tag"; } ;;
+        esac
+        printf '%s\n' "$line"
+      done <"$src"
+      # A .env from before the published images has neither line.
+      [[ $seen == *files* ]] || printf 'COMPOSE_FILE=%s\n' "$files"
+      [[ $seen == *tag* ]] || printf 'IMAGE_TAG=%s\n' "$tag"
+    } >"$dest.tmp"
     mv "$dest.tmp" "$dest"
   )
+}
+
+# The published image tag for REF (main or a vX.Y.Z tag); BUILD=1 (or another REF): none.
+image_tag_for() {
+  local ref=$1 build=$2
+  if [[ $build == 1 ]]; then
+    return 0
+  elif [[ $ref == main || $ref =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s\n' "$ref"
+  else
+    die "--ref $ref has no published images (main and the vX.Y.Z tags have them); add --build"
+  fi
 }
 
 # Polls https://DOMAIN/api/readyz until it answers 200, for READY_TIMEOUT seconds. With TLS_ISSUER
@@ -221,7 +245,7 @@ wait_ready() {
 }
 
 main() {
-  local domain="" ref=main ip="" dns_wait=0 dir=$INSTALL_DIR repo=$REPO_URL env_domain
+  local domain="" ref=main build=0 ip="" dns_wait=0 dir=$INSTALL_DIR repo=$REPO_URL env_domain tag
   while (($#)); do
     case $1 in
       --domain | --ref | --ip | --dns-wait | --dir | --repo) [[ $# -ge 2 ]] || die "$1 needs a value" ;;
@@ -233,6 +257,7 @@ main() {
       --dns-wait) dns_wait=$2 && shift ;;
       --dir) dir=$2 && shift ;;
       --repo) repo=$2 && shift ;;
+      --build) build=1 ;;
       --dry-run) DRY_RUN=1 ;;
       -h | --help) usage && return 0 ;;
       *) usage >&2 && die "unknown option: $1" ;;
@@ -241,6 +266,7 @@ main() {
   done
   [[ -z $domain || $domain =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || die "--domain '$domain' is not a host name"
   [[ $dns_wait =~ ^[0-9]+$ ]] || die "--dns-wait takes whole seconds, not '$dns_wait'"
+  tag=$(image_tag_for "$ref" "$build")
 
   check_root
   check_os /etc/os-release
@@ -254,14 +280,14 @@ main() {
   fi
 
   checkout "$dir" "$repo" "$ref"
-  # A first run writes .env from the example; a later one keeps it and changes DOMAIN only
-  # when --domain is given.
+  # A first run writes .env from the example; a later one keeps it, changes DOMAIN only when
+  # --domain is given, and sets the image tag from --ref and --build.
   if [[ -f $dir/.env ]]; then
     log "Keeping $dir/.env and its secrets"
-    render_env "$dir/.env" "$dir/.env" "$domain"
+    render_env "$dir/.env" "$dir/.env" "$domain" "$tag"
   elif [[ -f $dir/.env.prod.example ]]; then
     log "Writing $dir/.env with a new ADMIN_TOKEN and REDIS_PASSWORD"
-    render_env "$dir/.env.prod.example" "$dir/.env" "$(choose_domain "$domain" "$ip")"
+    render_env "$dir/.env.prod.example" "$dir/.env" "$(choose_domain "$domain" "$ip")" "$tag"
   else
     [[ $DRY_RUN == 1 ]] || die "$dir has no .env.prod.example; is --ref a revision of this project?"
     log "dry run: no checkout yet, so no .env"
@@ -274,7 +300,11 @@ main() {
   log "Domain: $env_domain"
   check_dns "$env_domain" "$ip" "$dns_wait"
 
-  log "Building and starting the stack (a few minutes on a fresh VM)"
+  if [[ -n $tag ]]; then
+    log "Pulling the published $tag images and starting the stack"
+  else
+    log "Building the images and starting the stack (a few minutes on a fresh VM)"
+  fi
   run make -C "$dir" prod-up
   log "Waiting for https://$env_domain/api/readyz (up to ${READY_TIMEOUT}s)"
   if [[ $DRY_RUN == 1 ]]; then

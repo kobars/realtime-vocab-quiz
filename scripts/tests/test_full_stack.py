@@ -213,25 +213,43 @@ def test_the_public_host_example_env_names_the_origin_and_the_default_cap() -> N
     assert env["ALLOWED_ORIGINS"] == "https://${DOMAIN}"
     assert env["ADMIN_TOKEN"] == env["REDIS_PASSWORD"] == ""  # a comment would be the value
     assert int(env["PER_IP_CONN_CAP"]) == Settings.model_fields["per_ip_conn_cap"].default
-    # Plain `docker compose`, make demo's and make down's included, then acts on the HTTPS stack.
-    assert env["COMPOSE_FILE"] == "compose.yaml:compose.prod.yaml"
+    # Plain `docker compose`, make new-quiz's and make down's included, then acts on the HTTPS
+    # stack, on the published images of main.
+    assert env["COMPOSE_FILE"] == "compose.yaml:compose.prod.yaml:compose.images.yaml"
+    assert env["IMAGE_TAG"] == "main"
     assert re.fullmatch(r"\d+[mg]b", env["REDIS_MAXMEMORY"])
 
 
-def test_the_public_host_targets_run_both_compose_files() -> None:
+def test_the_public_host_targets_run_the_compose_files_of_the_deploy_script() -> None:
+    """scripts/deploy/ops.sh compose runs both files, plus compose.images.yaml when IMAGE_TAG is
+    set (scripts/tests/test_deploy.py)."""
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    assert "\nPROD_COMPOSE = docker compose -f compose.yaml -f compose.prod.yaml\n" in makefile
-    for target in ("prod-up", "prod-down", "prod-logs", "prod-demo"):
+    assert "\nPROD_COMPOSE = scripts/deploy/ops.sh compose\n" in makefile
+    for target in ("prod-down", "prod-logs", "prod-demo"):
         recipe = re.search(rf"^{target}:.*\n\t(.*)", makefile, re.MULTILINE)
         assert recipe is not None
         assert recipe[1].startswith("$(PROD_COMPOSE) ")
+    assert re.search(r"^prod-up:.*\n\tscripts/deploy/ops\.sh up\n", makefile, re.MULTILINE)
 
 
 def test_prod_up_recreates_the_edge_so_a_pulled_config_change_applies() -> None:
     """git replaces a changed file, and a running container keeps the old bind-mounted one."""
-    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    (recipe,) = re.findall(r"^prod-up:.*\n((?:\t.*\n)+)", makefile, re.MULTILINE)
-    assert recipe.splitlines()[-1].endswith("--no-deps --force-recreate nginx caddy")
+    ops = (ROOT / "scripts" / "deploy" / "ops.sh").read_text(encoding="utf-8")
+    (body,) = re.findall(r"^up\(\) \{\n(.*?)^\}", ops, re.MULTILINE | re.DOTALL)
+    assert body.splitlines()[-1].endswith("--no-deps --force-recreate nginx caddy")
+
+
+def test_the_published_images_replace_every_image_built_here() -> None:
+    images = yaml_load((ROOT / "compose.images.yaml").read_text(encoding="utf-8"))["services"]
+    built_here = {
+        name: s["image"]
+        for name, s in COMPOSE["services"].items()
+        if s.get("image", "").startswith(("elsaquiz-api:", "elsaquiz-web:"))
+    }
+    assert images.keys() == built_here.keys()
+    for name, image in built_here.items():
+        repo = image.split(":")[0].replace("elsaquiz-", "ghcr.io/kobars/realtime-vocab-quiz-")
+        assert images[name] == {"image": f"{repo}:${{IMAGE_TAG:-main}}"}
 
 
 def test_caddy_keeps_the_admin_token_and_the_socket_ticket_out_of_its_logs() -> None:

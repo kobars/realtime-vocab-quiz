@@ -1,0 +1,4 @@
+# AI-ASSISTED: shellcheck settings for every run (make check's hook, CI and editors).
+# Follow each script's source= directive even when the sourced file is not among the files of the
+# run: pre-commit splits the files across processes.
+external-sources=true

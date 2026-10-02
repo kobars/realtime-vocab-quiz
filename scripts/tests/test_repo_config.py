@@ -241,9 +241,47 @@ def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
         assert any(command in run for run in runs), command
     workflow = path.read_text(encoding="utf-8")
     assert "scan-type: config" in workflow
-    # Image scans fail on CRITICAL and HIGH findings that have a fix, for both images.
-    assert workflow.count("ignore-unfixed: true") == workflow.count("image-ref:") == 2
-    assert workflow.count("severity: CRITICAL,HIGH") == 2
+    # Image scans fail on CRITICAL and HIGH findings that have a fix, for both images: once as
+    # built on every run, and per platform before a publish.
+    assert workflow.count("ignore-unfixed: true") == workflow.count("image-ref:") == 4
+    assert workflow.count("severity: CRITICAL,HIGH") == 4
+
+
+def test_only_the_publish_jobs_can_write_packages_after_every_check_and_scan() -> None:
+    path = WORKFLOWS / "containers.yml"
+    writers = {
+        job: [line for line in _section(path, job, 2) if line.endswith(": write")]
+        for job in _job_ids(path)
+    }
+    assert writers["publish"] == ["packages: write"]
+    assert writers["publish-tags"] == [
+        "packages: write",
+        "id-token: write",
+        "attestations: write",
+        "artifact-metadata: write",
+    ]
+    assert not any(
+        "packages: write" in w or "id-token: write" in w
+        for job, w in writers.items()
+        if job not in {"publish", "publish-tags"}
+    )
+    publish = _section(path, "publish", 2)
+    tags = _section(path, "publish-tags", 2)
+    # Never on a pull request or in a fork.
+    only_here = (
+        "if: github.event_name == 'push' && github.repository == 'kobars/realtime-vocab-quiz'"
+    )
+    assert only_here in publish
+    assert only_here in tags
+    assert "needs: [config, images]" in publish
+    assert "needs: [publish]" in tags
+    # Only the run of main's newest commit moves the main tag.
+    assert any('if [[ $head == "$GITHUB_SHA" ]]; then' in line for line in tags)
+    # Pushed by digest only, then scanned; only publish-tags gives the images a tag.
+    assert sum("push-by-digest=true" in line for line in publish) == 2
+    steps = [line for line in publish if line.startswith("- name:")]
+    assert steps.index("- name: trivy image (web)") < steps.index("- name: record the digests")
+    assert 'tags: ["v*.*.*"]' in _section(path, "on", 0)
 
 
 def test_web_image_scan_runs_only_when_the_images_were_built() -> None:

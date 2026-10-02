@@ -60,11 +60,12 @@ ui_run = mkdir -p web/node_modules && docker run --rm --platform linux/amd64 --i
 	corepack enable && pnpm install --frozen-lockfile --store-dir /tmp/pnpm-store && eval "pnpm exec playwright test $(1) $$UI_ARGS"'
 # The bots that make demo starts.
 BOTS ?= 20
-# The full stack on a public host, behind Caddy's HTTPS (docs/operations.md, "Deploy to a VM").
-PROD_COMPOSE = docker compose -f compose.yaml -f compose.prod.yaml
-export PROD_COMPOSE # scripts/deploy/ops.sh runs the same files
+# The full stack on a public host, behind Caddy's HTTPS (docs/operations.md, "Deploy to a VM"): on
+# the published images of IMAGE_TAG when it is set on the command line or in .env, else on images
+# built here.
+PROD_COMPOSE = scripts/deploy/ops.sh compose
 
-.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget prod-up prod-down prod-logs prod-demo prod-update prod-backup prod-restore
+.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget prod-up prod-down prod-logs prod-demo prod-update prod-backup prod-restore do-deploy do-destroy
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -86,23 +87,25 @@ new-quiz: ## Start a fresh 60-min quiz on the running stack; print its ID and pl
 demo-end: ## End quiz ID=<id> now as the mock host; its players see the final results
 	$(if $(ID),,$(error set ID=<quiz id>, as make demo printed it))
 	docker compose --progress quiet run --rm -T seed python /opt/seed.py --end '$(ID)'
-# The edge's config files are bind-mounted: a pulled change shows only in a new nginx or Caddy container.
-prod-up: build ## Build and start the full stack behind HTTPS on a public host (.env from .env.prod.example)
-	$(PROD_COMPOSE) --profile full up -d --wait --wait-timeout 180
-	$(PROD_COMPOSE) --profile full up -d --wait --wait-timeout 180 --no-deps --force-recreate nginx caddy
+prod-up: ## Start the full stack behind HTTPS on a public host: pull IMAGE_TAG's images, or build them if unset
+	scripts/deploy/ops.sh up
 prod-down: ## Stop the public host's stack; its data and certificates stay
 	$(PROD_COMPOSE) --profile '*' down
 prod-logs: ## Follow the logs of the public host's stack
 	$(PROD_COMPOSE) --profile full logs -f --tail 100
 prod-demo: ## Start a fresh 60-min quiz on the public host's stack; print its HTTPS player URL
 	$(PROD_COMPOSE) --progress quiet run --rm -T seed
-prod-update: ## Pull (or move to REF), rebuild and restart the public host's stack; roll back if not ready
-	scripts/deploy/ops.sh update $(if $(REF),'$(REF)')
+prod-update: ## Pull (or move to REF) with its images (BUILD=1: build them) and restart; roll back if not ready
+	scripts/deploy/ops.sh update $(if $(BUILD),--build) $(if $(REF),'$(REF)')
 prod-backup: ## Back up the public host's quiz data, certificates and .env to FILE (default: backups/)
 	scripts/deploy/ops.sh backup $(if $(FILE),'$(FILE)')
 prod-restore: ## Restore FILE, a make prod-backup file, onto the public host's stack and restart it
 	$(if $(FILE),,$(error set FILE=<backup .tar.gz>, as make prod-backup printed it))
 	scripts/deploy/ops.sh restore '$(FILE)'
+do-deploy: ## Create a DigitalOcean Droplet that installs the stack, with doctl (DOMAIN, REGION, SIZE, DRY_RUN=1)
+	scripts/deploy/droplet.sh deploy $(if $(DOMAIN),--domain '$(DOMAIN)') $(if $(REGION),--region '$(REGION)') $(if $(SIZE),--size '$(SIZE)') $(if $(DRY_RUN),--dry-run)
+do-destroy: ## Delete the Droplet, firewall and DNS record that make do-deploy created, after a prompt (DRY_RUN=1)
+	scripts/deploy/droplet.sh destroy $(if $(DRY_RUN),--dry-run)
 smoke-full: ## Smoke-test the running full stack through nginx, stopping one API node
 	uv run --project api --locked python load/smoke_full.py
 dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)

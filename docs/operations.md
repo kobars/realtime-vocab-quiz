@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: operating the stack: ports, endpoints, configuration, metrics, and the public-host deployment behind HTTPS: install, update, backup and restore. -->
+<!-- AI-ASSISTED: operating the stack: ports, endpoints, configuration, metrics, and the public-host deployment behind HTTPS: the published images, the Droplet from a laptop, install, update, backup and restore. -->
 # Operations
 
 ## Ports and endpoints
@@ -51,8 +51,15 @@ its default, and [`.env.example`](../.env.example) shows the common ones.
 
 ## Deploy to a VM
 
-One Linux VM with Docker runs the whole stack behind HTTPS: 2 vCPU and 4 GB of memory are enough
-for the demo. [compose.prod.yaml](../compose.prod.yaml) adds Caddy in front of nginx: it gets a
+One Linux VM with Docker runs the whole stack behind HTTPS. It pulls the images that CI
+publishes (see [Image tags](#image-tags)), so the VM builds nothing: 2 vCPU and 4 GB of memory
+are enough for a busy demo, and a 1 GiB Droplet runs a small one. Measured on an isolated copy of
+the stack, the containers used at most 255 MiB with 300 bots answering (the two API nodes 73
+and 62 MiB, nginx 94, Redis 15, the client 11) and Caddy 54 MiB idle. nginx starts one worker
+per CPU, about 10 MiB each, and that host had 12 CPUs; a 1 vCPU Droplet runs one worker. On
+1 GiB, set `REDIS_MAXMEMORY=256mb` in `.env`, since the example's `1gb` would let Redis outgrow
+the machine, and keep the published images: building them needs more memory than that.
+[compose.prod.yaml](../compose.prod.yaml) adds Caddy in front of nginx: it gets a
 Let's Encrypt certificate for `DOMAIN` and renews it, redirects HTTP to HTTPS and proxies the
 page, the API and the WebSocket to nginx, which publishes no port of its own. nginx takes each
 player's address from Caddy, so the per-address caps count every player apart.
@@ -60,6 +67,35 @@ player's address from Caddy, so the per-address caps count every player apart.
 In the VM's firewall, allow inbound TCP 22, 80 and 443 only. Without a domain, the stack serves
 on `<ip>.sslip.io` (for example `203.0.113.7.sslip.io`), a name that resolves to the address it
 contains. With a domain, its DNS A record (IPv4, and no AAAA record) points at the VM.
+
+### From a laptop
+
+With [`doctl`](https://docs.digitalocean.com/reference/doctl/how-to/install/) installed and
+signed in (`doctl auth init`; the script never reads or stores a token) and an SSH key in the
+DigitalOcean account (`doctl compute ssh-key import`), one command creates the host:
+
+```bash
+make do-deploy DOMAIN=quiz.example.com   # REGION=sgp1 and SIZE=s-2vcpu-4gb by default
+```
+
+[scripts/deploy/droplet.sh](../scripts/deploy/droplet.sh) creates a Cloud Firewall that allows
+inbound TCP 22, 80 and 443 only, for every Droplet tagged `realtime-vocab-quiz`; an Ubuntu
+24.04 Droplet with that tag, every SSH key of the account and no root password, whose user data
+is [infra/deploy/cloud-init.yaml](../infra/deploy/cloud-init.yaml) with `DOMAIN` filled in; and,
+when the domain is a DigitalOcean zone, its A record. For a domain hosted elsewhere it prints
+the address to point the record at. Without `DOMAIN` the stack serves on
+`<droplet-ip>.sslip.io`. It then waits up to 40 minutes (the install waits up to 30 for a DNS
+record hosted elsewhere) for `https://DOMAIN/api/readyz`, starts
+a 60-minute quiz over SSH (`make prod-demo` on the Droplet) and prints its player link. It stops
+before creating anything when doctl is not signed in, a lookup fails, the account has no SSH key,
+a Droplet with the tag exists, or the domain's DigitalOcean zone already has an A or AAAA record
+of that name (the install needs the name to point at the new Droplet alone). `DRY_RUN=1` runs only the lookups and prints each command that would create
+something.
+
+`make do-destroy` lists the Droplets tagged `realtime-vocab-quiz`, the A records that point at
+them under their own name, and the firewall of that name, and deletes them once you type `yes`;
+the Droplet's quiz data goes with it (`make prod-backup` first to keep it). `DRY_RUN=1` prints
+the deletes instead.
 
 ### Five-minute install
 
@@ -82,14 +118,17 @@ curl -fsSL https://raw.githubusercontent.com/kobars/realtime-vocab-quiz/main/scr
 Compose plugin, `git`, `make` and `openssl` when they are missing, clones the repository into
 `/opt/realtime-vocab-quiz` (or updates it), writes `.env` from
 [.env.prod.example](../.env.prod.example) with a new `ADMIN_TOKEN` and `REDIS_PASSWORD`, runs
-`make prod-up`, waits up to 3 minutes for `https://DOMAIN/api/readyz` and prints the next steps.
+`make prod-up` on the published images of `--ref` (`main` or a `vX.Y.Z` tag; `--build` builds
+them on the VM instead, and another ref needs it), waits up to 3 minutes for
+`https://DOMAIN/api/readyz` and prints the next steps.
 Without `--domain` it finds the VM's public IPv4 address from DigitalOcean's metadata service or
 a public echo service. It stops with a clear error when it is not run as root, on another OS,
 when ports 80 or 443 are in use, or when the domain does not resolve to this VM in public DNS
 (asked through Google Public DNS's JSON API, else the system's resolver): that check runs before
 Caddy asks for a certificate, so a wrong record does not use up Let's Encrypt's rate limits.
-Running it again is safe: it keeps `.env` and its secrets, and changes `DOMAIN` only when
-`--domain` is given. `--ref` picks another branch or tag, `--ip` gives the address, and
+Running it again is safe: it keeps `.env` and its secrets, changes `DOMAIN` only when `--domain`
+is given, and sets `IMAGE_TAG` and `COMPOSE_FILE` from `--ref` and `--build`. `--ref` picks
+another branch or tag, `--ip` gives the address, and
 `--help` lists every option; `--dry-run` runs the checks and writes `.env` but only prints the
 commands that install, clone, start or wait.
 
@@ -112,18 +151,59 @@ plain `docker compose` and the other make targets act on this stack too.
    sed -i "s/^ADMIN_TOKEN=$/&$(openssl rand -hex 24)/; s/^REDIS_PASSWORD=$/&$(openssl rand -hex 24)/" .env
    ```
 
-3. `make prod-up` builds the images and starts the stack; Caddy gets the certificate within a
-   minute. Check it from any machine: `curl https://quiz.example.com/api/readyz` prints
-   `{"status":"ready"}`.
+3. `make prod-up` pulls the published images of `main` and starts the stack (to build them
+   instead, see [Image tags](#image-tags)); Caddy gets the certificate within a minute. Check
+   it from any machine: `curl https://quiz.example.com/api/readyz` prints `{"status":"ready"}`.
+
+### Image tags
+
+On every push to `main` and on every `vX.Y.Z` tag, the containers workflow builds the API and
+web images for amd64 and arm64, pushes them by digest with an SBOM and their build provenance,
+scans each with Trivy as pulled (a CRITICAL or HIGH finding with a fix stops the publish), and
+only then tags them and adds a signed provenance attestation:
+
+| Image | Tags |
+|---|---|
+| `ghcr.io/kobars/realtime-vocab-quiz-api`, `ghcr.io/kobars/realtime-vocab-quiz-web` | `main` (the latest commit of `main`), the commit's short SHA (7 characters, for example `1a2b3c4`), `vX.Y.Z` for a release tag |
+
+GHCR creates each package as private on its first publish. Make both public once, so that a VM
+pulls them without a login: open
+`https://github.com/users/kobars/packages/container/realtime-vocab-quiz-api/settings` (and the
+same page for `realtime-vocab-quiz-web`), choose **Change visibility** under **Danger Zone**,
+select **Public** and type the package name to confirm. GitHub's REST API reads a package's
+visibility but cannot change it; `gh api /users/kobars/packages/container/realtime-vocab-quiz-api
+--jq .visibility` prints it (after `gh auth refresh -s read:packages`). While a package is private,
+or before the first publish of a tag, an anonymous pull fails ("denied" or "manifest unknown"):
+`make prod-up`, `make prod-update` and the install script then print a warning and build the
+images on the host from the checkout instead, under the published names, so the stack still
+starts (on 1 GiB that build may run out of memory).
+`gh attestation verify oci://ghcr.io/kobars/realtime-vocab-quiz-api:main -R
+kobars/realtime-vocab-quiz` checks that an image was built by this repository's workflow.
+
+`IMAGE_TAG` in `.env` picks the tag, and [compose.images.yaml](../compose.images.yaml), listed
+in the example's `COMPOSE_FILE`, puts those images in place of the ones `make build` makes. The
+prod targets add that override whenever `IMAGE_TAG` is set, in `.env` or on the command line:
+`make prod-up IMAGE_TAG=1a2b3c4` runs one commit's images for that command (set it in `.env` to
+keep them for the other targets). To build the images on the host
+instead (a branch with no published images, or a local change), leave `IMAGE_TAG` empty and drop
+`:compose.images.yaml` from `COMPOSE_FILE`, or run the install with `--build`.
 
 ### Update
 
 `make prod-update` notes the running commit, fast-forwards the branch the checkout is on to its
-newest commit on GitHub, runs `make prod-up` (which also recreates nginx and Caddy for new
-config) and waits for `readyz`. `make prod-update REF=<tag or branch>` moves to that ref instead;
-an install from a tag (`--ref v1.2`) is on no branch, so its updates name the next tag. When the
-new commit does not get ready, it checks out the commit that ran before, starts that again and
-exits non-zero with a message that says whether the rollback is ready.
+newest commit on GitHub, starts the stack again (pulling the tag's images, or building them when
+`IMAGE_TAG` is empty; nginx and Caddy are recreated for new config) and waits for `readyz`.
+`make prod-update REF=<tag or branch>` moves to that ref instead; an install from a tag
+(`--ref v1.2.0`) is on no branch, so its updates name the next tag. On published images, a
+`vX.Y.Z` ref or a commit's short SHA runs that tag's images and becomes `IMAGE_TAG` in `.env`
+once it is ready; a short-SHA `IMAGE_TAG` follows the checkout to its new commit. A branch other
+than `main` needs `BUILD=1`, which builds the images on the host under the current tag's name
+(the next pull replaces them). The `main` images follow the branch a few minutes after a merge,
+once the containers workflow has published them. When the update does not get ready, it checks
+out the commit that ran before and starts it on the images that ran before (kept as the
+`rollback` tag before the pull, then tagged as `IMAGE_TAG` again, so every prod target runs
+them), then exits non-zero with a message that says whether the rollback is ready. An update of
+a stopped stack keeps no images, so when it fails it puts the checkout back and stops there.
 
 ### Backup and restore
 
