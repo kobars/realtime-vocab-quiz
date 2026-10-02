@@ -494,11 +494,10 @@ async def test_standings_read_every_player_at_one_seq(
         return ranks
 
     store.ranks_of = join_after  # type: ignore[method-assign, assignment]
-    ranks, standings = await service.standings(QUIZ, ["a", "b"])
+    ranks, shared = await service.standings(QUIZ, ["a", "b"])
     assert reads == [["a", "b"], ["a", "b"]]  # one read for all the players, per try
-    snapshots = [replies[0] for replies in standings.values()]
-    assert {(s.atSeq, s.playerCount) for s in snapshots} == {(ranks.at_seq, 3)}
-    assert [s.you for s in snapshots] == [m.You(rank=1, score=0), m.You(rank=2, score=0)]
+    assert (shared.atSeq, shared.playerCount, shared.you) == (ranks.at_seq, 3, None)
+    assert dict(ranks.rows) == {"a": Place(1, 0), "b": Place(2, 0)}
 
 
 async def test_joined_echoes_the_stored_name(service: QuizService) -> None:

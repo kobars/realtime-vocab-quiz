@@ -1,9 +1,9 @@
 # AI-ASSISTED: the presence renew loop of docs/spec/redis.md §3, one per node.
 """A grace timer dies with its node, and its ``leave`` may fail, so every ``renew_ms`` this node
-renews the presence of each joined socket it holds, per quiz, and the same call drops every entry
-of the quiz that no node renewed for ``stale_ms``: the grace plus one renew period, so a normal
-disconnect still leaves through its grace timer first. A failed renew is logged, and the next
-one still runs."""
+renews the presence of each joined socket it holds, per quiz. The first renew of a quiz in each
+``renew_ms`` window, from any node, also drops every entry of the quiz that no node renewed for
+``stale_ms``: the grace plus one renew period, so a normal disconnect still leaves through its
+grace timer first. A failed renew is logged, and the next one still runs."""
 
 import asyncio
 import logging
@@ -27,7 +27,7 @@ class PresenceRenewer:
         self, store: Store, holders: Holders, grace_ms: int, renew_ms: int = RENEW_MS
     ) -> None:
         self._store, self._holders = store, holders
-        self._stale_ms, self._renew_s = grace_ms + renew_ms, renew_ms / 1000
+        self._stale_ms, self._renew_ms = grace_ms + renew_ms, renew_ms
         self._task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
@@ -42,9 +42,9 @@ class PresenceRenewer:
 
     async def _run(self) -> None:
         while True:
-            await asyncio.sleep(self._renew_s)
+            await asyncio.sleep(self._renew_ms / 1000)
             for quiz_id, pairs in self._holders.presence().items():
                 try:
-                    await self._store.renew_presence(quiz_id, self._stale_ms, pairs)
+                    await self._store.renew_presence(quiz_id, self._stale_ms, self._renew_ms, pairs)
                 except Exception:
                     log.warning("presence renew of quiz %s failed", quiz_id, exc_info=True)

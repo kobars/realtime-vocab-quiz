@@ -55,6 +55,6 @@ end
 local reply = {i, choice, key, correct and 1 or 0, elapsed > limit and 1 or 0, pts, total,
   tonumber(redis.call('GET', KEYS[K.seq])) or 0}
 redis.call('HSET', KEYS[K.subs], sub_field, cjson.encode(reply))
-refresh()
+refresh(K.answered, K.scored, K.dirty, K.subs)
 reply[9], reply[10] = step_back, 0
 return {'ok', unpack(reply)}

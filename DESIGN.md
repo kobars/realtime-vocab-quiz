@@ -510,7 +510,9 @@ latency is the client-observed round trip from `answer` to `answer_result`. Msg/
 frames the bots received; CPU % is the mean over the answering window, in percent of one core
 (two values: one per node); RSS is the node's peak memory in MiB as `docker stats` reports it.
 No run had a missing, timed-out or reconnecting sample; the many-quizzes run counted 4 `seq`
-gaps, each closed by a resync.
+gaps, each closed by a resync. These runs timed a frame when it arrived, also while a resync
+held it; the bots now time it when they apply it, as the web client shows it, which changes only
+the samples taken during a gap.
 
 | Scenario | Connections | Msg/s | p50 ms | p95 ms | p99 ms | CPU % | RSS MB | Answer p99 ms | Missing samples | Bots' CPU % (procs) | Result files in `load/results/` |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -657,10 +659,11 @@ Test paths are under `api/tests/` (server) or `web/src/` (client). "Not tested" 
 **Known limits.**
 
 - **A crash leaves stale presence.** The 10 s grace timer lives in the node; when the node dies,
-  `leave` never runs. Every node renews its own players' presence every 3 s, and that call drops
-  the entries no node renewed for 13 s (`fanout/presence.py`, `renew_presence.lua`), so another
-  node that serves the quiz clears them 13–16 s later. If no other node serves the quiz, they
-  stay until one does or the keys expire. Until then the online count is too high; scores and
+  `leave` never runs. Every node renews its own players' presence every 3 s, and the first renew
+  of a quiz in each 3 s window, from any node, drops the entries no node renewed for 13 s
+  (`fanout/presence.py`, `renew_presence.lua`), so another node that serves the quiz clears
+  them 13–16 s later. If no other node serves the quiz, they stay until one does or the keys
+  expire. Until then the online count is too high; scores and
   standings are not affected.
 - **No epoch on a Redis failover.** `seq` can go back after a failover or a restore; a client
   resyncs on a lower `seq`, but a counter that climbs past its `lastSeq` first goes unnoticed

@@ -19,6 +19,7 @@ type MoveStart = Callable[[str, int], Awaitable[None]]
 
 QUESTIONS = tuple(Question(f"q{i}", i % 4) for i in range(3))
 WINDOW_MS, LIMIT_MS = 600_000, 20_000
+SWEEP_MS = 100  # the presence sweep window: shorter than every wait between two renews
 SHORT_WINDOW_MS = 5_000  # far below LIMIT_MS, and far above any setup step on a real clock
 
 
@@ -44,7 +45,7 @@ async def answer(  # noqa: PLR0913, PLR0917
 async def test_unknown_quiz_is_not_found(store: Store, quiz_id: str) -> None:
     assert await refused(store.join(quiz_id, "a", "A", "c-a")) == ErrorCode.QUIZ_NOT_FOUND
     assert await refused(store.publish_if_dirty(quiz_id, "n1")) == ErrorCode.QUIZ_NOT_FOUND
-    assert await refused(store.renew_presence(quiz_id, 1, [])) == ErrorCode.QUIZ_NOT_FOUND
+    assert await refused(store.renew_presence(quiz_id, 1, 1, [])) == ErrorCode.QUIZ_NOT_FOUND
 
 
 @pytest.mark.parametrize(
@@ -444,10 +445,10 @@ async def test_renew_presence_drops_only_entries_that_no_node_renews(
     await store.publish_if_dirty(quiz_id, "n1")
     await advance(250)
     mine = [("a", "c-a"), ("b", "c-gone")]  # c-b holds b's entry, and nobody renews it
-    assert await store.renew_presence(quiz_id, 1_000, mine) == Renewed("renewed", 0)
+    assert await store.renew_presence(quiz_id, 1_000, SWEEP_MS, mine) == Renewed("renewed", 0)
     assert (await store.publish_if_dirty(quiz_id, "n1")).status == "clean"
     await advance(600)
-    assert await store.renew_presence(quiz_id, 500, mine) == Renewed("renewed", 1)
+    assert await store.renew_presence(quiz_id, 500, SWEEP_MS, mine) == Renewed("renewed", 1)
     assert (await store.snapshot(quiz_id, None)).online_count == 1  # a was renewed first
     assert await store.publish_if_dirty(quiz_id, "n1") == Publish("published", 2)
     assert await store.leave(quiz_id, "a", "c-a")
@@ -460,5 +461,19 @@ async def test_renew_presence_writes_nothing_once_ended(
     await started(store, quiz_id, "a")
     await advance(10)
     await pass_deadline(quiz_id)
-    assert await store.renew_presence(quiz_id, 1, []) == Renewed("ended")
+    assert await store.renew_presence(quiz_id, 1, 1, []) == Renewed("ended")
+    assert (await store.snapshot(quiz_id, None)).online_count == 1
+
+
+async def test_only_the_first_renew_of_a_sweep_window_drops_stale_entries(
+    store: Store, advance: Advance, quiz_id: str
+) -> None:
+    await started(store, quiz_id, "a", "b")
+    await advance(250)
+    window = 300  # b is stale for a 100 ms limit, and nobody renews it
+    assert await store.renew_presence(quiz_id, 1_000, window, []) == Renewed("renewed", 0)
+    assert await store.renew_presence(quiz_id, 100, window, [("a", "c-a")]) == Renewed("renewed")
+    assert (await store.snapshot(quiz_id, None)).online_count == 2  # the window's sweep is done
+    await advance(window)
+    assert await store.renew_presence(quiz_id, 100, window, [("a", "c-a")]) == Renewed("renewed", 1)
     assert (await store.snapshot(quiz_id, None)).online_count == 1

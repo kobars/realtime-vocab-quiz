@@ -239,7 +239,7 @@ Scoring, the standings, presence, the tick and the broadcast channel all belong 
 
 ### Decision
 
-One schema in one Redis: every key of a quiz is `quiz:{<quizId>}:<name>`, with the quiz ID as the hash tag, so a quiz lives in one Cluster slot and each script may touch all of its keys. Each script receives all keys of the quiz in one fixed order. The data keys share one TTL (24 h), refreshed by every write script; the tick token keeps its own 200 ms expiry. Lists inside hash fields are JSON arrays. The key table is `docs/spec/redis.md` §2.
+One schema in one Redis: every key of a quiz is `quiz:{<quizId>}:<name>`, with the quiz ID as the hash tag, so a quiz lives in one Cluster slot and each script may touch all of its keys. Each script receives all keys of the quiz in one fixed order. The data keys share one TTL (24 h), kept by every write script, which runs `PEXPIRE` on all of them only once the `meta` TTL has dropped by a minute, and gives a key it creates the `meta` TTL; the tick token keeps its own 200 ms expiry. Lists inside hash fields are JSON arrays. The key table is `docs/spec/redis.md` §2.
 
 ### Alternatives considered
 
@@ -250,7 +250,7 @@ One schema in one Redis: every key of a quiz is `quiz:{<quizId>}:<name>`, with t
 ### Consequences
 
 - Scaling out means a Redis Cluster that spreads quizzes over shards; one quiz never spans shards, so the largest quiz is bounded by one shard. On a Cluster, sharded pub/sub (`SPUBLISH`) keeps the channel on the quiz's shard.
-- A quiz expires as a whole 24 h after its last write.
+- A quiz expires as a whole 24 h after its last write, up to a minute sooner: the minute saves the 13 `PEXPIRE`s, and their AOF records, on every other write.
 
 <!-- AI-ASSISTED-END -->
 

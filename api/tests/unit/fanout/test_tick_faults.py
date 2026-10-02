@@ -137,7 +137,7 @@ def repairing() -> Mock:
     snapshot = m.Snapshot(
         atSeq=SEQ, status="open", playerCount=1, onlineCount=1, entries=[], you=None
     )
-    service.standings.return_value = (Ranks(SEQ, "open", 1, {"u": None}), {"u": (snapshot,)})
+    service.standings.return_value = (Ranks(SEQ, "open", 1, {"u": None}), snapshot)
     return service
 
 
