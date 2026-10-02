@@ -122,6 +122,16 @@ it('hides the icons of the preview card and of a field message from assistive te
   expect(wrapper.findAll('form svg').length).toBeGreaterThanOrEqual(2)
 })
 
+it('the quiz preview inside the join card casts no shadow of its own, so shadows never stack', async () => {
+  const { wrapper, id } = await screen()
+  await id.setValue('VOCAB-42')
+  await id.trigger('blur')
+  await flushPromises()
+  const card = wrapper.get('[data-slot="card"]')
+  expect(card.text()).toContain(open.title)
+  expect(card.findAll('*').filter((el) => el.classes().some((c) => c.startsWith('shadow-clay')))).toEqual([])
+})
+
 it('keeps both fields out of password managers and keeps their autocomplete hints', async () => {
   const { id, name } = await screen()
   for (const field of [id, name]) {

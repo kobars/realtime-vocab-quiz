@@ -157,6 +157,12 @@ it('after a close and a reopen on the first page, Next still keeps the shown row
   expect([pageRanks(w).length, pageRanks(w)[0], w.get('[data-test="page-range"]').text()]).toEqual([100, '#1', 'Players 1–100 of 300'])
 })
 
+it('the "Show all players" panel inside the leaderboard card casts no shadow of its own, so shadows never stack', async () => {
+  const w = await openAll()
+  expect(w.find('[tabindex="-1"]').exists()).toBe(true)
+  expect(w.findAll('[data-slot="card"] *').filter((el) => el.classes().some((c) => c.startsWith('shadow-clay')))).toEqual([])
+})
+
 it('a final page is never reloaded', async () => {
   await joinedStore()
   const w = render(LeaderboardPanel)
