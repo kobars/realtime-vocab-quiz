@@ -37,6 +37,11 @@ x-api-env: &api-env
   QUIZ_PORT: ${QUIZ_PORT:-8080}
   PER_IP_CONN_CAP: # from .env when set: every client of the 127.0.0.1 port shares one address
   REDIS_MAX_CONNECTIONS: ${REDIS_MAX_CONNECTIONS:-100} # each served quiz holds one subscription
+  # From .env when set: how long a node waits for a free pooled connection, a Redis reply, and
+  # a connect.
+  REDIS_POOL_TIMEOUT_MS:
+  REDIS_SOCKET_TIMEOUT_MS:
+  REDIS_CONNECT_TIMEOUT_MS:
   # nginx is the nodes' only proxy, but a host process can reach a node from the bridge gateway's
   # address in this subnet and set X-Forwarded-For: accepted, as the stack serves the local host.
   TRUSTED_PROXIES: ${QUIZ_SUBNET:-10.89.78.0/24}

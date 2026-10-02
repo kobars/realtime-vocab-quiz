@@ -1,0 +1,112 @@
+{
+  "run": {
+    "started_at": "2026-10-02T07:17:49+00:00",
+    "options": {
+      "url": "http://nginx:8080/api",
+      "origin": "http://localhost:8080",
+      "quiz_ids": [
+        "VOCAB-42"
+      ],
+      "bots": 5000,
+      "cohorts": 0,
+      "accuracy": 0.7,
+      "think_ms": 5000,
+      "duration": 180.0,
+      "ramp": 30.0,
+      "procs": 10,
+      "timeout_ms": 5000,
+      "label": "hot-2node-5000"
+    },
+    "wall_s": 215.9
+  },
+  "answer": {
+    "samples": 190119,
+    "p50": 4.896,
+    "p95": 150.254,
+    "p99": 345.562,
+    "max": 569.28,
+    "missing": 0,
+    "timed_out": 0,
+    "completion": 1.0
+  },
+  "leaderboard": {
+    "samples": 131976,
+    "p50": 119.946,
+    "p95": 199.411,
+    "p99": 408.611,
+    "max": 565.482,
+    "missing": 0,
+    "timed_out": 0,
+    "completion": 1.0
+  },
+  "msgs_in_per_s": 29463.3,
+  "msgs_out_per_s": 2252.5,
+  "counts": {
+    "answers": 190119,
+    "board_first": 235,
+    "cohorts": 21403,
+    "msgs_in": 6187285,
+    "msgs_out": 473019,
+    "resyncs": 21343,
+    "seq_gaps": 1
+  },
+  "swarm": {
+    "procs": [
+      {
+        "cpu_pct": 24.9,
+        "rss_mb": 88.5,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 24.7,
+        "rss_mb": 88.0,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 24.6,
+        "rss_mb": 87.6,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 24.9,
+        "rss_mb": 88.6,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 24.6,
+        "rss_mb": 88.0,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 24.5,
+        "rss_mb": 87.9,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 24.6,
+        "rss_mb": 89.2,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 24.7,
+        "rss_mb": 88.3,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 24.7,
+        "rss_mb": 88.2,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 24.7,
+        "rss_mb": 87.8,
+        "active_s": 210.0
+      }
+    ],
+    "cpu_pct_max": 24.9
+  },
+  "problems": [],
+  "valid": true,
+  "slo_within": 0.9994,
+  "slo_met": true
+}

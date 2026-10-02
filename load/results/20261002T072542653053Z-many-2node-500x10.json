@@ -1,6 +1,6 @@
 {
   "run": {
-    "started_at": "2026-10-02T02:00:02+00:00",
+    "started_at": "2026-10-02T07:22:05+00:00",
     "options": {
       "url": "http://nginx:8080/api",
       "origin": "http://localhost:8080",
@@ -507,6 +507,7 @@
         "LOAD-500"
       ],
       "bots": 5000,
+      "cohorts": 0,
       "accuracy": 0.7,
       "think_ms": 5000,
       "duration": 180.0,
@@ -515,82 +516,97 @@
       "timeout_ms": 5000,
       "label": "many-2node-500x10"
     },
-    "wall_s": 216.6
+    "wall_s": 216.7
   },
   "answer": {
-    "samples": 191030,
-    "p50": 1.031,
-    "p95": 63.565,
-    "p99": 394.64,
-    "max": 579.074,
+    "samples": 189247,
+    "p50": 2.186,
+    "p95": 113.652,
+    "p99": 438.341,
+    "max": 871.238,
     "missing": 0,
-    "timed_out": 0
+    "timed_out": 0,
+    "completion": 1.0
   },
   "leaderboard": {
-    "samples": 128607,
-    "p50": 91.694,
-    "p95": 191.264,
-    "p99": 237.54,
-    "max": 718.132,
+    "samples": 126890,
+    "p50": 89.737,
+    "p95": 192.644,
+    "p99": 384.37,
+    "max": 999.094,
     "missing": 0,
-    "timed_out": 0
+    "timed_out": 0,
+    "completion": 1.0
   },
-  "msgs_in_per_s": 8925.3,
-  "msgs_out_per_s": 2260.7,
+  "msgs_in_per_s": 8802.2,
+  "msgs_out_per_s": 2242.0,
   "counts": {
-    "answers": 191030,
-    "board_first": 695,
-    "cohorts": 21531,
-    "msgs_in": 1874316,
-    "msgs_out": 474750,
-    "resyncs": 21534,
+    "answers": 189247,
+    "board_first": 710,
+    "cohorts": 21367,
+    "error_RATE_LIMITED": 1,
+    "msgs_in": 1848470,
+    "msgs_out": 470824,
+    "resyncs": 21371,
     "seq_gaps": 4
   },
   "swarm": {
     "procs": [
       {
-        "cpu_pct": 10.0,
-        "rss_mb": 88.5
+        "cpu_pct": 9.8,
+        "rss_mb": 87.5,
+        "active_s": 210.0
       },
       {
-        "cpu_pct": 10.0,
-        "rss_mb": 88.5
+        "cpu_pct": 9.8,
+        "rss_mb": 87.3,
+        "active_s": 210.0
       },
       {
-        "cpu_pct": 9.9,
-        "rss_mb": 88.6
-      },
-      {
-        "cpu_pct": 10.0,
-        "rss_mb": 88.6
-      },
-      {
-        "cpu_pct": 10.0,
-        "rss_mb": 87.3
+        "cpu_pct": 9.8,
+        "rss_mb": 88.0,
+        "active_s": 210.0
       },
       {
         "cpu_pct": 9.9,
-        "rss_mb": 87.7
+        "rss_mb": 89.0,
+        "active_s": 210.0
       },
       {
-        "cpu_pct": 10.0,
-        "rss_mb": 88.2
+        "cpu_pct": 9.8,
+        "rss_mb": 87.7,
+        "active_s": 210.0
       },
       {
-        "cpu_pct": 9.9,
-        "rss_mb": 88.3
+        "cpu_pct": 9.8,
+        "rss_mb": 88.2,
+        "active_s": 210.0
       },
       {
-        "cpu_pct": 10.0,
-        "rss_mb": 88.0
+        "cpu_pct": 9.8,
+        "rss_mb": 88.3,
+        "active_s": 210.0
       },
       {
-        "cpu_pct": 10.0,
-        "rss_mb": 88.8
+        "cpu_pct": 9.8,
+        "rss_mb": 89.7,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 9.8,
+        "rss_mb": 89.4,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 9.8,
+        "rss_mb": 87.6,
+        "active_s": 210.0
       }
     ],
-    "cpu_pct_max": 10.0
+    "cpu_pct_max": 9.9
   },
   "problems": [],
-  "valid": true
+  "valid": true,
+  "slo_within": 0.9932,
+  "slo_met": true
 }

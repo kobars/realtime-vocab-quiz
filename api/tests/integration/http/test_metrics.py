@@ -1,5 +1,5 @@
 # AI-ASSISTED: a /metrics scrape finds each named metric with its type, each answer result and the
-# store outage series of the error replies.
+# store outage series of the error replies, and both reasons of the failed feed subscriptions.
 import httpx
 
 from quiz.config import Settings
@@ -20,6 +20,7 @@ METRICS = {
     "tick_duration_seconds": "histogram",
     "redis_clock_step_total": "counter",
     "log_lines_dropped_total": "counter",
+    "feed_subscribe_failures_total": "counter",
 }
 
 
@@ -38,3 +39,4 @@ async def test_metrics_scrape_finds_each_name() -> None:
     assert {f'answers_total{{result="{r}"}}' for r in ("correct", "wrong", "late")} <= series
     assert 'ws_errors_total{code="UNAVAILABLE",request="answer"}' in series
     assert 'ws_closes_total{code="1013"}' in series
+    assert {f'feed_subscribe_failures_total{{reason="{r}"}}' for r in ("limit", "error")} <= series

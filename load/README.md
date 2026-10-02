@@ -110,38 +110,44 @@ make load LOAD_ARGS="--quiz-ids $IDS --quizzes 500 --bots 5000 --procs 10 --dura
 Machine: an Apple M4 Pro laptop (12 cores, 24 GB) running Docker Desktop 29.8.1 with a Linux VM
 of 12 CPUs and 7.7 GiB. Everything shares that VM: nginx, the API nodes (one Python process
 each), Redis and the swarm. The stack is the `full` profile with `PER_IP_CONN_CAP=20000`; each
-run starts on a flushed Redis and restarted nodes, built from commit `f33b6b5` of `main`. Every run: a 30 s ramp, then 180 s of answering
-(`--duration 180 --ramp 30`), `--think-ms 5000` (one answer per player about every 5 s, the
-pace the capacity estimate assumes), `--accuracy 0.7`.
+run starts on a flushed Redis and restarted nodes, built from commit `145284ba`, which adds the
+Redis command timeouts (`REDIS_SOCKET_TIMEOUT_MS`, default 5 s), and the swarm is the one
+described above. Every run: a 30 s ramp, then 180 s of answering (`--duration 180 --ramp 30`),
+`--think-ms 5000` (one answer per player about every 5 s, the pace the capacity estimate
+assumes), `--accuracy 0.7`.
 
-| Run | Quizzes | Connections | Msg/s to / from bots (ramp included) | Leaderboard p50 / p95 / p99 ms | Answer p50 / p95 / p99 ms | Missing samples | API node CPU % mean (peak) | Swarm CPU % per process (procs) | API node RSS MB idle → peak | Swarm RSS MB per process |
-|---|---|---|---|---|---|---|---|---|---|---|
-| One hot quiz, 1 node | 1 | 1,000 | 5,991 / 455 | 111.7 / 195.2 / 202.1 | 0.5 / 14.4 / 30.6 | 0 | 26.2 (44.9) | 9.8 (4) | 57 → 123 | 69 |
-| One hot quiz, 1 node | 1 | 2,500 | 14,025 / 1,132 | 126.2 / 218.5 / 385.4 | 0.8 / 84.0 / 254.6 | 0 | 63.8 (101.5) | 17.2 (6) | 59 → 197 | 76 |
-| One hot quiz, 2 nodes | 1 | 5,000 | 29,327 / 2,257 | 121.7 / 200.8 / 418.6 | 3.0 / 119.1 / 320.9 | 0 | 63.8 (87.1), 63.7 (93.8) | 23.4 (10) | 60 → 194, 61 → 205 | 88 |
-| Many quizzes, 2 nodes | 500 × 10 players | 5,000 | 8,925 / 2,261 | 91.7 / 191.3 / 237.5 | 1.0 / 63.6 / 394.6 | 0 | 74.4 (99.7), 73.5 (98.9) | 10.0 (10) | 60 → 244, 60 → 242 | 89 |
+| Run | Quizzes | Connections | Msg/s to / from bots (ramp included) | Leaderboard p50 / p95 / p99 ms | Answer p50 / p95 / p99 ms | Missing samples | Leaderboard completion | Below 500 ms (`slo_met`) | API node CPU % mean (peak) | Swarm CPU % per process (procs) | API node RSS MB idle → peak | Swarm RSS MB per process |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| One hot quiz, 1 node | 1 | 1,000 | 5,942 / 455 | 116.5 / 195.9 / 205.4 | 0.6 / 20.1 / 41.7 | 0 | 1 | 100.00% (true) | 31.2 (49.7) | 11.0 (4) | 57 → 121 | 69 |
+| One hot quiz, 1 node | 1 | 2,500 | 13,989 / 1,133 | 128.0 / 218.5 / 363.9 | 1.0 / 74.0 / 243.4 | 0 | 1 | 99.99% (true) | 62.7 (89.1) | 16.7 (6) | 56 → 197 | 77 |
+| One hot quiz, 2 nodes | 1 | 5,000 | 29,463 / 2,253 | 119.9 / 199.4 / 408.6 | 4.9 / 150.3 / 345.6 | 0 | 1 | 99.94% (true) | 72.8 (109.1), 71.0 (109.5) | 24.9 (10) | 56 → 202, 59 → 208 | 89 |
+| Many quizzes, 2 nodes | 500 × 10 players | 5,000 | 8,802 / 2,242 | 89.7 / 192.6 / 384.4 | 2.2 / 113.7 / 438.3 | 0 | 1 | 99.32% (true) | 77.1 (98.2), 75.0 (109.0) | 9.9 (10) | 58 → 242, 59 → 244 | 90 |
 
 Result files, in the order of the table (the swarm's, then the nodes'):
 
-- `load/results/20261002T015133874705Z-hot-1node-1000.json`, `load/results/20261002T015125572903Z-hot-1node-1000-nodes.json`
-- `load/results/20261002T015548565474Z-hot-1node-2500.json`, `load/results/20261002T015539887204Z-hot-1node-2500-nodes.json`
-- `load/results/20261002T015941299620Z-hot-2node-5000.json`, `load/results/20261002T015933705982Z-hot-2node-5000-nodes.json`
-- `load/results/20261002T020339231432Z-many-2node-500x10.json`, `load/results/20261002T020329823078Z-many-2node-500x10-nodes.json`
+- `load/results/20261002T070755572662Z-hot-1node-1000.json`, `load/results/20261002T070747368871Z-hot-1node-1000-nodes.json`
+- `load/results/20261002T071712779035Z-hot-1node-2500.json`, `load/results/20261002T071702549732Z-hot-1node-2500-nodes.json`
+- `load/results/20261002T072125990027Z-hot-2node-5000.json`, `load/results/20261002T072118251231Z-hot-2node-5000-nodes.json`
+- `load/results/20261002T072542653053Z-many-2node-500x10.json`, `load/results/20261002T072534161765Z-many-2node-500x10-nodes.json`
 
 Every run is valid: no swarm process reached 80% of a core, and no run had a reconnect, a
-failed open, a timed-out or a missing sample, so every leaderboard block has a completion of 1
-and each run meets the SLO under the miss-counting rule above too. The many-quizzes run counted 4 `seq` gaps, each
-closed by a resync; the other runs had none.
+failed open, a timed-out or a missing sample, so every latency block has a completion of 1, and
+every run meets the SLO (`slo_met: true`). The two-node hot quiz counted 1 `seq` gap and the
+many-quizzes run 4, each closed by a resync; the many-quizzes run also got one `RATE_LIMITED`
+error reply. The other runs had neither.
 
-**Verdict: the target is met.** The leaderboard p99 stays below 500 ms in every run, at 419 ms
+**Verdict: the target is met.** The leaderboard p99 stays below 500 ms in every run, at 409 ms
 in the worst (one hot quiz of 5,000 players on two nodes). The p50 near 120 ms in one hot quiz is
 the coalescing tick: a total waits on average half of the 200 ms tick before a frame carries it.
-The tail grows with CPU: at 2,500 sockets in one hot quiz a node spends about 64% of its one core
-on average and peaks near a full core, and the p99 moves from about 200 ms (1,000 sockets) to 385
-to 419 ms. Two nodes hold twice the sockets of one at about the same latency, so the hot quiz
-scales out. Repeats vary on this shared VM: two earlier sets of the same four runs, each on the
-code before a later server change, measured p99s of 205, 409, 436 and 313 ms and of 206, 359, 379
-and 233 ms, all within the target too. The headroom is small: from the CPU at 2,500 sockets, a
-node above about 3,500 sockets in one hot quiz nears a full core on average and is likely to miss
-the target (an estimate, not measured), so the next step for more players per quiz is more nodes,
-or fewer bytes per frame (the top-50 frame dominates the egress).
+The tail grows with CPU: at 2,500 sockets in one hot quiz a node spends about 63% of its one core
+on average and peaks at 89%, and the p99 moves from about 205 ms (1,000 sockets) to 364 ms. Two
+nodes hold twice the sockets of one at about the same latency (p99 409 ms), so the hot quiz scales
+out, though each node of the two-node run works harder (about 72% of a core on average, with
+peaks above a full core) than the single node at the same 2,500 sockets. The many-quizzes run has
+the least margin by share: 99.32% of updates arrive below 500 ms, against the 99% target. Repeats
+vary on this shared VM: three earlier sets of the same four runs, each on the code before a later
+server change, measured p99s of 202, 385, 419 and 238 ms; of 205, 409, 436 and 313 ms; and of
+206, 359, 379 and 233 ms, all within the target too. The headroom is small: from the CPU at 2,500
+sockets, a node above about 3,500 sockets in one hot quiz nears a full core on average and is
+likely to miss the target (an estimate, not measured), so the next step for more players per quiz
+is more nodes, or fewer bytes per frame (the top-50 frame dominates the egress).

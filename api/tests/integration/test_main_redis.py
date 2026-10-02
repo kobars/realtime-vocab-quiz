@@ -1,10 +1,13 @@
 # AI-ASSISTED: the composition root on Redis: the start hook loads every Lua script; a join burst
 # above the connection pool's size waits for a connection instead of failing; quiz subscriptions
 # never take the command pool's connections; readiness needs a write that Redis accepts; a ticket
-# renews its session's expiry; a node with every subscription taken refuses a join to a new quiz.
+# renews its session's expiry; a node with every subscription taken refuses a join to a new quiz;
+# a Redis that stops answering fails a request with 503 after the command timeout, while a quiet
+# subscription waits past that timeout for its next message.
 import asyncio
 import hashlib
 import json
+import time
 import uuid
 from collections.abc import Callable
 from contextlib import AsyncExitStack, ExitStack
@@ -18,6 +21,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from quiz.adapters.mock_auth import tokens
 from quiz.adapters.mock_auth.redis_store import SESSION_KEY
+from quiz.adapters.redis.keys import quiz_keys
 from quiz.adapters.redis.scripts import SCRIPTS, source
 from quiz.app.service import Connection
 from quiz.config import Settings
@@ -67,6 +71,45 @@ async def test_readyz_answers_503_while_redis_refuses_writes(redis_url: str) -> 
             await admin.config_set("min-replicas-to-write", 0)
         assert (down.status_code, down.json()) == (503, {"status": "unavailable"})
         assert (await client.get("/readyz")).status_code == 200
+
+
+async def test_a_paused_redis_answers_503_within_the_command_timeout(redis_url: str) -> None:
+    settings = Settings(store="redis", redis_url=redis_url, redis_socket_timeout_ms=2_500)
+    timeout_s = settings.redis_socket_timeout_ms / 1000
+    pause_ms = settings.redis_socket_timeout_ms + 1_500  # CLIENT UNPAUSE would wait for it too
+    app = create_app(settings)
+    transport = httpx.ASGITransport(app=app)
+    session = {"displayName": "Ana"}
+    async with (
+        Redis.from_url(redis_url) as admin,
+        app.router.lifespan_context(app),  # its stop hooks close both Redis pools
+        httpx.AsyncClient(transport=transport, base_url="http://node") as client,
+    ):
+        assert (await client.post("/sessions", json=session)).status_code == 201  # connected
+        await admin.client_pause(pause_ms, all=True)
+        started = time.monotonic()
+        try:
+            stuck = await client.post("/sessions", json=session)
+            waited_s = time.monotonic() - started
+        finally:
+            await admin.ping()  # returns when the pause is over
+    assert (stuck.status_code, stuck.json()["error"]) == (503, "UNAVAILABLE")
+    assert timeout_s <= waited_s < pause_ms / 1000
+
+
+async def test_a_quiet_subscription_outlives_the_command_timeout(redis_url: str) -> None:
+    settings = Settings(store="redis", redis_url=redis_url, redis_socket_timeout_ms=2_500)
+    app, quiz_id = create_app(settings), f"Q-{uuid.uuid4().hex[:8].upper()}"
+    store = services_of(app).store
+    async with (
+        Redis.from_url(redis_url) as admin,
+        app.router.lifespan_context(app),
+        store.subscribe(quiz_id) as messages,
+    ):
+        waiting = asyncio.ensure_future(anext(messages))
+        await asyncio.sleep(settings.redis_socket_timeout_ms / 1000 + 0.5)
+        await admin.publish(quiz_keys(quiz_id).events, "frame")
+        assert await asyncio.wait_for(waiting, 1) == "frame"
 
 
 async def test_open_subscriptions_leave_the_command_pool_free(redis_url: str) -> None:

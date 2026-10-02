@@ -1,4 +1,4 @@
-// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement, one-shot motion behind motion-safe), the phone tabs with the time-left button and the countdown warnings outside them, the keys only from the question, the Quiz tab or no control, one countdown loop that a blocking card stops, no score for an ended-quiz viewer, the connection pill, the error messages and blocking cards, the loading card and the busy and locked next buttons, driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement, one-shot motion behind motion-safe), the phone tabs with the time-left button and the countdown warnings outside them, the keys only from the question, the Quiz tab or no control and never with a modifier, one countdown loop that a blocking card stops, no score for an ended-quiz viewer, the connection pill, the error messages and blocking cards, the loading card and the busy and locked next buttons, driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -30,7 +30,8 @@ const question = (questionIndex = 0, remainingMs = 20_000): Question => ({ v: 1,
 const result = (choiceIndex: number, pointsAwarded: number, over: Partial<AnswerResult> = {}): AnswerResult => ({ v: 1, type: 'answer_result', atSeq: 4,
   questionIndex: 0, submissionId: 's-1', choiceIndex, correctChoiceIndex: 2, correct: choiceIndex === 2, late: false, pointsAwarded, score: pointsAwarded, ...over })
 const choice = (w: VueWrapper, i: number) => w.get(`[data-choice="${i}"]`)
-const press = (key: string) => (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
+const press = (key: string, modifiers: KeyboardEventInit = {}) =>
+  (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...modifiers }))
 const frames = (ms: number) => vi.advanceTimersByTimeAsync(ms)
 
 async function view() {
@@ -96,6 +97,16 @@ it('keys 1–4 answer once: the choices lock with Checking… while it is pendin
   expect(port.answer.mock.calls).toEqual([[0, 2]])
   expect(choice(w, 2).text()).toContain('Checking…')
   expect(choice(w, 0).attributes('aria-disabled')).toBe('true')
+})
+
+it('a digit with Ctrl, Meta or Alt held sends no answer, so browser and system shortcuts keep their keys; a plain digit answers', async () => {
+  await playing()
+  press('1', { ctrlKey: true })
+  press('1', { metaKey: true })
+  press('1', { altKey: true })
+  expect(port.answer).not.toHaveBeenCalled()
+  press('1')
+  expect(port.answer.mock.calls).toEqual([[0, 0]])
 })
 
 it('the focus ring of a choice is offset by the page color', async () => {

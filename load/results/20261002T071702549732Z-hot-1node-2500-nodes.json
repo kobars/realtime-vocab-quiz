@@ -4,15 +4,15 @@
     "ramp": 32.0,
     "duration": 175.0,
     "every": 5,
-    "label": "hot-1node-1000"
+    "label": "hot-1node-2500"
   },
   "samples": 35,
   "nodes": {
     "elsaquiz-api-1-1": {
-      "cpu_pct_mean": 26.2,
-      "cpu_pct_max": 44.88,
-      "mem_mib_idle": 57.0,
-      "mem_mib_max": 123.0
+      "cpu_pct_mean": 62.7,
+      "cpu_pct_max": 89.07,
+      "mem_mib_idle": 55.6,
+      "mem_mib_max": 196.7
     }
   }
 }

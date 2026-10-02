@@ -10,6 +10,7 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, PositiveInt, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from quiz.adapters.redis.store import WAITAOF_TIMEOUT_MS
 from quiz.contracts.codec import MAX_FRAME_BYTES
 from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
 
@@ -33,6 +34,11 @@ class Settings(BaseSettings):
     # serves holds one subscription connection.
     redis_max_connections: PositiveInt = 100
     redis_pool_timeout_ms: PositiveInt = 2_000
+    # A command or a connect that Redis does not answer within this long fails as UNAVAILABLE (HTTP
+    # 503) instead of holding its request until the proxy gives up. The command timeout outlasts
+    # the host end's WAITAOF wait, which blocks on the server by design.
+    redis_socket_timeout_ms: Annotated[int, Field(gt=WAITAOF_TIMEOUT_MS)] = 5_000
+    redis_connect_timeout_ms: PositiveInt = 2_000
     node_id: Annotated[str, Field(min_length=1, max_length=64)] = Field(
         default_factory=_default_node_id
     )
