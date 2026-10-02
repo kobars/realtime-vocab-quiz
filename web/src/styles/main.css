@@ -85,6 +85,37 @@
 @utility ease-standard { transition-timing-function: var(--ease-standard); }
 @utility ease-spring { transition-timing-function: var(--ease-spring); }
 
+/* Text clipped to the text gradient; a solid primary where background-clip: text is missing, and the system text color in forced colors. */
+@utility text-gradient {
+  color: var(--primary);
+  @supports (background-clip: text) {
+    background-image: var(--gradient-text);
+    background-clip: text;
+    color: transparent;
+  }
+  @media (forced-colors: active) {
+    background-image: none;
+    color: CanvasText;
+  }
+}
+
+/* Three soft blobs behind the join screen's hero, painted with gradients on a pseudo-element instead of a blur filter. */
+@utility hero-blobs {
+  position: relative;
+  isolation: isolate;
+  &::before {
+    content: '';
+    position: absolute;
+    inset: -2rem -1rem;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(closest-side at 12% 20%, color-mix(in srgb, var(--mint) var(--blob-tint), transparent), transparent),
+      radial-gradient(closest-side at 88% 30%, color-mix(in srgb, var(--cyan) var(--blob-tint), transparent), transparent),
+      radial-gradient(closest-side at 50% 90%, color-mix(in srgb, var(--primary-bright) var(--blob-tint), transparent), transparent);
+  }
+}
+
 @layer base {
   * { @apply border-border outline-ring/50; }
   /* The browser's own focus outline is thin and translucent here; elements with ring classes set outline-none. */

@@ -1,6 +1,7 @@
-<!-- AI-ASSISTED: the calm connection pill: connecting, reconnecting, updating, server busy, or closed; nothing while live or blocked (UI spec §3.7, §6.3). -->
+<!-- AI-ASSISTED: the calm connection pill: connecting, reconnecting, updating, server busy (warning pill), or closed (destructive pill); nothing while live or blocked (UI spec §3.7, §6.3). -->
 <script setup lang="ts">
 import { computed } from 'vue'
+import { badgeVariants } from '@/components/ui/badge'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 
@@ -29,7 +30,7 @@ const text = computed(() => {
   <p
     role="status"
     data-test="connection"
-    :class="text ? 'self-start rounded-full bg-muted px-3 py-1 text-sm text-muted-foreground' : 'sr-only'"
+    :class="text ? badgeVariants({ variant: store.connection === 'closed' ? 'destructive' : 'warning' }) : 'sr-only'"
   >
     {{ text }}
   </p>

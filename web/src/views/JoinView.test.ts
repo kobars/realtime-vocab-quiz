@@ -1,4 +1,4 @@
-// AI-ASSISTED: tests for the landing and join screen: validation, the share link, the preview and the join outcomes.
+// AI-ASSISTED: tests for the landing and join screen: the wordmark and decoration, validation, the share link, the preview and the join outcomes.
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -87,6 +87,31 @@ async function screen(path = '/') {
 it('the header link is a 44 px touch target', async () => {
   const { wrapper } = await screen()
   expect(wrapper.get('header a').classes()).toContain('min-h-11')
+})
+
+it('keeps the app name as the wordmark text and hides its icon tile from assistive tech', async () => {
+  const { wrapper } = await screen()
+  const wordmark = wrapper.get('[data-test="wordmark"]')
+  expect(wordmark.text()).toBe(strings.appName)
+  expect(wordmark.get('svg').element.closest('[aria-hidden="true"]')).not.toBeNull()
+})
+
+it('draws the hero decoration as a pseudo-element, adding no node to the page', async () => {
+  const { wrapper } = await screen()
+  const hero = wrapper.get('[data-test="hero"]')
+  expect(hero.classes()).toContain('hero-blobs')
+  expect(hero.findAll('[aria-hidden="true"]')).toHaveLength(0)
+})
+
+it('hides the icons of the preview card and of a field message from assistive tech', async () => {
+  const { wrapper, id } = await screen()
+  await id.setValue('VOCAB-42')
+  await id.trigger('blur')
+  await flushPromises()
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  for (const icon of wrapper.findAll('form svg')) expect(icon.element.closest('[aria-hidden="true"]')).not.toBeNull()
+  expect(wrapper.findAll('form svg').length).toBeGreaterThanOrEqual(2)
 })
 
 describe('validation', () => {

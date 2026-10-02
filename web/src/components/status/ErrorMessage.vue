@@ -1,7 +1,8 @@
-<!-- AI-ASSISTED: a short message for the errors the player should see, and the blocking card for the store's blocked state: "Use this tab", "Reload" or "Try again" (UI spec §3.7, §4.3). -->
+<!-- AI-ASSISTED: a short message for the errors the player should see, and the blocking clay card for the store's blocked state: "Use this tab", "Reload" or "Try again" (UI spec §3.7, §4.3). -->
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { type Blocked, useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 
@@ -35,13 +36,13 @@ function act(): void {
 </script>
 
 <template>
-  <div
+  <Card
     v-if="store.blocked"
     role="alert"
     data-test="error"
-    class="flex flex-col items-start gap-3 rounded-lg bg-card p-4 shadow-card"
+    class="items-start gap-4"
   >
-    <p class="font-semibold">
+    <p class="text-xl font-extrabold">
       {{ strings.blocked[store.blocked].title }}
     </p>
     <Button
@@ -58,7 +59,7 @@ function act(): void {
     >
       {{ strings.notFound.home }}
     </a>
-  </div>
+  </Card>
   <p
     v-else
     role="status"
