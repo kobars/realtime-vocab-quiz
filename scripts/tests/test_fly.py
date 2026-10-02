@@ -385,10 +385,14 @@ def test_the_fly_edge_is_the_vm_edge_with_only_the_fly_lines_changed() -> None:
 
 
 def _docker_runs() -> bool:
-    return DOCKER is not None and (
-        subprocess.run([DOCKER, "info"], capture_output=True, check=False, timeout=30).returncode
-        == 0
-    )
+    """A daemon too busy to answer within 30 s counts as not running."""
+    if DOCKER is None:
+        return False
+    try:
+        info = subprocess.run([DOCKER, "info"], capture_output=True, check=False, timeout=30)
+    except subprocess.TimeoutExpired:
+        return False
+    return info.returncode == 0
 
 
 @pytest.mark.skipif(DOCKER is None, reason="needs Docker")
