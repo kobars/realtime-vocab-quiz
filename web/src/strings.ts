@@ -39,6 +39,7 @@ export const strings = {
     continue: 'Continue',
     loading: 'Loading the question…',
     secondsLeft: (seconds: number) => `${seconds} seconds left`,
+    timeLeft: (seconds: number) => `${seconds} s left`,
     checking: 'Checking…',
     timeUp: "Time's up: an answer now scores 0.",
     waiting: 'Waiting for the connection…',

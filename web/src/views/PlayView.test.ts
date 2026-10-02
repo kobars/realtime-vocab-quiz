@@ -1,4 +1,4 @@
-// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement, one-shot motion behind motion-safe), the phone tabs, the connection pill, the error messages and blocking cards, the loading card and the busy and locked next buttons, driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement, one-shot motion behind motion-safe), the phone tabs with the time-left button and the countdown warnings outside them, the keys only from inside the question, no score for an ended-quiz viewer, the connection pill, the error messages and blocking cards, the loading card and the busy and locked next buttons, driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -601,4 +601,65 @@ it('desktops: no tabs, the quiz and the leaderboard side by side', async () => {
   expect(w.find('[role="tablist"]').exists()).toBe(false)
   expect([shown(w, 'quiz'), shown(w, 'leaderboard')]).toEqual([true, true])
   expect(w.get('#panel-quiz').attributes('role')).toBeUndefined()
+})
+
+it('phones: on the Leaderboard tab during a question the header shows the time left, which selects the Quiz tab', async () => {
+  phone()
+  const w = await playing()
+  expect(w.find('[data-test="time-left"]').exists()).toBe(false)
+  await tab(w, 'leaderboard').trigger('click')
+  clock = 7_500
+  await frames(50)
+  const left = w.get('header [data-test="time-left"]')
+  expect(left.text()).toBe('13 s left')
+  await left.trigger('click')
+  await nextTick()
+  expect([tab(w, 'quiz').attributes('aria-selected'), shown(w, 'quiz')]).toEqual(['true', true])
+  expect(document.activeElement).toBe(tab(w, 'quiz').element)
+  expect(w.find('[data-test="time-left"]').exists()).toBe(false)
+  await tab(w, 'leaderboard').trigger('click')
+  press('3')
+  await receive(result(2, 133))
+  expect(w.find('[data-test="time-left"]').exists()).toBe(false)
+})
+
+it('desktops: no time-left button, the question is always in view', async () => {
+  const w = await playing()
+  expect(w.find('[data-test="time-left"]').exists()).toBe(false)
+})
+
+it('phones: the 10 s and 5 s warnings sit outside the tab panels, so the Leaderboard tab hears them too', async () => {
+  phone()
+  const w = await playing()
+  await tab(w, 'leaderboard').trigger('click')
+  const live = w.get('[data-test="ring-announce"]')
+  expect(live.element.closest('[role="tabpanel"]')).toBeNull()
+  clock = 10_500
+  await frames(50)
+  expect([live.text(), live.isVisible()]).toEqual(['10 seconds left', true])
+  clock = 15_500
+  await frames(50)
+  expect(live.text()).toBe('5 seconds left')
+})
+
+it('keys 1–4 answer only with the focus in the question: not from a leaderboard button, still from the prompt', async () => {
+  const w = await playing()
+  const showAll = w.findAll('#panel-leaderboard button').find((b) => b.text() === 'Show all players')
+  ;(showAll?.element as HTMLElement).focus()
+  press('1')
+  expect(port.answer).not.toHaveBeenCalled()
+  w.get('h2').element.focus()
+  press('1')
+  expect(port.answer.mock.calls).toEqual([[0, 0]])
+})
+
+it('a viewer of an ended quiz (you: null) sees the results with no score badge', async () => {
+  useQuizStore().join('VOCAB-42', 'Ana')
+  await receive({ type: 'snapshot', atSeq: 9, status: 'ended', playerCount: 2, onlineCount: 0,
+    entries: [{ rank: 1, userId: 'p1', displayName: 'Bo', score: 300 }, { rank: 2, userId: 'p2', displayName: 'Cy', score: 100 }], you: null },
+  error('QUIZ_ENDED', 'join'))
+  const w = await view()
+  expect(w.text()).toContain('Final results')
+  expect(w.find('[data-test="score"]').exists()).toBe(false)
+  expect(w.find('[data-test="rank"]').exists()).toBe(false)
 })

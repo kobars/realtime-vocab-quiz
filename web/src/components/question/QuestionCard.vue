@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the question screen: the countdown, the prompt and four choices (click or keys 1–4 while shown), locked while an answer is pending or the socket is down, and Skip, locked while the socket is down; clay choice tiles that lift and press behind motion-safe (UI spec §3.3, §4.1, §5.5, §6.1, §6.2). -->
+<!-- AI-ASSISTED: the question screen: the countdown, the prompt and four choices (click, or keys 1–4 while the focus is in the question and it is shown), locked while an answer is pending or the socket is down, and Skip, locked while the socket is down; clay choice tiles that lift and press behind motion-safe (UI spec §3.3, §4.1, §5.5, §6.1, §6.2). -->
 <script setup lang="ts">
 import { LoaderCircle } from '@lucide/vue'
 import { useEventListener } from '@vueuse/core'
@@ -14,6 +14,7 @@ const props = defineProps<{ question: CurrentQuestion }>()
 /** The key hint chips cycle the role fills; the number stays the cue, the color only tells the keys apart. */
 const KEY_FILLS = ['bg-input', 'bg-mint', 'bg-cyan', 'bg-sun'] as const
 const store = useQuizStore()
+const card = useTemplateRef<HTMLElement>('card')
 const heading = useTemplateRef<HTMLElement>('heading')
 const msLeft = useCountdown(() => store.msLeft(), () => props.question.deadlineAt)
 const locked = computed(() => store.pending !== null || !store.online)
@@ -24,10 +25,12 @@ function choose(choiceIndex: number): void {
   if (!locked.value) store.answer(choiceIndex)
 }
 
-// Keys 1–4 choose, unless a text field has the focus, a modifier is held or the phone's Leaderboard tab hides the question.
+// Keys 1–4 choose while the focus is in the question or on no control (the page itself), with no modifier held, and
+// while the phone's Leaderboard tab does not hide the question.
 useEventListener(window, 'keydown', (event: KeyboardEvent) => {
-  const target = event.target instanceof Element ? event.target : null
-  if (event.ctrlKey || event.metaKey || event.altKey || target?.closest('input, textarea, select, [contenteditable]')) return
+  const target = event.target instanceof Node ? event.target : null
+  if (event.ctrlKey || event.metaKey || event.altKey) return
+  if (target !== document.body && card.value?.contains(target) !== true) return
   if (heading.value?.checkVisibility() === false) return
   const n = Number(event.key)
   if (Number.isInteger(n) && n >= 1 && n <= 4) {
@@ -38,7 +41,10 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
 </script>
 
 <template>
-  <section class="flex flex-col gap-4">
+  <section
+    ref="card"
+    class="flex flex-col gap-4"
+  >
     <div class="flex items-center gap-4">
       <h2
         ref="heading"
