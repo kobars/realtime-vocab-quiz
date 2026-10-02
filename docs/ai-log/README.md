@@ -9,8 +9,10 @@ GitHub PR number. The design work before the first line of code is in
 entries. Each PR is reviewed by Claude Code `/code-review` (high) and Codex (`gpt-6-astra`,
 high reasoning); the two finding lists are combined, each finding is checked against the code,
 and the verified findings are posted as one PR comment. The first PRs were reviewed after they
-merged, with the fixes in a follow-up PR; later PRs are reviewed before they merge. The
-**Reviewed by** line of each entry says which.
+merged, with the fixes in a follow-up PR; later PRs are reviewed before they merge. A PR that
+only fixes listed review findings gets a fix check instead: another agent re-tests each listed
+defect and runs no new review round. The **Reviewed by** line of each entry says which review
+ran, when, and where its findings went.
 
 **How to read an entry.** Each entry has six fields:
 
