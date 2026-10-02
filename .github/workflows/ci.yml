@@ -67,7 +67,7 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
       COVERAGE_FILE: ${{ github.workspace }}/reports/.coverage.integration
       # The combined report holds the floor, so this partial run has none.
-      PYTEST_ADDOPTS: --cov --cov-append --cov-report= --cov-fail-under=0
+      PYTEST_ADDOPTS: --cov --cov-report= --cov-fail-under=0
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
