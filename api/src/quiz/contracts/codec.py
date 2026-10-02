@@ -60,6 +60,18 @@ def _reject_constant(name: str) -> NoReturn:
     raise ValueError(msg)
 
 
+def _version_error(data: dict[str, object], known: str | None) -> ProtocolError | None:
+    """A missing or non-integer ``v`` is malformed; an integer other than 1 another version."""
+    if "v" not in data:
+        return _error(ErrorCode.INVALID_MESSAGE, "missing field v", known)
+    version = data["v"]
+    if type(version) is not int:  # true, "1" and 1.0 are a wrong type, not another version
+        return _error(ErrorCode.INVALID_MESSAGE, "field v must be an integer", known)
+    if version != 1:
+        return _error(ErrorCode.UNSUPPORTED_VERSION, "only protocol version 1 is supported", known)
+    return None
+
+
 def parse_client_message(raw: bytes) -> ClientMessage | ProtocolError:  # noqa: PLR0911
     """Return the typed message in ``raw``, or the ``error`` message to send back."""
     if len(raw) > MAX_FRAME_BYTES:
@@ -74,12 +86,8 @@ def parse_client_message(raw: bytes) -> ClientMessage | ProtocolError:  # noqa: 
         return _error(ErrorCode.INVALID_MESSAGE, "not a JSON object")
     kind = data.get("type")
     known = kind if isinstance(kind, str) and kind in CLIENT_TYPES else None
-    if "v" not in data:
-        return _error(ErrorCode.INVALID_MESSAGE, "missing field v", known)
-    version = data["v"]
-    if type(version) is not int or version != 1:
-        msg = "only protocol version 1 is supported"
-        return _error(ErrorCode.UNSUPPORTED_VERSION, msg, known)
+    if (refused := _version_error(data, known)) is not None:
+        return refused
     if not isinstance(kind, str):
         return _error(ErrorCode.INVALID_MESSAGE, "missing or non-string field type")
     if kind not in CLIENT_TYPES:

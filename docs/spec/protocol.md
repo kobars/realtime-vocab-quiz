@@ -18,7 +18,7 @@ This document is the wire contract between the server, the Vue client, the load 
 | `userId` | string, `^[A-Za-z0-9_-]{1,64}$`; set by the server from the ticket, never sent by the client |
 | `questionId` | string, `^[A-Za-z0-9_-]{1,64}$` |
 | `submissionId` | string, a UUID (RFC 9562, lowercase hex with hyphens) that the client makes per answer |
-| `displayName` | string, at most 128 characters on input; 1–32 after trim and Unicode NFC normalization |
+| `displayName` | string, at most 128 characters on input; 1–32 after trim and Unicode NFC normalization, at least one of them visible (not only control, format or other invisible characters such as U+200B; these are kept inside a visible name) |
 | `questionIndex` | integer, `0 … N−1` (`next` also accepts `N`) |
 | `choiceIndex` | integer, `0 … 3` |
 | `seq`, `atSeq`, `lastSeq` | integer ≥ 0 (see §3) |
@@ -137,9 +137,9 @@ The server sends `error` before every application close of an open socket. A ref
 
 | Code | When | Client action |
 |---|---|---|
-| `INVALID_MESSAGE` | Bad JSON, unknown or missing field, wrong type or range, JSON depth above 8, or a `submissionId` reused for another question | Drop the request; it is a client bug. The socket stays open |
+| `INVALID_MESSAGE` | Bad JSON, unknown or missing field, wrong type or range (also a `v` that is not a JSON integer, such as `"1"`, `1.0` or `true`), JSON depth above 8, or a `submissionId` reused for another question | Drop the request; it is a client bug. The socket stays open |
 | `UNSUPPORTED_TYPE` | Unknown `type` | Same as above |
-| `UNSUPPORTED_VERSION` | `v` is not 1 | Show "please reload"; close 1000 |
+| `UNSUPPORTED_VERSION` | `v` is an integer other than 1 | Show "please reload"; close 1000 |
 | `MESSAGE_TOO_LARGE` | An inbound frame above 16 KiB; the server closes with 1009 | Reconnect with backoff; never resend that frame |
 | `UNAUTHORIZED` | Missing, used or expired ticket: HTTP 401 at the upgrade, never a frame; the client sees close 1006 | None of its own: a failed open (below) |
 | `FORBIDDEN` | Wrong `Origin`: HTTP 403 at the upgrade, never a frame; the client sees close 1006 | None of its own: a failed open (below) |
