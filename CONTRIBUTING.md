@@ -59,6 +59,28 @@ step, the same stack is two API nodes on one Redis behind nginx; you need Docker
 5. `make down` stops the stack and keeps the Redis data; `docker compose --profile full down -v`
    also deletes it.
 
+To run a second stack beside the first, for example from another clone or worktree, give it its
+own Compose project, port and network in its `.env`: `COMPOSE_PROJECT_NAME` (default `elsaquiz`)
+keeps its containers, network and volumes apart, `QUIZ_PORT` moves its nginx off 8080 (the API's
+default allowed origins follow it), and `QUIZ_SUBNET` gives its network a range that does not
+overlap the first one's (default `10.89.78.0/24`):
+
+```bash
+COMPOSE_PROJECT_NAME=elsaquiz-b
+QUIZ_PORT=8090
+QUIZ_SUBNET=10.89.80.0/24
+```
+
+The make targets and the system and browser tests of that checkout then use its stack, since they
+read `.env`. Both checkouts build the same `elsaquiz-api:dev` and `elsaquiz-web:dev` images; to
+run different code in the second, add `IMAGE_TAG=b` to its `.env` for compose and pass it to
+`make build` and `make demo` too (`make build IMAGE_TAG=b`), which take the tag from the command
+line or the shell, not from `.env`. Two more things stay shared: the bots image of `make demo`
+(`elsaquiz-load`, which has no tag) and the two named volumes of `make ui-check` that hold its
+Linux `node_modules`, so run `make demo` or `make ui-check` in one checkout at a time. The
+development Redis of `make up` always takes `127.0.0.1:6381`, so only one checkout can run it at
+a time.
+
 ## Develop without Docker
 
 One API node with an in-memory store, and the client's dev server, which reloads the page when
@@ -112,12 +134,13 @@ layers need more:
 - `make ui-check`: the visual and accessibility specs (`web/e2e/visual.spec.ts`,
   `web/e2e/a11y.spec.ts`, and `web/e2e/gallery.visual.spec.ts` for the design system's gallery) on
   the production build, with no backend: `web/e2e/fixtures/` mocks the
-  HTTP calls and the quiz socket and pauses the page clock. Eleven screens, from the join form to
-  the final results, run at 320, 768 and 1280 px wide in light and dark with reduced motion (the
-  Leaderboard tab only below 1024 px; wider, the leaderboard sits beside every play screen). Each
-  must match its screenshot baseline in `web/e2e/__screenshots__/` (at most 50 pixels differ) and
-  pass axe for WCAG 2.2 A and AA, with no sideways scroll (also at 640 px, a 1280 px window at
-  200% zoom), controls of at least 44 × 44 px and a visible focus ring at every Tab stop. The
+  HTTP calls and the quiz socket and pauses the page clock. Fifteen screens, the player's from the
+  join form to the final results plus the four host screens and the not-found page, run at 320,
+  768 and 1280 px wide in light and dark with reduced motion (the Leaderboard tab only below
+  1024 px; wider, the leaderboard sits beside every play screen). Each must match its screenshot
+  baseline in `web/e2e/__screenshots__/` (at most 50 pixels differ) and pass axe for WCAG 2.2 A
+  and AA, with no sideways scroll (also at 640 px, a 1280 px window at 200% zoom), controls of at
+  least 44 × 44 px and a visible focus ring at every Tab stop. The
   gallery has one baseline per colour scheme at 1280 px, and passes axe with no sideways scroll at
   every width. It all runs in the Playwright image pinned in the `Makefile`, always as
   `linux/amd64`, so every machine renders like CI; it needs Docker, and `make check` needs no browser. `make ui-baselines`
@@ -194,8 +217,8 @@ layers need more:
 In order, stopping at the first failing step:
 
 1. The client install from the lock file (`pnpm install --frozen-lockfile`).
-2. Every pre-commit hook on every file: ruff lint and format, ESLint, typos, and lychee (in
-   Docker) on the relative links and anchors of the tracked Markdown.
+2. Every pre-commit hook on every file: ruff lint and format, ESLint, shellcheck, typos, and
+   lychee (in Docker) on the relative links and anchors of the tracked Markdown.
 3. The test citations: each test that the tracked Markdown cites as a file path, `::` and a
    test name, outside the AI-LOG entries, exists (`scripts/check_citations.py`).
 4. actionlint and zizmor on the workflows: zizmor fails on a finding of medium severity or

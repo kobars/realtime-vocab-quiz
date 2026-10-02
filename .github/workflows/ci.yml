@@ -211,7 +211,7 @@ jobs:
 
   scheduled-failure:
     if: failure() && github.event_name == 'schedule'
-    needs: [check, integration, coverage]
+    needs: [check, integration, ui, coverage]
     permissions:
       issues: write
     uses: ./.github/workflows/scheduled-failure.yml
