@@ -47,8 +47,8 @@ make load LOAD_ARGS="--quiz-ids VOCAB-42 --bots 1000 --procs 4 --duration 180 --
 ```
 
 `LOAD_URL` sets the HTTP base (default `http://nginx:8080/api`; the socket is `/ws` on the same
-host). Outside Docker, against one API node on the host:
-`uv run --project api python load/bots.py --url http://127.0.0.1:8001 --bots 50 --duration 30`.
+host). Outside Docker, from the host against the same stack through nginx (the default `--url`):
+`uv run --project api python load/bots.py --admin-token "$ADMIN_TOKEN" --bots 50 --duration 30`.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -80,12 +80,13 @@ name within 5 s and sends every bot to `api-1`. Pass `--containers elsaquiz-api-
 files (`LOAD-001` and on, each with the `VOCAB-42` questions) into `load/bank/` and prints their
 IDs; `load/compose.bank.yaml` mounts that folder over both nodes' bank and raises
 `REDIS_MAX_CONNECTIONS`, because each quiz a node serves holds one connection of its subscription
-pool, which has that size (the default of 100 would refuse the 101st quiz on a node):
+pool, which has that size (the default of 100 would refuse the 101st quiz on a node). The nodes
+read the bank only at start, so `--force-recreate` restarts them on the new files:
 
 ```sh
 IDS=$(uv run --project api python load/gen_bank.py --quizzes 500)
 export COMPOSE_FILE=compose.yaml:load/compose.bank.yaml
-docker compose --profile full up -d --wait
+docker compose --profile full up -d --wait --force-recreate
 make load LOAD_ARGS="--quiz-ids $IDS --quizzes 500 --bots 5000 --procs 10 --duration 180 --ramp 30 --think-ms 5000 --admin-token $ADMIN_TOKEN --label many"
 ```
 

@@ -22,7 +22,7 @@ are mocks behind ports, and quiz admin is a mock host action (§14).
 
 | Measure | Target (ours) | Measured |
 |---|---|---|
-| Concurrent sockets, two API nodes | thousands | 5,000 in one quiz (2,500 per node) and 5,000 over 500 quizzes, all within C5 (§9) |
+| Concurrent sockets, two API nodes | thousands | 5,000 in one quiz (about 2,500 per node) and 5,000 over 500 quizzes, all within C5 (§9) |
 | Answer accepted → leaderboard delivered, p99 (C5) | below 500 ms | 202 to 419 ms in four runs; worst 419 ms, one quiz of 5,000 players on two nodes (§9) |
 | Leaderboard frames per quiz | at most 5 per second | by design: one per 200 ms tick, only after a change |
 | Scoring rule | wrong or late 0; correct `100 + (50 * (T - e)) // T` | exact integers; one formula in Lua and Python |
@@ -438,7 +438,7 @@ per tick (A7). All of it runs on one core (A12), so CPU or the network is likely
 practical number below the cap: 215 MB/s is about 1.7 Gbit/s before framing, above a 1 Gbit/s
 link. Measured (the table below): one node held 2,500 sockets of one hot quiz within C5 (p99
 385 ms) at 64 % of its core on average, peaking at a full core, and each node of the two-node run
-held 2,500 at 64 % (p99 419 ms). So the practical number per node in one hot quiz is 2,500
+held about 2,500 at 64 % (p99 419 ms). So the practical number per node in one hot quiz is 2,500
 measured, and by extrapolating the CPU about 3,500 at most (an estimate, not measured), against
 the computed cap of 10,000: CPU, not memory, sets it.
 
@@ -509,7 +509,9 @@ tail grows with the node's CPU, so the margin at 2,500 sockets per node in one h
 idle RSS taken before the run (in the `-nodes.json` files): 1,000 sockets
 `(123.0 − 57.0) MiB / 1,000` = 68 KiB; 2,500 sockets `(197.0 − 58.6) MiB / 2,500` = 57 KiB; the
 two-node hot quiz 55 and 59 KiB; 500 quizzes 75 KiB on each node (each served quiz adds its own
-state and a Redis subscription). That is about a tenth of the 634 KiB per socket that the buffer bounds
+state and a Redis subscription). The two-node figures assume an even split of 2,500 sockets per
+node: nginx balances requests round-robin and no result file counts sockets per node, but the
+nodes' near-equal CPU and memory growth agree with it. That is about a tenth of the 634 KiB per socket that the buffer bounds
 above allow a slow, flooding client, so 10,000 healthy sockets need about 0.5 to 0.8 GiB per
 node.
 
