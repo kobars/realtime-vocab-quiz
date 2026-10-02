@@ -9,10 +9,12 @@ from itertools import pairwise
 from typing import Any, cast
 
 import pytest
+from redis.asyncio import Redis
 
 from quiz.adapters.memory import MemoryStore
 from quiz.adapters.mock_questions import MockQuestionBank
 from quiz.adapters.redis import RedisStore
+from quiz.adapters.redis.keys import quiz_keys
 from quiz.adapters.ws.registry import Registry
 from quiz.adapters.ws.sender import Sender
 from quiz.app.service import Connection, QuizService
@@ -223,6 +225,28 @@ async def test_a_host_mark_is_announced_at_the_deadline(redis_store: RedisStore)
     await asyncio.sleep(1.0)
     await ticker.stop()
     assert [update["type"] for _, update in sink.updates["a"]] == ["quiz_ended"]
+
+
+@pytest.mark.parametrize("lost", ["the announcement", "the second host step"])
+async def test_a_durable_host_mark_is_announced_by_the_next_tick(
+    redis_store: RedisStore, redis_client: Redis, redis_prefix: str, lost: str
+) -> None:
+    quiz_id = await quiz_with(redis_store, "a")
+    if lost == "the announcement":
+        await redis_store.end_by_host(quiz_id)
+        await redis_client.hdel(quiz_keys(quiz_id, redis_prefix).meta, "endSeq")  # a restart
+    else:
+        await redis_store.end_quiz(quiz_id, "mark")  # the node died before it announced
+    assert (await redis_store.snapshot(quiz_id, None)).status == "open"
+    sink = Sink("a")
+    (ticker := ticker_of(redis_store, sink)).open(quiz_id)
+    for _ in range(60):  # the fsync of the mark takes up to 1 s; the deadline is 60 s away
+        if sink.updates["a"]:
+            break
+        await asyncio.sleep(0.05)
+    await ticker.stop()
+    assert [update["type"] for _, update in sink.updates["a"]] == ["quiz_ended"]
+    assert (await redis_store.snapshot(quiz_id, None)).status == "ended"
 
 
 class Reads:

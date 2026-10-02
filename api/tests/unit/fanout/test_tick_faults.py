@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any, cast
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -15,7 +15,7 @@ from quiz.domain.errors import DomainError, ErrorCode
 from quiz.fanout import tick
 from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
-from quiz.ports.store import FeedStore, Limits, Publish, Ranks, Row, Store
+from quiz.ports.store import End, FeedStore, Limits, Publish, Ranks, Row, Store
 
 SEQ = 3  # the quiz's seq when the loop subscribes
 
@@ -29,6 +29,16 @@ class ScriptedStore:
     def __init__(self, *steps: Publish | Exception, messages: Sequence[str] = ()) -> None:
         self.steps, self.messages, self.calls = steps, messages, 0
         self.ranks_error: Exception | None = None
+        self.host_ends: list[int | Exception] = []  # end_by_host plays these in turn
+
+    async def end_quiz(self, _quiz_id: str, _reason: str) -> End:
+        return End("not_due")
+
+    async def end_by_host(self, _quiz_id: str) -> int:
+        step = self.host_ends.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return step
 
     async def publish_if_dirty(self, _quiz_id: str, _node_id: str) -> Publish:
         step = self.steps[self.calls]
@@ -159,6 +169,24 @@ async def test_an_end_published_before_the_subscribe_ends_the_loop_without_waiti
     store = ScriptedStore(Publish("ended", SEQ))  # its quiz_ended never arrives on the feed
     await run(store, sockets)
     assert store.calls == 1
+
+
+async def test_an_unannounced_host_mark_is_confirmed_and_announced_by_the_tick(
+    sockets: Mock, caplog: pytest.LogCaptureFixture
+) -> None:
+    store = ScriptedStore(*[Publish("ended")] * 2)  # a mark, before the deadline
+    store.host_ends = [DomainError(ErrorCode.UNAVAILABLE, "not fsynced"), SEQ]
+    await run(store, sockets)
+    assert (store.calls, store.host_ends) == (2, [])  # the failed fsync is retried next tick
+    assert logged(caplog, logging.WARNING) == ["tick of quiz Q: the end mark is not durable yet"]
+
+
+async def test_the_loop_drops_the_cached_standings_when_it_starts_and_when_it_ends(
+    sockets: Mock,
+) -> None:
+    service = Mock(spec=QuizService)
+    await run(ScriptedStore(Publish("ended", SEQ)), sockets, service)
+    assert service.drop_cache.call_args_list == [call("Q"), call("Q")]
 
 
 async def test_a_malformed_broadcast_is_skipped_and_the_next_one_relayed(
