@@ -10,6 +10,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 import tomllib
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -469,11 +470,33 @@ def test_the_rendered_fly_edge_passes_nginx_t_and_trusts_only_flys_proxy() -> No
     )
 
 
+def git_ignores(root: Path, name: str) -> bool:
+    """Whether the ``.gitignore`` at ``root`` ignores ``name``, by git's own matching; the user's
+    global excludes file is left out. ``git check-ignore`` needs a work tree and the test image's
+    build context drops ``.git``, so a root without one is checked in a new empty repository that
+    holds a copy of its ``.gitignore``."""
+    with tempfile.TemporaryDirectory() as scratch:
+        work = root
+        if not (root / ".git").exists():
+            work = Path(scratch)
+            shutil.copy(root / ".gitignore", work / ".gitignore")
+            subprocess.run(["git", "init", "-q"], cwd=work, check=True)  # noqa: S607
+        ignored = subprocess.run(
+            ["git", "-c", f"core.excludesFile={os.devnull}", "check-ignore", "-q", name],  # noqa: S607
+            cwd=work,
+            check=False,
+        )
+    assert ignored.returncode in (0, 1), "git check-ignore failed"
+    return ignored.returncode == 0
+
+
+def test_the_git_ignore_check_works_without_a_git_work_tree(tmp_path: Path) -> None:
+    # The test image's build context drops .git, so the repository there is a plain folder.
+    shutil.copy(ROOT / ".gitignore", tmp_path / ".gitignore")
+    assert git_ignores(tmp_path, ".env.fly")
+    assert not git_ignores(tmp_path, "fly.toml")
+
+
 def test_the_fly_secrets_file_stays_out_of_git_and_the_images() -> None:
-    ignored = subprocess.run(
-        ["git", "check-ignore", "-q", ".env.fly"],  # noqa: S607
-        cwd=ROOT,
-        check=False,
-    )
-    assert ignored.returncode == 0
+    assert git_ignores(ROOT, ".env.fly")
     assert "**/.env.fly" in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
