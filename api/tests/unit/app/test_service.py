@@ -228,6 +228,33 @@ async def test_concurrent_cold_snapshots_share_one_refill(
     assert all(reply == replies[0] for reply in replies)
 
 
+async def test_a_snapshot_read_in_flight_when_the_cache_drops_is_not_kept(
+    service: QuizService, store: SpyStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conn = await joined(service)
+    await send(service, conn, m.Next(questionIndex=0))
+    read, started, release = store.snapshot, asyncio.Event(), asyncio.Event()
+
+    async def first_held(quiz_id: str, user_id: str | None) -> Snapshot:
+        if started.is_set():
+            return await read(quiz_id, user_id)
+        started.set()
+        old = await read(quiz_id, user_id)  # the standings before the answer
+        await release.wait()
+        return old
+
+    monkeypatch.setattr(store, "snapshot", first_held)
+    old = asyncio.create_task(service.snapshot(QUIZ, "a"))
+    await started.wait()
+    service.drop_cache(QUIZ)  # a store restart while the old read runs
+    await send(service, conn, answer(0))  # scores without a tick: the cache key stays the same
+    new = await service.snapshot(QUIZ, "a")
+    release.set()
+    await old
+    later = await service.snapshot(QUIZ, "a")
+    assert new.entries[0].score == later.entries[0].score == 150
+
+
 async def test_resync_adds_rank_update_outside_the_shown_entries(service: QuizService) -> None:
     conns = [await joined(service, f"u{i:03}") for i in range(m.FULL_LIST_MAX + 1)]
     await send(service, conns[-1], m.Next(questionIndex=0))

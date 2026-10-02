@@ -119,6 +119,7 @@ class QuizService:
         self._store, self._bank, self._clock, self._tick_ms = store, bank, clock, tick_ms
         self._shared: dict[str, Shared] = {}  # per quiz: the standings at its latest seq
         self._refills: dict[str, asyncio.Task[Shared]] = {}  # per quiz: the read in flight
+        self._generation = 0  # moves on each drop: a read that started before it is not cached
         self._outage_log = Throttle(clock, OUTAGE_LOG_INTERVAL_MS)
         self._pages: dict[PageKey, tuple[int, m.LeaderboardPage]] = {}  # (expires at ms, page)
         self._page_reads: dict[PageKey, asyncio.Task[m.LeaderboardPage]] = {}
@@ -129,6 +130,7 @@ class QuizService:
         A store restart can lose writes without moving ``seq``, so the reconnect and
         resubscribe path calls this before it sends its repair snapshots (redis.md §5).
         """
+        self._generation += 1
         if quiz_id is None:
             self._shared.clear()
             self._refills.clear()
@@ -345,8 +347,14 @@ class QuizService:
 
     async def _refill(self, quiz_id: str) -> Shared:
         """Read the cached standings again; concurrent misses of one quiz share one read."""
-        read = partial(self._store.snapshot, quiz_id, None)
-        shared = self._shared[quiz_id] = await _share(self._refills, quiz_id, read)
+        return await _share(self._refills, quiz_id, partial(self._read_shared, quiz_id, None))
+
+    async def _read_shared(self, quiz_id: str, user_id: str | None) -> Shared:
+        """Read the standings and cache them, unless the cache was dropped during the read."""
+        generation = self._generation
+        shared = await self._store.snapshot(quiz_id, user_id)
+        if self._generation == generation:
+            self._shared[quiz_id] = shared
         return shared
 
     async def snapshot(self, quiz_id: str, user_id: str | None) -> m.Snapshot:
@@ -354,7 +362,7 @@ class QuizService:
 
         When the two never meet at one key, one full read with the user returns both."""
         if (read := await self._at_one_key(quiz_id, () if user_id is None else (user_id,))) is None:
-            full = self._shared[quiz_id] = await self._store.snapshot(quiz_id, user_id)
+            full = await self._read_shared(quiz_id, user_id)
             return _message(full, full.you)
         ranks, shared = read
         return _message(shared, next(iter(ranks.rows.values()), None))
