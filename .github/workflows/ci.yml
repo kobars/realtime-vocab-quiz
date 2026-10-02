@@ -1,27 +1,34 @@
-# AI-ASSISTED: pull-request gate: make check, the Redis integration tests and the internal-content guard.
+# AI-ASSISTED: CI: make check, the Redis integration tests and the combined coverage gate, on pull
+# requests and on main; the PR guards and the review budget on pull requests.
 name: ci
 
 on:
   pull_request:
-    # edited re-runs the guard on the PR title and body; the other jobs skip it.
-    types: [opened, synchronize, reopened, edited]
+    # A label change runs the workflow again, so the guards read the new labels.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  # An edit must not cancel a running code check, so edits get their own group.
-  group: ci-${{ github.head_ref || github.ref }}-${{ github.event.action == 'edited' && 'edit' || 'code' }}
-  cancel-in-progress: true
+  # A new push to a PR replaces its older run; runs on main always finish.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   HYPOTHESIS_PROFILE: ci
+  # The Makefile writes each test step's JUnit report here; upload-test-results uploads them.
+  REPORTS: reports
 
 jobs:
   check:
-    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      COVERAGE_FILE: ${{ github.workspace }}/reports/.coverage.unit
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
@@ -38,9 +45,12 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       # make check includes the contract drift step.
       - run: make check
+      - if: always()
+        uses: ./.github/actions/upload-test-results
+        with:
+          name: unit
 
   integration:
-    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
@@ -55,6 +65,9 @@ jobs:
           --health-retries 15
     env:
       REDIS_URL: redis://localhost:6379/0
+      COVERAGE_FILE: ${{ github.workspace }}/reports/.coverage.integration
+      # The combined report holds the floor, so this partial run has none.
+      PYTEST_ADDOPTS: --cov --cov-report= --cov-fail-under=0
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
@@ -62,23 +75,103 @@ jobs:
           enable-cache: true
           cache-dependency-glob: api/uv.lock
       - run: make test-integration
+      - if: always()
+        uses: ./.github/actions/upload-test-results
+        with:
+          name: integration
 
-  internal:
+  # Combines the coverage-* artifacts; a job that uploads one joins the report by being listed in
+  # needs. On a PR it also gates the changed lines.
+  coverage:
+    needs: [check, integration]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 0 # diff-cover diffs against the base branch
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: api/uv.lock
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-*
+          path: reports
+          merge-multiple: true
+      # fail_under in api/pyproject.toml is the floor; the summary is written before the check.
+      - name: Combined coverage
+        working-directory: api
+        run: |
+          uv run --locked coverage combine ../reports
+          uv run --locked coverage xml -o ../coverage.xml --fail-under=0
+          echo "Combined coverage: $(uv run --locked coverage report --format=total --fail-under=0)%" >> "$GITHUB_STEP_SUMMARY"
+          uv run --locked coverage report
+      - name: Diff coverage
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          rc=0
+          uv run --project api --locked diff-cover coverage.xml --compare-branch="origin/$BASE_REF" \
+            --fail-under=90 --format markdown:diff-cover.md || rc=$?
+          cat diff-cover.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+  # The rules of AGENTS.md (scripts/check_pr.py); a label lets a PR past the frozen-path or size rule.
+  guards:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - name: Tracked files
-        run: python3 scripts/check_internal.py
-      - name: Commit messages
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 scripts/check_internal.py --commits "$BASE_SHA..$HEAD_SHA"
-      - name: Pull request title and body
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" | python3 scripts/check_internal.py --stdin
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: api/uv.lock
+      - run: |
+          mapfile -t labels < <(jq -r '.[]' <<< "$PR_LABELS")
+          uv run --project api --locked python scripts/check_pr.py \
+            --base "$BASE_SHA" --head "$HEAD_SHA" --pr "$PR_NUMBER" --labels "${labels[@]}"
+
+  # The PR's review input in tokens (scripts/review_budget.py); it fails at the limit.
+  review-budget:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      TIKTOKEN_CACHE_DIR: /tmp/tiktoken
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: api/uv.lock
+      - uses: actions/cache@v6
+        with:
+          path: ${{ env.TIKTOKEN_CACHE_DIR }}
+          key: tiktoken-o200k_base
+      - run: make review-budget
+
+  # The ruleset requires this job only; a job joins the gate by being listed in needs.
+  ci-required:
+    if: always()
+    needs: [check, integration, coverage, guards, review-budget]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # A skipped job passes, so a job that runs only on some events never blocks a merge.
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

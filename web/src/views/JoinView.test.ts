@@ -39,6 +39,34 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/**
+ * Types each key as one input event. A browser runs a microtask checkpoint after each listener of a user's input
+ * event, so Vue flushes between them; happy-dom runs them back to back, which hides a listener that reads the caret
+ * too late. The listeners added after this call are held and run one at a time with a flush after each.
+ */
+function typeLikeABrowser() {
+  const held: (() => void)[] = []
+  const add = HTMLInputElement.prototype.addEventListener
+  vi.spyOn(HTMLInputElement.prototype, 'addEventListener').mockImplementation(function (this: HTMLInputElement, type, listener, options) {
+    if (type !== 'input' || listener === null) return add.call(this, type, listener, options)
+    const call = typeof listener === 'function' ? listener.bind(this) : listener.handleEvent.bind(listener)
+    add.call(this, type, (event) => held.push(() => call(event)), options)
+  })
+  return async (el: HTMLInputElement, keys: string) => {
+    el.focus()
+    for (const key of keys) {
+      const at = el.selectionStart ?? el.value.length
+      el.value = el.value.slice(0, at) + key + el.value.slice(el.selectionEnd ?? at)
+      el.setSelectionRange(at + 1, at + 1)
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      for (const run of held.splice(0)) {
+        run()
+        await flushPromises()
+      }
+    }
+  }
+}
+
 async function screen(path = '/') {
   const router = createAppRouter(createMemoryHistory())
   await router.push(path)
@@ -56,6 +84,11 @@ async function screen(path = '/') {
   return { wrapper, router, id, name, describedBy, submit, button }
 }
 
+it('the header link is a 44 px touch target', async () => {
+  const { wrapper } = await screen()
+  expect(wrapper.get('header a').classes()).toContain('min-h-11')
+})
+
 describe('validation', () => {
   it('upper-cases the quiz ID as it is typed and puts no native length limit on the name', async () => {
     const { id, name } = await screen()
@@ -65,16 +98,16 @@ describe('validation', () => {
     expect(name.attributes('maxlength')).toBeUndefined()
   })
 
-  it('keeps the caret in place when a lower-case letter is typed mid-ID', async () => {
-    const { id } = await screen()
-    await id.setValue('VOCAB-2')
-    id.element.focus()
-    id.element.value = 'VOCAB-x2'
-    id.element.setSelectionRange(7, 7)
-    await id.trigger('input')
-    await flushPromises()
-    expect(id.element.value).toBe('VOCAB-X2')
-    expect(id.element.selectionStart).toBe(7)
+  it('keeps the order and the caret of keys typed one by one, also mid-ID', async () => {
+    const type = typeLikeABrowser()
+    const { id, name } = await screen()
+    await type(id.element, 'vocab-42')
+    expect([id.element.value, id.element.selectionStart]).toEqual(['VOCAB-42', 8])
+    id.element.setSelectionRange(3, 3)
+    await type(id.element, 'x')
+    expect([id.element.value, id.element.selectionStart]).toEqual(['VOCXAB-42', 4])
+    await type(name.element, 'Kim')
+    expect(name.element.value).toBe('Kim')
   })
 
   it('renders when sessionStorage cannot be read', async () => {

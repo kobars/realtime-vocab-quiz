@@ -10,7 +10,7 @@ import { strings } from '@/strings'
       <div class="mx-auto flex h-14 max-w-5xl items-center px-4">
         <RouterLink
           to="/"
-          class="rounded-md font-semibold focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+          class="-mx-2 inline-flex min-h-11 items-center rounded-md px-2 font-semibold focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
         >
           {{ strings.appName }}
         </RouterLink>

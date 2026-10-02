@@ -1,0 +1,8 @@
+# AI-ASSISTED: lock and generated files; scripts/pr_changes.py leaves them out of PR size counts.
+uv.lock linguist-generated
+pnpm-lock.yaml linguist-generated
+*.generated.ts linguist-generated
+contracts/schema/*.json linguist-generated
+# shadcn-vue writes these components; they are regenerated rather than reviewed line by line.
+web/src/components/ui/** linguist-generated
+web/src/components/ui/**/*.test.ts -linguist-generated

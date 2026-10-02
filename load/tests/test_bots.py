@@ -3,44 +3,26 @@ import asyncio
 import contextlib
 import itertools
 import json
-import threading
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import httpx
 import pytest
-import uvicorn
-from pydantic import SecretStr
 
 import bots
 from bots import BOARD_HEAD, converse, create_quizzes, main, parse, play, swarm
 from latency import summary
 from player import DEAD_LINK, NORMAL, OVERLOAD, Backoff, BoardWait, Player, Recorder
-from quiz.config import Settings
 from quiz.contracts.codec import encode_broadcast
 from quiz.contracts.messages import Entry, Leaderboard
-from quiz.main import create_app
+
+pytest_plugins = ["app_server"]  # the app_url fixture
 
 OPTS = parse(["--timeout-ms", "200"])
 TOKENS = httpx.MockTransport(
     lambda _: httpx.Response(201, json={"sessionToken": "s", "ticket": "t"})
 )
-
-
-@pytest.fixture
-def app_url() -> Iterator[str]:
-    token = SecretStr("load-token")
-    app = create_app(Settings(admin_mock=True, admin_token=token, allowed_origins=(OPTS.origin,)))
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
-    thread = threading.Thread(target=server.run)
-    thread.start()
-    while not server.started:
-        assert thread.is_alive()
-        time.sleep(0.01)
-    yield f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}"
-    server.should_exit = True
-    thread.join()
 
 
 @pytest.fixture
@@ -238,17 +220,27 @@ async def test_a_swarm_plays_whole_quizzes_against_the_app(app_url: str) -> None
 async def test_a_quiz_end_before_the_deadline_ends_the_cpu_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    events, process_time, busy_s = list[str](), time.process_time, 0.1
+
+    def cpu_sample() -> float:
+        events.append("cpu sample")
+        return process_time()
+
     async def busy_until_the_quiz_ends(p: Player, *_: object) -> None:
-        until = time.monotonic() + 0.3
-        while time.monotonic() < until:
+        events.append("play")
+        until = process_time() + busy_s  # CPU time: a busy machine stretches only its wall time
+        while process_time() < until:
             pass
         p.ended = True
 
+    monkeypatch.setattr(time, "process_time", cpu_sample)
     monkeypatch.setattr(bots, "play", busy_until_the_quiz_ends)
     t0 = time.monotonic()
     rec, proc = await swarm(parse(["--bots", "1", "--duration", "3", "--ramp", "0"]))
-    assert time.monotonic() - t0 < 1  # no idle wait for the deadline
-    assert proc["cpu_pct"] > 50  # idle time until the deadline would dilute it to about 10%
+    elapsed = time.monotonic() - t0
+    assert elapsed < 2  # no idle wait for the deadline
+    assert events[:2] == ["cpu sample", "play"]  # with no ramp, the window opens before play
+    assert proc["cpu_pct"] >= round(100 * busy_s / elapsed, 1)  # it holds the whole busy run
     assert rec.counts["slots_ended_early"] == 1
 
 

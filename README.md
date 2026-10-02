@@ -5,9 +5,6 @@ vocabulary questions, and watch a shared leaderboard update live as scores
 change. The server is Python (FastAPI over WebSockets, Redis for scores and
 fan-out); the client is a Vue 3 single-page app.
 
-**Status: work in progress.** The repository layout, the locked dependencies
-and the document skeletons exist; the service itself is being built.
-
 ## Stack
 
 | Part | Tools |
@@ -19,7 +16,7 @@ and the document skeletons exist; the service itself is being built.
 | Client tests and quality | Vitest (v8 coverage), @vue/test-utils, happy-dom, ESLint, vue-tsc |
 | Infra | Docker Compose, nginx |
 
-## Working today
+## Run and test
 
 ```bash
 uv sync --project api        # install the server dependencies
@@ -30,6 +27,7 @@ make check                   # every check a change must pass; stops at the firs
 make test                    # the server and client unit tests
 make test-integration        # the tests that need Redis (set REDIS_URL to use your own)
 make audit                   # the dependency audits and the secret scan (needs the network and gitleaks 8.25+)
+make review-budget           # the branch's review input in tokens (diff plus changed files, against origin/main)
 make acceptance              # the acceptance tests; ACCEPTANCE_STORE=redis runs them on a Redis of their own
 make build                   # the API and web images, elsaquiz-api and elsaquiz-web (IMAGE_TAG=dev)
 make dev-api                 # one API node on 127.0.0.1:8001 (memory store) that allows the :5173 origins
@@ -43,18 +41,28 @@ The API refuses a WebSocket upgrade from an origin it does not allow (HTTP 403).
 `DEV_ORIGINS` change the port and the list.
 
 `make check` runs, in order: the client install from the lock file
-(`pnpm install --frozen-lockfile`); every pre-commit hook on every file (the
-internal-content guard `scripts/check_internal.py`, ruff lint and format, ESLint,
-typos, and lychee in Docker on the relative links and anchors of the tracked
-Markdown); mypy (strict); import-linter; deptry (every import in `api/src` is a
-declared dependency and every runtime dependency is used; `api/tests`, `scripts/`
-and `load/` import only declared packages); pytest (without the `integration` and
-`acceptance` markers) with a branch-coverage floor (`api/pyproject.toml`);
-the contract drift check; vue-tsc; Vitest with coverage thresholds
+(`pnpm install --frozen-lockfile`); every pre-commit hook on every file (ruff
+lint and format, ESLint, typos, and lychee in Docker on the relative links and
+anchors of the tracked Markdown); mypy (strict); import-linter; deptry (every
+import in `api/src` is a declared dependency and every runtime dependency is
+used; `api/tests`, `scripts/` and `load/` import only declared packages); pytest
+(without the `integration` and `acceptance` markers) with a unit branch-coverage
+floor (`UNIT_COVERAGE_FLOOR` in the `Makefile`); the contract drift check; vue-tsc; Vitest with coverage thresholds
 (`web/vitest.config.ts`); and the client build (`pnpm -C web build`). Every pull
-request runs the same gate in GitHub Actions (`.github/workflows/ci.yml`), plus the
-Redis integration tests and the guard on the commit messages and the PR text (run
-again when the PR text is edited). A weekly job (`.github/workflows/links.yml`)
+request and every push to `main` runs the same gate in GitHub Actions
+(`.github/workflows/ci.yml`), plus the Redis integration tests. Its `coverage` job
+combines the coverage data of the test jobs and fails below the combined floor
+(`fail_under` in `api/pyproject.toml`) and, on a pull request, when less than 90% of the
+changed lines are covered (diff-cover). Each run keeps the JUnit reports (`reports-*`)
+and the coverage data (`coverage-*`) as artifacts for 7 days. The CI, security and
+container workflows each end in one gate job (`ci-required`, `security-required`,
+`containers-required`) that fails when a job it needs fails or is cancelled. On pull
+requests, CI also runs `scripts/check_pr.py` (the size limit, the frozen acceptance
+tests, the commit trailer and the AI-LOG entry of `AGENTS.md`; the labels `size-exception`
+and `acceptance-change` waive the first two) and the review budget, which fails a PR whose
+review input reaches the `limit` in `api/pyproject.toml`. Neither counts the paths that
+`.gitattributes` marks `linguist-generated` (lock files, generated contracts, shadcn-vue
+components). A weekly job (`.github/workflows/links.yml`)
 also checks the external links.
 Another workflow (`.github/workflows/containers.yml`) checks the container and
 infrastructure files: hadolint (settings in `.hadolint.yaml`), shellcheck,
@@ -67,12 +75,43 @@ security header of `web/security-headers.conf` (CSP, `nosniff`, `Referrer-Policy
 `Permissions-Policy`) on `/` and on a hashed asset (locally:
 `make build && scripts/smoke_images.sh`).
 
-`make help` lists every target; a target whose work has not landed yet prints
-`not yet`.
+`make help` lists every target.
+
+## Running the full stack
+
+The `full` Compose profile runs two API nodes (`api-1`, `api-2`) on one Redis behind
+nginx (`infra/nginx/nginx.conf`), which sends `/` to the web app, `/api/` (prefix
+dropped) and `/ws` to the nodes, round-robin. Only nginx publishes a port:
+`127.0.0.1:${QUIZ_PORT}`, 8080 by default.
+
+```bash
+cp .env.example .env                        # then set ADMIN_TOKEN and REDIS_PASSWORD
+make build                                  # the images the stack runs
+docker compose --profile full up -d --wait  # returns once every service is healthy
+make smoke-full                             # the smoke run below
+make down                                   # stops the stack and the development Redis
+```
+
+`make smoke-full` (`load/smoke_full.py`) checks `/healthz` and `/readyz` on each node,
+joins through nginx on its published port (`docker compose port nginx 8080`, so any
+`QUIZ_PORT` works), answers one question for points, then stops the node that holds its socket
+(the one whose `ws_connections` gauge on `/metrics` grew): within 10 s it must be back on the other node through nginx, resynced, with its score.
+The stopped node then starts again. It starts the quiz `VOCAB-42` for an hour unless it
+is open already; after that hour a run needs another quiz
+(`uv run --project api python load/smoke_full.py --quiz-ids BIZ-20`) or a fresh stack
+Redis (`docker compose --profile full down -v`).
+
+The nodes publish no port, so check `/healthz` and `/readyz` on one from inside its
+container:
+
+```bash
+docker compose exec api-1 python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8000/readyz').read().decode())"
+```
 
 ## Documents
 
 - [DESIGN.md](DESIGN.md) — the system design
 - [docs/DECISIONS.md](docs/DECISIONS.md) — architecture decision records
+- [docs/ai-log/](docs/ai-log/) — how AI was used in each change, and how it was checked
 - [AGENTS.md](AGENTS.md) — rules for contributors and coding agents
 - [SECURITY.md](SECURITY.md) — how to report a vulnerability, and the security scans

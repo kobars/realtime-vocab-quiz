@@ -1,10 +1,11 @@
-# AI-ASSISTED: checks on the pre-commit hooks, make check, deptry and the CI workflow triggers.
+# AI-ASSISTED: checks on the pre-commit hooks, make targets, deptry and the CI workflows.
 """Tests for the repository's hook and workflow configuration.
 
 The workflows and the Makefile are read as text; the hook test uses pre-commit's own
-config loader and file filter.
+config loader.
 """
 
+import os
 import re
 import shlex
 import subprocess
@@ -13,11 +14,9 @@ from pathlib import Path
 
 import pytest
 from pre_commit.clientlib import load_config
-from pre_commit.commands.run import Classifier
-from pre_commit.hook import Hook
-from pre_commit.prefix import Prefix
 
 ROOT = Path(__file__).resolve().parents[2]
+WORKFLOWS = ROOT / ".github" / "workflows"
 
 
 def _block(path: Path, start: str, next_prefix: str) -> list[str]:
@@ -47,11 +46,6 @@ def _section(path: Path, key: str, indent: int) -> list[str]:
     return [line.strip() for line in raw[begin:end]]
 
 
-def _job(name: str) -> list[str]:
-    """Return the stripped lines of one job of the CI workflow."""
-    return _section(ROOT / ".github" / "workflows" / "ci.yml", name, 2)
-
-
 def _hook(hook_id: str) -> dict[str, object]:
     """Return one hook of the pre-commit config, with pre-commit's defaults filled in."""
     config = load_config(str(ROOT / ".pre-commit-config.yaml"))
@@ -69,37 +63,114 @@ def _run_commands(path: Path) -> list[str]:
     return [line.removeprefix("run:").strip() for line in lines if line.startswith("run:")]
 
 
-def test_internal_hook_scans_every_staged_file_and_symlink(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # pre-commit's own loader and file filter, so its default `types: [file]` applies.
-    hook = Hook.create(str(ROOT), Prefix(str(ROOT)), _hook("check-internal"))
-    monkeypatch.chdir(tmp_path)
-    Path("notes.md").write_text("text\n", encoding="utf-8")
-    Path(".hidden").write_text("text\n", encoding="utf-8")
-    Path("link").symlink_to("notes.md")
-    names = ["notes.md", ".hidden", "link"]
-    assert sorted(Classifier(names).filenames_for_hook(hook)) == sorted(names)
-
-
 def test_eslint_hook_runs_one_process_so_the_typescript_program_is_built_once() -> None:
     assert _hook("eslint")["require_serial"] is True
 
 
-def test_ci_runs_again_when_the_pull_request_text_is_edited() -> None:
-    trigger = _block(ROOT / ".github" / "workflows" / "ci.yml", "pull_request:", "permissions:")
-    assert "types: [opened, synchronize, reopened, edited]" in trigger
+GATE_FAILS = "- if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')"
 
 
-def test_only_the_internal_job_runs_on_an_edit() -> None:
-    skip_edit = "if: github.event.action != 'edited'"
-    assert skip_edit in _job("check")
-    assert skip_edit in _job("integration")
-    assert skip_edit not in _job("internal")
+@pytest.mark.parametrize(
+    ("workflow", "gate", "needs"),
+    [
+        ("ci.yml", "ci-required", "[check, integration, coverage, guards, review-budget]"),
+        ("security.yml", "security-required", "[secrets, dependency-review]"),
+        ("containers.yml", "containers-required", "[config, images]"),
+    ],
+)
+def test_each_workflow_has_one_gate_job_over_its_required_jobs(
+    workflow: str, gate: str, needs: str
+) -> None:
+    # The ruleset requires the gate job ids, so a rename or a dropped need shows up here.
+    job = _section(WORKFLOWS / workflow, gate, 2)
+    assert f"needs: {needs}" in job
+    assert "if: always()" in job
+    assert GATE_FAILS in job
+    assert not any(line.startswith("name:") for line in job)
+
+
+def _job_ids(path: Path) -> list[str]:
+    """Return the ids of a workflow's jobs, in file order."""
+    jobs = path.read_text(encoding="utf-8").split("\njobs:\n", 1)[1]
+    return re.findall(r"^  ([\w-]+):$", jobs, re.MULTILINE)
+
+
+def test_coverage_job_combines_every_job_that_uploads_test_results() -> None:
+    path = WORKFLOWS / "ci.yml"
+    coverage = _section(path, "coverage", 2)
+    uploaders = [
+        job
+        for job in _job_ids(path)
+        if "uses: ./.github/actions/upload-test-results" in _section(path, job, 2)
+    ]
+    assert uploaders == ["check", "integration"]
+    assert f"needs: [{', '.join(uploaders)}]" in coverage
+    assert "pattern: coverage-*" in coverage
+    assert "uv run --locked coverage combine ../reports" in coverage
+    assert "uv run --locked coverage report" in coverage
+    assert "--fail-under=90 --format markdown:diff-cover.md || rc=$?" in coverage
+    assert "fetch-depth: 0" in [line.split(" #")[0] for line in coverage]
+
+
+def _make_dry_run(target: str, *variables: str) -> str:
+    """Return the commands ``make -n`` prints for ``target``, unaffected by an outer REPORTS."""
+    env = {k: v for k, v in os.environ.items() if k not in {"REPORTS", "MAKEFLAGS", "MAKELEVEL"}}
+    return subprocess.run(
+        ["make", "-n", target, *variables],  # noqa: S607
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_test_steps_write_junit_reports_only_when_reports_is_set(tmp_path: Path) -> None:
+    reports = tmp_path / "reports"
+    commands = "".join(
+        _make_dry_run(target, f"REPORTS={reports}") for target in ("check", "test-integration")
+    )
+    assert f"--junitxml={reports}/unit.xml" in commands
+    assert f"--junitxml={reports}/integration.xml" in commands
+    assert f"--reporter=junit --outputFile.junit={reports}/vitest.xml" in commands
+    assert "junit" not in _make_dry_run("check") + _make_dry_run("test-integration")
+
+
+@pytest.mark.parametrize(
+    ("workflow", "types"),
+    [
+        # ci.yml runs again on a label change, for the guards; never on a PR text edit.
+        ("ci.yml", ["types: [opened, synchronize, reopened, labeled, unlabeled]"]),
+        ("containers.yml", []),
+    ],
+)
+def test_workflow_runs_on_every_pull_request_update_and_on_main(
+    workflow: str, types: list[str]
+) -> None:
+    on = _section(WORKFLOWS / workflow, "on", 0)
+    assert "pull_request:" in on
+    assert [line for line in on if line.startswith("types:")] == types
+    assert on[on.index("push:") + 1] == "branches: [main]"
+
+
+@pytest.mark.parametrize("job", ["guards", "review-budget"])
+def test_pull_request_checks_read_the_whole_history_of_the_pr_head(job: str) -> None:
+    lines = _section(WORKFLOWS / "ci.yml", job, 2)
+    assert "if: github.event_name == 'pull_request'" in lines
+    assert "ref: ${{ github.event.pull_request.head.sha }}" in lines
+    assert "fetch-depth: 0" in lines
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "security.yml", "containers.yml", "codeql.yml"])
+def test_only_a_newer_pull_request_run_cancels_an_older_one(workflow: str) -> None:
+    concurrency = _section(WORKFLOWS / workflow, "concurrency", 0)
+    group = "group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}"
+    assert group in concurrency
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in concurrency
 
 
 def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
-    path = ROOT / ".github" / "workflows" / "containers.yml"
+    path = WORKFLOWS / "containers.yml"
     assert "pull_request:" in _section(path, "on", 0)
     runs = _run_commands(path)
     for command in (
@@ -195,3 +266,23 @@ def test_dependency_check_fails_when_a_direct_import_is_undeclared(tmp_path: Pat
     result = _deptry("src", "--config", str(tmp_path / "pyproject.toml"))
     assert result.returncode == 1
     assert "DEP003 'starlette' imported but it is a transitive dependency" in result.stderr
+
+
+def _phony_and_targets(makefile: str) -> tuple[list[str], list[str]]:
+    """Return the sorted ``.PHONY`` names and the sorted names of the defined targets."""
+    phony = re.search(r"^\.PHONY:(.*)$", makefile, re.MULTILINE)
+    assert phony is not None
+    targets = re.findall(r"^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?!=)", makefile, re.MULTILINE)
+    return sorted(phony.group(1).split()), sorted(targets)
+
+
+def test_target_names_with_digits_underscores_and_dots_are_found() -> None:
+    makefile = ".PHONY: e2e\nVAR := 1\nV2:=2\ne2e: ## a\n\techo\nlint_py.v2: ## b\n\techo\n"
+    assert _phony_and_targets(makefile) == (["e2e"], ["e2e", "lint_py.v2"])
+
+
+def test_every_make_target_is_phony_and_none_is_a_placeholder() -> None:
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    phony, targets = _phony_and_targets(makefile)
+    assert phony == targets
+    assert "not yet" not in makefile

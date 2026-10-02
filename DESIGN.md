@@ -78,7 +78,7 @@ core; the quiz host uses a token-gated mock admin API. All three are dashed.
 ```mermaid
 flowchart LR
     player(["Player<br/>(browser)"])
-    host(["Quiz host<br/>(make new-quiz, end now)"])
+    host(["Quiz host<br/>(admin API, end now)"])
     subgraph built["Built for real"]
         quiz["Real-time quiz service<br/>Vue client + API nodes + Redis"]
     end
@@ -442,7 +442,7 @@ it.
 |---|---|---|
 | Identity and tickets (`quiz/adapters/mock_auth/`) | `POST /sessions` makes an anonymous user ID and a session token; `POST /tickets` makes a single-use 30 s ticket; both kept in Redis | The company's identity provider (OIDC) for users and sessions; the single-use ticket mechanism stays as built |
 | Question bank (`quiz/adapters/mock_questions/`) | Seed quizzes read from JSON files at start-up | A content service or database, edited in an authoring tool |
-| Quiz admin (`quiz/adapters/http/`, `ADMIN_MOCK`) | `POST /admin/quizzes {quizId, timeLimitMs, windowMs}` starts a quiz from the bank, only with `ADMIN_MOCK=1` and a matching `X-Admin-Token` header (else 404); the make targets `make new-quiz` and `make demo` create a quiz; a mock host action "end now" ends a quiz early | The admin API behind the identity provider, with per-user roles in place of one shared token, plus an admin UI for scheduling and quiz settings |
+| Quiz admin (`quiz/adapters/http/`, `ADMIN_MOCK`) | `POST /admin/quizzes {quizId, timeLimitMs, windowMs}` starts a quiz from the bank, only with `ADMIN_MOCK=1` and a matching `X-Admin-Token` header (else 404); a mock host action "end now" ends a quiz early | The admin API behind the identity provider, with per-user roles in place of one shared token, plus an admin UI for scheduling and quiz settings |
 
 <!-- AI-ASSISTED-END -->
 
@@ -459,9 +459,9 @@ stated the fix and a test pinned it. The full record is in the AI-LOG entries (b
 | Tool | Model | Role in the design |
 |---|---|---|
 | Claude Code | claude-opus-5-5 | Drafted the architecture, the protocol, the Redis data model and scripts, the UI spec, the test strategy and the ADRs |
-| Codex CLI | `gpt-6-astra`, high reasoning, read-only sandbox | Independent reviewer of the design drafts, and of every PR after its merge |
+| Codex CLI | `gpt-6-astra`, high reasoning, read-only sandbox | Independent reviewer of the design drafts, of each spec PR once it merged, and of every later PR before its merge |
 | A second Claude Code agent | claude-opus-5-5, fresh context, read-only | Independent reviewer of the design drafts, with no access to how they were written |
-| Claude Code `/code-review` | claude-opus-5-5, high | Reviewer of every PR after its merge, next to Codex |
+| Claude Code `/code-review` | claude-opus-5-5, high | Reviewer of each spec PR once it merged and of every later PR before its merge, next to Codex |
 
 **Design tasks and the nature of each interaction.**
 
@@ -545,7 +545,7 @@ Every decision is recorded in full (context, decision, alternatives considered, 
 
 | ADR | Decision |
 |---|---|
-| [ADR-001](docs/DECISIONS.md#adr-001--build-the-real-time-quiz-service-with-a-python-and-fastapi-server-mock-identity-questions-and-admin) | Build the real-time quiz service for real (Python and FastAPI server, Vue client); mock identity and tickets and the question bank behind ports; quiz admin is make targets and a mock host action. |
+| [ADR-001](docs/DECISIONS.md#adr-001--build-the-real-time-quiz-service-with-a-python-and-fastapi-server-mock-identity-questions-and-admin) | Build the real-time quiz service for real (Python and FastAPI server, Vue client); mock identity and tickets and the question bank behind ports; quiz admin is a token-gated mock admin API and a mock host action ("end now"). |
 | [ADR-002](docs/DECISIONS.md#adr-002--self-paced-quiz-model-and-the-integer-scoring-rule) | Self-paced quiz: each player sets their own pace on one shared live board; integer scoring `100 + (50 * (T - e)) // T`, wrong or late 0. |
 | [ADR-003](docs/DECISIONS.md#adr-003--transport-raw-websocket-on-fastapi-and-uvicorn) | One raw WebSocket per tab on FastAPI and uvicorn, subprotocol `quiz.v1`, a single-use ticket checked before the upgrade. |
 | [ADR-004](docs/DECISIONS.md#adr-004--wire-protocol-standings-policy-and-the-200-ms-coalescing-tick) | Versioned JSON messages with a per-quiz `seq` and resync; full standings up to 200 players, else the top 50 plus `rank_update`; one frame per 200 ms tick. |

@@ -23,6 +23,7 @@ build-backend = "uv_build"
 dev = [
     "anyio>=4.15.1",
     "deptry>=0.25.1",
+    "diff-cover>=10.6.0",
     "httpx>=0.28.1",
     "httpx2>=2.13.1",
     "hypothesis>=6.168.3",
@@ -34,6 +35,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "pytest-timeout>=2.4.0",
     "ruff>=0.16.9",
+    "tiktoken>=0.14.0",
     "typos>=1.50.3",
 ]
 load = [
@@ -58,7 +60,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["quiz", "check_internal", "bots", "latency", "player"]
+known-first-party = [
+    "quiz", "check_pr", "pr_changes", "review_budget", "bots", "latency", "player", "smoke_full",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004"]
@@ -66,6 +70,13 @@ known-first-party = ["quiz", "check_internal", "bots", "latency", "player"]
 "../scripts/*.py" = ["S603", "T201"]
 "../load/*.py" = ["T201"]
 "../load/tests/**" = ["S101", "PLR2004"]
+
+# The review input of a PR in o200k_base tokens (scripts/review_budget.py): a notice, a warning,
+# and the limit at which the review-budget job fails.
+[tool.review-budget]
+info = 100000
+warning = 150000
+limit = 200000
 
 # make check runs deptry on src, and on tests, ../scripts and ../load with the Makefile's extra flags.
 [tool.deptry]
@@ -112,14 +123,16 @@ markers = [
 ]
 
 # make check runs the unit, property and contract tests with --cov; the Redis adapter and the
-# WebSocket gateway are covered mostly by the integration tests, which it does not run.
+# WebSocket gateway are covered mostly by the integration tests, which it does not run. CI
+# combines the coverage data of its test jobs.
 [tool.coverage.run]
 branch = true
 source_pkgs = ["quiz"]
 
 [tool.coverage.report]
-# The measured branch coverage of make check's test run, rounded down; raise it as tests grow.
-fail_under = 84
+# The floor of CI's combined report, below its measured 98%; make check's unit-only run has its
+# own floor in the Makefile.
+fail_under = 95
 show_missing = true
 skip_covered = true
 
