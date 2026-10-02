@@ -1,5 +1,43 @@
 # System design: real-time vocabulary quiz
 
+<!-- AI-ASSISTED-BEGIN: contents list and reading map drafted with Claude Code from the headings below. -->
+
+**Contents.**
+
+1. [Summary](#1-summary)
+2. [Assumptions and non-goals](#2-assumptions-and-non-goals)
+3. [Architecture](#3-architecture)
+4. [Components](#4-components), with [Maintainability](#maintainability)
+5. [Data flow](#5-data-flow)
+6. [Technologies and justification](#6-technologies-and-justification)
+7. [Consistency contract](#7-consistency-contract)
+8. [Non-functional requirements](#8-non-functional-requirements)
+9. [Capacity estimate](#9-capacity-estimate)
+10. [Scalability and trade-offs](#10-scalability-and-trade-offs)
+11. [Reliability and failure modes](#11-reliability-and-failure-modes)
+12. [Security](#12-security)
+13. [Observability](#13-observability)
+14. [Implemented and mocked](#14-implemented-and-mocked)
+15. [AI Collaboration in Design](#15-ai-collaboration-in-design)
+16. [ADR index](#16-adr-index)
+
+**Where to find.**
+
+| Topic | Sections |
+|---|---|
+| Architecture | [§3](#3-architecture): context, containers, walk-through and deployment |
+| Components | [§4](#4-components): every component, its role and what it talks to |
+| Data flow | [§5](#5-data-flow): join, answer to leaderboard, reconnect, hosting and quiz end |
+| Technologies | [§6](#6-technologies-and-justification): each choice against its alternative, with the ADRs of [§16](#16-adr-index) |
+| AI collaboration in the design | [§15](#15-ai-collaboration-in-design) |
+| Scalability | [§10](#10-scalability-and-trade-offs), sized by [§9](#9-capacity-estimate) |
+| Performance | The targets of [§2](#2-assumptions-and-non-goals) and [§8](#8-non-functional-requirements), measured in [§9](#9-capacity-estimate) |
+| Reliability | [§11](#11-reliability-and-failure-modes), on the guarantees of [§7](#7-consistency-contract) |
+| Maintainability | [Maintainability](#maintainability) in §4 |
+| Observability | [§13](#13-observability) |
+
+<!-- AI-ASSISTED-END -->
+
 <!-- AI-ASSISTED-BEGIN: sections 1-4 drafted with Claude Code from docs/spec/ and docs/DECISIONS.md, checked by hand against the code layout and the import-linter contracts; the Mermaid diagrams were rendered with the Mermaid CLI. -->
 
 ## 1. Summary
@@ -16,7 +54,9 @@ Lua script that reads the time from Redis `TIME`, so any node can score any answ
 and a (player, question) scores at most once. Score changes only mark the quiz dirty; a 200 ms
 coalescing tick publishes one full leaderboard frame per quiz over Redis pub/sub, numbered by a
 per-quiz `seq`, and a client that sees a gap asks for a snapshot. Identity and the question bank
-are mocks behind ports, and quiz admin is a mock host action (§14).
+are mocks behind ports. Any visitor can host a quiz from the host page (`/host`), which calls the
+self-service hosting API, and end it with the host token it gets; a token-gated mock admin API
+serves the make targets (§14).
 
 **Headline numbers.** The load runs and §9 fill in the measured column.
 
@@ -41,7 +81,7 @@ Host-led stays future work.
 | Topic | Assumption |
 |---|---|
 | Players | Anonymous: a mock session gives a user ID; the player types a display name (1–32 characters). One open tab per player and quiz; a second tab replaces the first |
-| Quiz shape | 10 questions, 4 choices each, `T` = 20 s per question; the quiz is open for a window from its creation (default 10 min, at most 60 min) or until a mock host ends it |
+| Quiz shape | 10 questions, 4 choices each, `T` = 20 s per question; the quiz is open for a window from its creation (default 10 min, at most 60 min; 30 min for a self-hosted quiz) or until its host ends it (with the host token, or through the mock admin API) |
 | Time | The server decides time on one clock (Redis `TIME`); the client countdown is display only |
 | Clients | Current browsers with WebSocket support; phones and desktops |
 | Store | One Redis 8 (Valkey 8 also works) with AOF `everysec`; a crash can lose about 1 s of answers (§11) |
@@ -76,32 +116,42 @@ translations.
 
 **Context.** The quiz service is the one component built for real. The identity provider and the
 content service are mocks behind ports, so a real one can replace each without touching the
-core; the quiz host uses a token-gated mock admin API. All three are dashed.
+core; both are dashed. A quiz host starts a quiz and ends it early from the host page, which
+calls the self-service hosting API with a host token; the make targets use the token-gated mock
+admin API (dashed).
 
 ```mermaid
 flowchart LR
     player(["Player<br/>(browser)"])
-    host(["Quiz host<br/>(make new-quiz, end now)"])
+    host(["Quiz host<br/>(host page /host; make new-quiz, make demo-end)"])
     subgraph built["Built for real"]
         quiz["Real-time quiz service<br/>Vue client + API nodes + Redis"]
     end
     idp["Identity provider<br/>(mock: sessions and tickets)"]
     content["Content service<br/>(mock: question bank)"]
     player -- "HTTPS + WebSocket" --> quiz
-    host -. "mock admin" .-> quiz
+    host -- "HTTPS: host a quiz, end it (host token)" --> quiz
+    host -. "mock admin (make targets)" .-> quiz
     quiz -. "who is this user?" .-> idp
     quiz -. "quiz questions" .-> content
     classDef mock stroke-dasharray: 5 5
-    class idp,content,host mock
+    class idp,content mock
 ```
 
-**Containers.** The two mocks are not containers of their own: each API node loads them
+**Containers.** nginx is the edge of the stack: it proxies `/` to the `web` container, which
+serves the built client from an nginx of its own, and `/api` and `/ws` to both API nodes. On a
+public VM (`compose.prod.yaml`) Caddy terminates HTTPS in front of it, and nginx publishes no
+port of its own; on Fly.io, Fly's proxy terminates HTTPS instead and one web Machine runs both
+the edge and the client (Deployment below). The two mocks are not containers of their own: each API node loads them
 in-process as adapters (dashed), and the identity mock keeps its sessions and tickets in Redis.
 
 ```mermaid
 flowchart LR
     browser["Browser<br/>Vue 3 SPA<br/>one WebSocket per tab"]
-    nginx["nginx :8080<br/>static client, /api and /ws proxy"]
+    caddy["Caddy :80, :443<br/>HTTPS, public VM only"]
+    fly["Fly proxy<br/>HTTPS, Fly.io only"]
+    nginx["nginx :8080, the edge<br/>/ to web; /api and /ws to the API nodes"]
+    web["web :8080<br/>nginx serving the built client"]
     subgraph api1["api-1 (FastAPI on uvicorn)"]
         core1["gateway, use cases, fan-out<br/>/metrics"]
         ids1["mock identity adapter<br/>sessions and tickets"]
@@ -113,9 +163,14 @@ flowchart LR
         bank2["mock question bank adapter<br/>JSON files in the image"]
     end
     redis[("Redis 8<br/>primary database, AOF everysec<br/>Lua scripts, sorted sets, pub/sub<br/>session and ticket keys")]
-    browser -- "POST /api/sessions, /api/tickets<br/>GET /ws (quiz.v1)" --> nginx
-    nginx --> core1
-    nginx --> core2
+    browser -- "public VM: HTTPS" --> caddy
+    caddy --> nginx
+    browser -- "Fly.io: HTTPS" --> fly
+    fly --> nginx
+    browser -- "local: GET /, POST /api/sessions, /api/tickets<br/>GET /ws (quiz.v1)" --> nginx
+    nginx -- "/" --> web
+    nginx -- "/api, /ws" --> core1
+    nginx -- "/api, /ws" --> core2
     core1 -- "in-process" --> ids1
     core1 -- "in-process" --> bank1
     core2 -- "in-process" --> ids2
@@ -174,9 +229,11 @@ composition root alone wires them is a convention, not a check.
 
 | Component | Role | Owns | Talks to |
 |---|---|---|---|
-| Web client (`web/src/`) | The player's UI: join, question, feedback, finished and live leaderboard | The protocol client (backoff, `seq` tracking, resync), the Pinia quiz store and the views | nginx: HTTP for session and ticket, one WebSocket; the design system |
+| Web client (`web/src/`) | The player's UI: join, question, feedback, finished and live leaderboard; the host page (`/host`) | The protocol client (backoff, `seq` tracking, resync), the Pinia quiz store and the views | nginx: HTTP for session and ticket, one WebSocket; the design system |
 | Design system (`web/packages/clay/`) | The client's look, as the workspace package `@quiz/clay` | The design tokens (light and dark), the Tailwind theme and utilities, the self-hosted font, the components (button, card, badge, input, progress, toaster) and their gallery ([README](web/packages/clay/README.md)) | Imported by the web client through its entry points only |
-| nginx (`infra/`) | The single public entry | The static client, the `/api` and `/ws` routes, WebSocket upgrade headers, `X-Forwarded-For` | Browser; both API nodes |
+| nginx (`infra/nginx/`) | The edge: the stack's single entry | The routes (`/` to the web container; `/api`, its prefix dropped, and `/ws` to both API nodes), WebSocket upgrade headers, `X-Forwarded-For`, the request limits and an access log without the query string | Browser, or Caddy on a public host; the web container; both API nodes |
+| Web container (`web/Dockerfile`, `web/nginx.conf`) | Serves the built client | The Vite build's static files, their cache headers, the CSP and the other security headers (`web/security-headers.conf`) | nginx |
+| Caddy (`infra/caddy/`, `compose.prod.yaml`) | HTTPS on a public VM only (on Fly.io, Fly's proxy terminates it and the web app runs the edge config `infra/fly/nginx.conf.template`) | The certificate for `DOMAIN` (Let's Encrypt, renewed), the redirect to HTTPS, HSTS, a fresh `X-Forwarded-For` and a log without the admin token, the host token or the ticket | Browser; nginx |
 | API node (`quiz/main.py`) | One FastAPI process; two run side by side | `create_app()`: settings, the chosen adapters, start and stop hooks | nginx; Redis |
 | Domain (`quiz/domain/`) | The quiz rules with no I/O | Scoring, standings order and ranks, the player's session states, domain errors | Nothing |
 | Contracts (`quiz/contracts/`) | The wire protocol, defined once | Pydantic models of every message and the codec; the source of the generated JSON Schema and TypeScript types | Used by the use cases, the gateway and the client (generated types) |
@@ -189,6 +246,32 @@ composition root alone wires them is a convention, not a check.
 | Mock question bank (`quiz/adapters/mock_questions/`) | Stands in for a content service | Seed quizzes in `data/*.json`, validated at start | Local files |
 | Observability (`quiz/obs/`) | Logs and metrics | JSON logs (structlog) and Prometheus counters and histograms | `/metrics` |
 | Redis | Primary database and backplane | All quiz keys `quiz:{<quizId>}:*`, the scripts' atomicity, the clock, the events and control channels | All API nodes |
+
+### Maintainability
+
+What keeps the code easy to change, and the check behind each point (the wiring that the
+paragraph above calls a convention is the one exception):
+
+- **Layers.** The domain, ports, use cases and adapters follow the import rules above, and the
+  import-linter contracts in `api/pyproject.toml` fail `make check` when an import crosses them.
+- **One protocol source.** The wire messages are Pydantic models in `quiz/contracts/`;
+  `scripts/gen_contracts.py` generates the JSON Schema (`contracts/schema/protocol.json`) and the
+  client's TypeScript types (`web/src/protocol/types.generated.ts`) from them, and its `--check`
+  step in `make check` fails when a generated file drifts from the models (§6, ADR-009).
+- **Specs and decisions.** The rules live in [docs/spec/](docs/spec/) (domain, protocol, Redis,
+  UI) and the reasoning in the ADRs (§16). `scripts/check_citations.py` fails `make check` when a
+  document cites a test that does not exist, and `scripts/tests/test_design_components.py` when
+  §4 misses a Lua script or an HTTP endpoint that the specs define.
+- **A test pyramid with floors.** Unit, property (Hypothesis) and contract tests (one suite run
+  on the memory and the Redis store) under the integration, acceptance, system and browser
+  layers ([CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests)). CI fails below 95% combined Python
+  coverage or 90% of a PR's changed lines; `make check` keeps a unit floor of 84% and Vitest
+  thresholds of its own.
+- **Gates and boundaries.** `make check` runs before every push and CI runs it again, with the
+  Redis, stack, container and security workflows
+  ([CONTRIBUTING.md](CONTRIBUTING.md#continuous-integration)). The design system is the
+  workspace package `@quiz/clay` (ADR-013), and an ESLint rule lets the client import it only
+  through its entry points.
 
 <!-- AI-ASSISTED-END -->
 
@@ -315,8 +398,9 @@ no frame arrived, which finds a lost last frame.
 **Hosting a quiz.** Any visitor can start a quiz without the admin token (`PUBLIC_HOSTING`,
 on by default).
 
-1. The host page lists the bank quizzes (`GET /api/banks`) and posts `POST /api/quizzes
-   {bankQuizId}`. `adapters/http/hosting.py` checks the `Origin` (403 from another site), the
+1. The host page (`/host`, [ui.md §3.8](docs/spec/ui.md#38-host-a-quiz)) lists the bank
+   quizzes (`GET /api/banks`) and posts `POST /api/quizzes {bankQuizId}`; any HTTP client may
+   do the same. `adapters/http/hosting.py` checks the `Origin` (403 from another site), the
    client address's creation limit (429 `RATE_LIMITED`), then draws a run ID such as
    `VOCAB-42-7K3Q`.
 2. `hold_hosted.lua` counts the run in `quiz:hosted`, one sorted set for every node, unless
@@ -333,7 +417,7 @@ on by default).
 1. At the deadline there is no timer: once `TIME` passes it, `publish_leaderboard.lua` returns
    `ended`, and the first write refused at the deadline (a join, a serve or an answer gets
    `QUIZ_ENDED`) also leads the use case to call `end_quiz.lua` with the reason `deadline`.
-2. The mock host end (`POST /admin/quizzes/{quizId}/end`, or the host token's
+2. The host end (the mock admin's `POST /admin/quizzes/{quizId}/end`, or the host token's
    `POST /quizzes/{quizId}/end`) runs `RedisStore.end_by_host`: an end
    mark, `WAITAOF 1 0 2000` until the mark is on disk (else 503 `UNAVAILABLE`, retry), then
    `end_quiz.lua` with the reason `host`.
@@ -361,8 +445,9 @@ column points to the full reasoning in [docs/DECISIONS.md](docs/DECISIONS.md).
 | State and scoring | Redis 8: one sorted set per quiz and one Lua script per multi-step write, every time read from Redis `TIME`; AOF `everysec` | `WATCH`/`MULTI` transactions; PostgreSQL with row locks | Every check and its write run in one atomic script on one clock, so a (player, question) scores at most once on any node; ranks read with `ZRANGE` in O(log N + M) | A Redis crash can lose about 1 s of answers (§11); scripts block Redis while they run, so each stays small; one quiz is bounded by one shard | 005, 008 |
 | Cross-node fan-out | Redis pub/sub on `quiz:{<quizId>}:events`, a per-quiz `seq` and resync | Redis Streams; a broker (NATS, Kafka) | The tick script increments `seq` and publishes in one atomic step on the Redis we already run; frames are full standings, so a lost one is healed by one snapshot | Delivery is at most once: a missed frame costs the client a snapshot; no history survives a node restart | 004, 006, 007 |
 | Client | Vue 3, Vite and TypeScript; Pinia; Vue Router; Tailwind CSS 4 with shadcn-vue on reka-ui | React with Next.js; Svelte | A small single-page app with no server rendering; single-file components, a Pinia store and the protocol client test with Vitest in happy-dom; the generated message types keep client and server in step | The protocol client (backoff, `seq`, resync) is our code; shadcn-vue components are copied into the Clay design-system package (`web/packages/clay/`), so we maintain them | 009, 012 |
-| Edge | nginx: the static client, the `/api` and `/ws` routes to both API nodes | Traefik or HAProxy; uvicorn exposed directly | One origin for the page, the API and the socket, so the origin check stays strict; WebSocket upgrade headers and `X-Forwarded-For` for the per-IP cap; a plain, well-known config | Hand-written config whose read timeouts must exceed the 25 s heartbeat; one nginx is a single point of failure in this stack | 003 |
+| Edge | nginx: `/` to the web container (the static client), the `/api` and `/ws` routes to both API nodes | Traefik or HAProxy; uvicorn exposed directly | One origin for the page, the API and the socket, so the origin check stays strict; WebSocket upgrade headers and `X-Forwarded-For` for the per-IP cap; a plain, well-known config | Hand-written config whose read timeouts must exceed the 25 s heartbeat; one nginx is a single point of failure in this stack | 003 |
 | Metrics and logs | The Prometheus client (`prometheus-client`) serves `/metrics` on each API node; structlog writes JSON logs. No Prometheus server or Grafana container | OpenTelemetry SDK with a collector; a Prometheus and Grafana stack in Compose | One library and the text format any scraper reads; the stack stays small and the counters and histograms are there for any existing Prometheus to scrape (§13) | No stored history or dashboards in this build: you read `/metrics` directly, and the load runs report their own latency numbers | — |
+| Public edge and deploy | On a public host, Caddy in front of nginx (`compose.prod.yaml`); the API and web images built, scanned and attested by CI and published to GHCR; `scripts/deploy/install.sh` installs the stack on a VM, `scripts/deploy/droplet.sh` (`make do-deploy`) creates that VM with doctl, and `scripts/deploy/ops.sh` updates it with a rollback, backs it up and restores it; on Fly.io, `scripts/deploy/fly.sh` (`make fly-launch`, `make fly-deploy`) runs the same images as three apps behind Fly's HTTPS proxy | Terminating TLS in nginx with certbot; building on the host; Terraform for the VM | Caddy gets and renews the certificate on its own with a short config; the host pulls tested images by `IMAGE_TAG` instead of building them; one Droplet needs no state file | A second proxy hop and container on the public host; the images depend on GHCR; doctl creates one VM, with no plan or drift view; on Fly.io, Redis on a volume is ours to run | 011, 012, 014 |
 | Packaging and running | Docker Compose: Redis, two API nodes, nginx and the built client | Kubernetes (kind or minikube); processes started by hand | One command brings the whole stack up the same way on any machine with Docker; the tests start their own Redis container on a free port | One host: no autoscaling, rolling deploy or node spread; production would need an orchestrator | — |
 | Build and test tooling | uv and pnpm with committed lock files; pytest, pytest-asyncio and Hypothesis; Vitest | pip or Poetry; npm; unittest | Fast, reproducible installs from the lock files in CI and locally; property tests for the rules that must hold for every input | Two toolchains (Python and Node) to install; the lock files are regenerated, never merged by hand | — |
 
@@ -745,11 +830,28 @@ The client address comes from `X-Forwarded-For` only when the peer is a trusted 
 `TRUSTED_PROXIES`). On a public host (`compose.prod.yaml`), Caddy terminates HTTPS, sends HSTS
 and replaces any `X-Forwarded-For` a client sent; nginx trusts that header from Caddy's network
 alone, so each player keeps their own address for the caps, and its request zones stay ceilings
-for the whole stack. Caddy's error log drops the admin token and the WebSocket ticket. The mock admin API exists only with `ADMIN_MOCK=1`; without the
-`X-Admin-Token` header (compared in constant time) its paths answer 404 like unknown paths.
+for the whole stack. Caddy's error log drops the admin token, the host token and the WebSocket
+ticket. The mock admin API exists only with `ADMIN_MOCK=1`; without the `X-Admin-Token` header
+(compared in constant time) its paths answer 404 like unknown paths.
 nginx answers 404 for `/api/metrics`. The containers run as non-root users on read-only root
 filesystems with every capability dropped, and the web image sends a CSP and the other
 security headers (`web/security-headers.conf`). [SECURITY.md](SECURITY.md) lists the scans.
+
+**Self-service hosting.** Any visitor can host a quiz (`PUBLIC_HOSTING`, on by default; `0`
+removes the routes, which then answer 404). The host token is 32 random bytes (base64url),
+returned once; the store keeps only its SHA-256 with the quiz, the node compares hashes in
+constant time (`hmac.compare_digest`), and no log line carries the token: the node logs the
+path only (`adapters/http/hosting.py`), and on a public host Caddy deletes the `X-Host-Token`
+header from the requests it logs. A request whose `Origin` names a site outside
+`ALLOWED_ORIGINS` gets 403 on all three routes. A browser sends `Origin` with every `POST`, so a
+`POST` without it comes from no browser and no other site can make a visitor send it; a `GET
+/banks` without it, such as a navigation, only reads the list of question sets. Creation has two
+limits. Per client address, a token bucket on each node holds `HOSTING_PER_IP` (5) creations and
+refills them over `HOSTING_PER_IP_WINDOW_S` (600 s), one every 120 s: a burst of 5, then one per
+refill (429 with `Retry-After`), and nginx's two nodes each keep their own bucket. Across every
+node, at most `HOSTING_MAX_OPEN` (50) self-hosted quizzes are open, counted in Redis by
+`hold_hosted.lua` (503 `HOSTING_FULL`). Each self-hosted quiz is open for `HOSTING_WINDOW_MS` (30 min). The routes and
+their errors are in [protocol §8](docs/spec/protocol.md#8-authentication).
 
 **The reveal abuse.** `answer_result` reveals the correct choice at once, and a mock identity
 is free: one person with a second tab (a second identity) can answer each question there
@@ -802,8 +904,11 @@ total, with missing and timed-out samples counted as misses.
   (frames a slow socket's send queue dropped for a newer one), `resyncs_total` (resync requests
   answered with a snapshot), `tick_duration_seconds` (histogram of one tick),
   `feed_subscribe_failures_total` (by `reason`: `limit`, joins refused because every
-  subscription connection is taken; `error`, subscribe attempts that failed) and `redis_clock_step_total` (answers scored at
-  elapsed 0 after a Redis clock step back).
+  subscription connection is taken; `error`, subscribe attempts that failed),
+  `ws_errors_total{request,code}` (the `error` replies of the use cases, by request type and
+  error code), `redis_clock_step_total` (answers scored at elapsed 0 after a Redis clock step
+  back) and `log_lines_dropped_total` (log lines lost because the queue to the log writer was
+  full or the output stream was closed or broken).
 - JSON logs (`obs/logs.py`, structlog): one `http_request` line per request with the path,
   status and duration; a line when a socket closes, with its code; each line carries the
   `request_id` (a socket's connection ID) and the `quiz_id`. No API log line holds a ticket.
@@ -875,11 +980,13 @@ it.
 | Gateway and fan-out | The `/ws` endpoint, limits, heartbeat, send buffers; the tick, pub/sub relay, `seq` and resync |
 | Client | The Vue 3 app: protocol client with backoff and resync, Pinia store, screens |
 | Scale-out | Two API nodes, nginx, one Redis, a two-node integration test and load runs |
+| Self-service hosting | The host page `/host` (pick a question set, share the link, end the quiz); `GET /banks`, `POST /quizzes {bankQuizId}` (a fresh run ID and a host token, kept as its SHA-256) and the host-token end `POST /quizzes/{quizId}/end`; a creation limit per client address on each node and a cap on the open self-hosted quizzes across nodes; on unless `PUBLIC_HOSTING=0` (§12) |
 
 **Mocked.** The identity and question-bank mocks sit behind ports (`TicketStore`,
-`QuestionBank`); quiz admin is a token-gated mock admin API in the HTTP adapter, off unless
-`ADMIN_MOCK=1`. All three say `MOCK:` in their code: the adapters' module docstrings, the
-`/admin` routes and the `ADMIN_MOCK` setting in `quiz/config.py`.
+`QuestionBank`); quiz admin for the make targets is a token-gated mock admin API in the HTTP
+adapter, off unless `ADMIN_MOCK=1`, beside the self-service hosting above. The three mocks say
+`MOCK:` in their code: the adapters' module docstrings, the `/admin` routes and the
+`ADMIN_MOCK` setting in `quiz/config.py`.
 
 | Mock | What this build does | What production would use instead |
 |---|---|---|
@@ -972,10 +1079,12 @@ the draft. (4) Every fix stated in a spec section, with the test that pins it li
 tests run: `make test-integration` and the unit suites in `make check` pass on `main`; the exact
 commands and results are in each AI-LOG entry.
 
-**AI-LOG entries for the design.** `docs/ai-log/design-phase.md`; the spec PRs
-`docs/ai-log/PR-3.md`, `PR-5.md`, `PR-7.md`, `PR-9.md`; and their fix PRs `PR-16.md`,
-`PR-18.md`, `PR-26.md`, `PR-30.md`, `PR-34.md`. Every later PR has its own entry in
-`docs/ai-log/`.
+**AI-LOG entries for the design.** [design-phase.md](docs/ai-log/design-phase.md); the spec
+PRs [PR-3](docs/ai-log/PR-3.md), [PR-5](docs/ai-log/PR-5.md), [PR-7](docs/ai-log/PR-7.md) and
+[PR-9](docs/ai-log/PR-9.md); and their fix PRs [PR-16](docs/ai-log/PR-16.md),
+[PR-18](docs/ai-log/PR-18.md), [PR-26](docs/ai-log/PR-26.md), [PR-30](docs/ai-log/PR-30.md) and
+[PR-34](docs/ai-log/PR-34.md). Every later PR has its own entry in
+[docs/ai-log/](docs/ai-log/README.md).
 
 <!-- AI-ASSISTED-END -->
 

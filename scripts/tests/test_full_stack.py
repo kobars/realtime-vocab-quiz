@@ -252,13 +252,14 @@ def test_the_published_images_replace_every_image_built_here() -> None:
         assert images[name] == {"image": f"{repo}:${{IMAGE_TAG:-main}}"}
 
 
-def test_caddy_keeps_the_admin_token_and_the_socket_ticket_out_of_its_logs() -> None:
+def test_caddy_keeps_the_admin_and_host_tokens_and_the_socket_ticket_out_of_its_logs() -> None:
     """A failed upstream request is logged with its headers and URI; Caddy redacts only
     Authorization and cookies by itself."""
     caddyfile = (ROOT / "infra" / "caddy" / "Caddyfile").read_text(encoding="utf-8")
     global_options = caddyfile[caddyfile.index("\n{\n") : caddyfile.index("\n}\n")]
     assert re.search(r"^\t\tformat filter \{", global_options, re.MULTILINE)
     assert "request>headers>X-Admin-Token delete" in global_options
+    assert "request>headers>X-Host-Token delete" in global_options
     assert re.search(r"request>uri query \{\s*replace ticket REDACTED\s*\}", global_options)
 
 

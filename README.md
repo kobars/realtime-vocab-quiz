@@ -48,15 +48,20 @@ on Fly.io instead: see [Deploy to Fly.io](docs/operations.md#deploy-to-flyio).
   player's score updates the moment the answer is accepted.
 - **Live leaderboard:** every player sees the same standings, refreshed about five times a
   second while anyone is scoring, whichever node their socket is on.
+- **Host a quiz:** any visitor can start a quiz from a question set on the host page (`/host`),
+  share its `/q/<quizId>` link and end it early with the host token the tab keeps; a per-address
+  limit and a cap on open quizzes keep it bounded.
 
-The real-time server is built for real, and the Vue client is its working demo interface.
-Identity, the question bank and quiz admin are mocks ([DESIGN.md §14](DESIGN.md#14-implemented-and-mocked)).
+The real-time server and self-service hosting are built for real, and the Vue client is their
+working demo interface, for players and hosts. Identity, the question bank and the admin API behind the make
+targets are mocks ([DESIGN.md §14](DESIGN.md#14-implemented-and-mocked)).
 
 ## How it works
 
 ```mermaid
 flowchart LR
   B[Browser: Vue client] -->|HTTP + WebSocket| N[nginx]
+  N -->|/| W[web: the built client]
   N --> A1[API node 1]
   N --> A2[API node 2]
   A1 <-->|Lua scripts, pub/sub| R[(Redis)]
@@ -79,6 +84,9 @@ The host tests need Docker, Python 3.14 with uv and Node 24 with pnpm:
 - `make test-system`: the system tests through nginx against the running stack: a score on one
   node reaches a socket on the other. They need fresh stack data, not the `make demo` stack
   ([CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests) has the steps).
+- `make test-browser`: the browser specs in Chromium, with an accessibility scan, against the
+  same fresh stack, after the system tests (`web/e2e/`; install Chromium once with
+  `pnpm -C web exec playwright install chromium`).
 
 `make help` lists the rest; [CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests) explains each layer.
 

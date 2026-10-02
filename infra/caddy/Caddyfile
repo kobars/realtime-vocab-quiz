@@ -6,12 +6,14 @@
 		protocols h1 h2
 	}
 	# A failed upstream request is logged with its headers and URI. Caddy redacts Authorization
-	# and cookies itself; the admin token and the WebSocket's one-time ticket are removed here.
+	# and cookies itself; the admin token, the host token and the WebSocket's one-time ticket are
+	# removed here.
 	log {
 		format filter {
 			wrap json
 			fields {
 				request>headers>X-Admin-Token delete
+				request>headers>X-Host-Token delete
 				request>uri query {
 					replace ticket REDACTED
 				}

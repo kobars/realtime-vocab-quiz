@@ -23,7 +23,7 @@ A quiz (for example `VOCAB-42`) has N questions (default 10), each with 4 choice
 | State | Meaning | Entered when |
 |---|---|---|
 | `open` | Joins, serves and answers are accepted | the quiz is created (`startMs = TIME`) |
-| `ended` | Every write is refused with `QUIZ_ENDED`; the standings are final | `now ≥ deadlineMs`, or the mock host action "end now" announces `quiz_ended` once its end mark (`endedMs = TIME`) is durable. Between the mark and the announcement, writes are refused with `UNAVAILABLE` and reads still say `open` (`docs/spec/redis.md` §3.1) |
+| `ended` | Every write is refused with `QUIZ_ENDED`; the standings are final | `now ≥ deadlineMs`, or a host "end now" (with the host token, or through the mock admin API) announces `quiz_ended` once its end mark (`endedMs = TIME`) is durable. Between the mark and the announcement, writes are refused with `UNAVAILABLE` and reads still say `open` (`docs/spec/redis.md` §3.1) |
 
 `ended` is final; there is no way back to `open`. The quiz is `ended` as soon as the deadline passes, even before any request notices it: the state is computed from the clock, not stored by a timer. "End now" is idempotent: a second call changes nothing. Whichever comes first (the host action, a write that is refused, or the leaderboard tick) runs the end script, which broadcasts `quiz_ended` with the final standings exactly once; `docs/spec/redis.md` defines the mechanism. How soon `quiz_ended` arrives may depend on that tick; what the final standings are never does.
 
@@ -146,7 +146,7 @@ The first join of a user registers the player with total 0 and `reachedRelMs` = 
 |---|---|---|
 | What does `next` do before the player answers? | It skips: the question scores 0 and is closed for that player | One request, one meaning; no "unanswered" question stays open behind the player |
 | Question order | The same order for every player (and the same choice order) | Fair comparison of totals; simplest to test |
-| How long is a quiz open? | A window from creation: default 10 min, at most 60 min, set per quiz; plus a mock host "end now" | Gives the quiz a clear end without a host; fits the sorted-set time field |
+| How long is a quiz open? | A window from creation: default 10 min, at most 60 min, set per quiz (30 min for a self-hosted quiz); plus a host "end now" (with the host token, or through the mock admin API) | Gives the quiz a clear end without a host; fits the sorted-set time field |
 | Late joiners | They may join and play while the quiz is `open`, with the full `T` per question; questions they cannot reach before the deadline score nothing. After the end, a join gets the final standings and `QUIZ_ENDED` | No one is turned away from a live quiz; the end is the same for everyone |
 | When is the correct choice revealed? | Right after the player's own answer, in that player's `answer_result` only; never broadcast, never in a served question, not on a skip | Feedback per answer without telling players who have not answered |
 
