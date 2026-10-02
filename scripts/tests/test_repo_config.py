@@ -500,3 +500,30 @@ def test_every_make_target_is_phony_and_none_is_a_placeholder() -> None:
     phony, targets = _phony_and_targets(makefile)
     assert phony == targets
     assert "not yet" not in makefile
+
+
+SCHEDULED = sorted(
+    path.name
+    for path in WORKFLOWS.glob("*.yml")
+    if any(line.strip() == "schedule:" for line in _section(path, "on", 0))
+)
+
+
+def test_the_scheduled_workflows_are_found() -> None:
+    assert {"ci.yml", "codeql.yml", "links.yml", "scorecard.yml", "stack.yml"} <= set(SCHEDULED)
+
+
+@pytest.mark.parametrize("workflow", SCHEDULED)
+def test_a_failed_scheduled_run_of_each_workflow_is_reported_in_an_issue(workflow: str) -> None:
+    path = WORKFLOWS / workflow
+    assert "scheduled-failure" in _job_ids(path)
+    job = _section(path, "scheduled-failure", 2)
+    assert "if: failure() && github.event_name == 'schedule'" in job
+    assert "uses: ./.github/workflows/scheduled-failure.yml" in job
+    # The called workflow's job needs issues: write, so the calling job grants that and no more.
+    assert [line for line in job if line.endswith(": write")] == ["issues: write"]
+    (needs,) = [line for line in job if line.startswith("needs: [")]
+    needed = needs.removeprefix("needs: [").removesuffix("]").split(", ")
+    others = [j for j in _job_ids(path) if j != "scheduled-failure"]
+    assert needed
+    assert set(needed) <= set(others), needed

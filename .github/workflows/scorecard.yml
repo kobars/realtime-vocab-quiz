@@ -1,7 +1,9 @@
 # AI-ASSISTED: OpenSSF Scorecard: supply-chain checks of the repository, published and sent to code scanning.
 name: scorecard
 
-# Publishing the results limits this workflow to the steps and keys that Scorecard verifies.
+# Publishing the results limits this workflow to the steps and keys that Scorecard verifies:
+# no top-level env, defaults or write permission; only the analysis job may write id-token, and
+# that job may use only the actions Scorecard lists. Other jobs, like scheduled-failure, may run.
 on:
   push:
     branches: [main]
@@ -34,3 +36,10 @@ jobs:
       - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: results.sarif
+
+  scheduled-failure:
+    if: failure() && github.event_name == 'schedule'
+    needs: [analysis]
+    permissions:
+      issues: write
+    uses: ./.github/workflows/scheduled-failure.yml
