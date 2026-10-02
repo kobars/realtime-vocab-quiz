@@ -3,44 +3,26 @@ import asyncio
 import contextlib
 import itertools
 import json
-import threading
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import httpx
 import pytest
-import uvicorn
-from pydantic import SecretStr
 
 import bots
 from bots import BOARD_HEAD, converse, create_quizzes, main, parse, play, swarm
 from latency import summary
 from player import DEAD_LINK, NORMAL, OVERLOAD, Backoff, BoardWait, Player, Recorder
-from quiz.config import Settings
 from quiz.contracts.codec import encode_broadcast
 from quiz.contracts.messages import Entry, Leaderboard
-from quiz.main import create_app
+
+pytest_plugins = ["app_server"]  # the app_url fixture
 
 OPTS = parse(["--timeout-ms", "200"])
 TOKENS = httpx.MockTransport(
     lambda _: httpx.Response(201, json={"sessionToken": "s", "ticket": "t"})
 )
-
-
-@pytest.fixture
-def app_url() -> Iterator[str]:
-    token = SecretStr("load-token")
-    app = create_app(Settings(admin_mock=True, admin_token=token, allowed_origins=(OPTS.origin,)))
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
-    thread = threading.Thread(target=server.run)
-    thread.start()
-    while not server.started:
-        assert thread.is_alive()
-        time.sleep(0.01)
-    yield f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}"
-    server.should_exit = True
-    thread.join()
 
 
 @pytest.fixture
