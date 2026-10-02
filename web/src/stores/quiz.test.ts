@@ -403,3 +403,46 @@ it('quiz_ended with you: null sends no resync before a joined', async () => {
   await wait(10_000)
   expect([store.phase, store.myRank, resyncs(socket)]).toEqual(['results', null, []])
 })
+
+/** Plays question 0 and gets `answer_result` with a total of 150 at `atSeq` 4. */
+async function answered() {
+  const { store, socket } = await playing()
+  socket.receive(question(0))
+  store.answer(1)
+  socket.receive(result(0, 's-1', 150))
+  return { store, socket }
+}
+const myRow = (store: ReturnType<typeof useQuizStore>) => store.entries.find((row) => row.userId === me.userId)
+
+it('a leaderboard frame at or before my last answer never lowers my score, in the header or my row', async () => {
+  const { store, socket } = await answered()
+  socket.receive(board(4, 50))
+  expect([store.seq, store.myRank, store.myScore, myRow(store)?.score]).toEqual([4, 1, 150, 150])
+  socket.receive(board(5, 150))
+  expect([store.seq, store.myScore, myRow(store)?.score]).toEqual([5, 150, 150])
+})
+
+it('a rank_update at or before my last answer never lowers my score; a later one sets it', async () => {
+  const { store, socket } = await answered()
+  socket.receive({ type: 'rank_update', atSeq: 4, rank: 220, score: 50, playerCount: 300 })
+  expect([store.myRank, store.myScore]).toEqual([220, 150])
+  socket.receive({ type: 'rank_update', atSeq: 3, rank: 230, score: 0, playerCount: 300 })
+  expect([store.myRank, store.myScore]).toEqual([230, 150])
+  socket.receive({ type: 'rank_update', atSeq: 5, rank: 90, score: 150, playerCount: 300 })
+  expect([store.myRank, store.myScore]).toEqual([90, 150])
+})
+
+it('a snapshot with a lower score still lowers my score, so the standings recover after a store restart', async () => {
+  const { store, socket } = await answered()
+  socket.receive({ ...snapshot(2), entries: [rival, me], you: { rank: 2, score: 0 } })
+  expect([store.seq, store.myScore, myRow(store)?.score]).toEqual([2, 0, 0])
+  socket.receive({ ...board(3, 40), entries: [rival, { ...me, score: 40 }] })
+  expect([store.seq, store.myScore, myRow(store)?.score]).toEqual([3, 40, 40])
+})
+
+it('a snapshot whose rows are older than its you shows the score of you in the header and in my row', async () => {
+  const { store, socket } = await joinQuiz()
+  socket.receive(joined())
+  socket.receive({ ...snapshot(3), entries: [rival, { ...me, score: 50 }], you: { rank: 2, score: 150 } })
+  expect([store.myScore, myRow(store)?.score, store.entries[0]]).toEqual([150, 150, rival])
+})

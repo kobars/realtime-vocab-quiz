@@ -70,6 +70,8 @@ const initial = () => ({
   onlineCount: 0,
   myRank: null as number | null,
   myScore: 0,
+  /** The `atSeq` of the last `answer_result`: standings at or before it were built before that answer was scored. */
+  answeredAtSeq: -1,
   /** Counts the standings applied as a full replacement (`snapshot`, `rebase: true`), which swap in one step (UI spec §5.1). */
   replacements: 0,
   /** The last page of "Show all players". */
@@ -156,7 +158,7 @@ export const useQuizStore = defineStore('quiz', () => {
         if (s.pending?.submissionId === message.submissionId) s.pending = null
         // A reply read before the end never changes the final standings either (protocol §3).
         if (s.ended) return
-        Object.assign(s, { lastResult: message, myScore: message.score, phase: 'feedback' })
+        Object.assign(s, { lastResult: message, myScore: message.score, answeredAtSeq: message.atSeq, phase: 'feedback' })
         setCursor(message.questionIndex, false)
         return
       case 'finished':
@@ -167,7 +169,7 @@ export const useQuizStore = defineStore('quiz', () => {
         standings(message.seq, message.entries, message.playerCount, message.onlineCount, undefined, message.rebase)
         return
       case 'rank_update':
-        if (!s.ended) Object.assign(s, { myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
+        if (!s.ended) Object.assign(s, { myRank: message.rank, myScore: ownScore(message.atSeq, message.score), playerCount: message.playerCount })
         return
       case 'snapshot':
         // A snapshot read before the end never undoes it (protocol §3).
@@ -239,14 +241,25 @@ export const useQuizStore = defineStore('quiz', () => {
     s.connection = 'idle'
   }
 
-  /** Applies the standings; returns whether they gave my rank and score, from `you` or my row in `rows`. */
+  /**
+   * Applies the standings; returns whether they gave my rank and score, from `you` or my row in `rows`. `you` is read
+   * when the message is built, so it can be newer than the rows; my row then shows its score, like the header.
+   */
   function standings(seq: number, rows: Entry[], players: number, online: number, you?: You | null, replace = false): boolean {
-    Object.assign(s, { seq, entries: rows, playerCount: players, onlineCount: online })
+    const row = rows.find((entry) => entry.userId === s.quiz?.userId)
+    const mine = you ?? row
+    if (mine) Object.assign(s, { myRank: mine.rank, myScore: you ? mine.score : ownScore(seq, mine.score) })
+    const entries = row && row.score !== s.myScore ? rows.map((entry) => (entry === row ? { ...row, score: s.myScore } : entry)) : rows
+    Object.assign(s, { seq, entries, playerCount: players, onlineCount: online })
     if (replace) s.replacements += 1
-    const mine = you ?? rows.find((row) => row.userId === s.quiz?.userId)
-    if (mine) Object.assign(s, { myRank: mine.rank, myScore: mine.score })
     return mine !== undefined
   }
+
+  /**
+   * My score from standings at `seq`: those at or before my last answer's `atSeq` were built before it was scored, so
+   * they never lower the score it gave (protocol §3). `you` and `joined` are read fresh and set it directly.
+   */
+  const ownScore = (seq: number, score: number): number => (seq <= s.answeredAtSeq ? Math.max(score, s.myScore) : score)
 
   const setCursor = (cursor: number, open: boolean): void => void (s.quiz && Object.assign(s.quiz, { cursor, cursorOpen: open }))
   /**
