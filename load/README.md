@@ -116,6 +116,13 @@ described above. Every run: a 30 s ramp, then 180 s of answering (`--duration 18
 `--think-ms 5000` (one answer per player about every 5 s, the pace the capacity estimate
 assumes), `--accuracy 0.7`.
 
+Later commits on `main` postdate these runs but leave the answer → leaderboard path alone: since
+`145284ba` no commit has changed the serve, score, tick, join or read scripts, the fan-out
+(`api/src/quiz/fanout/`), the WebSocket adapter (`api/src/quiz/adapters/ws/`), the nginx config
+or the swarm. The changes beside that path are the display-name rule on `join`, a split of the
+parser's protocol-version check (a valid message passes the same checks) and the self-service
+hosting routes and scripts. `git log 145284ba..main -- <path>` lists them.
+
 | Run | Quizzes | Connections | Msg/s to / from bots (ramp included) | Leaderboard p50 / p95 / p99 ms | Answer p50 / p95 / p99 ms | Missing samples | Leaderboard completion | Below 500 ms (`slo_met`) | API node CPU % mean (peak) | Swarm CPU % per process (procs) | API node RSS MB idle → peak | Swarm RSS MB per process |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | One hot quiz, 1 node | 1 | 1,000 | 5,942 / 455 | 116.5 / 195.9 / 205.4 | 0.6 / 20.1 / 41.7 | 0 | 1 | 100.00% (true) | 31.2 (49.7) | 11.0 (4) | 57 → 121 | 69 |
