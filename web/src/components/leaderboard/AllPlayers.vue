@@ -32,6 +32,15 @@ function load(at: number): void {
   store.loadPage(at)
 }
 
+/** Pages to `at`. A pager button that this disables loses the focus, so the panel takes it and Escape still works. */
+function go(at: number): void {
+  load(at)
+  void nextTick(() => {
+    const focused = document.activeElement
+    if (panel.value?.contains(focused) !== true || focused?.matches(':disabled') === true) panel.value?.focus()
+  })
+}
+
 function show(): void {
   open.value = true
   load(0)
@@ -93,14 +102,14 @@ onBeforeUnmount(cancel)
       <Button
         variant="secondary"
         :disabled="offset === 0"
-        @click="load(Math.max(0, offset - PAGE_SIZE))"
+        @click="go(Math.max(0, offset - PAGE_SIZE))"
       >
         {{ strings.leaderboard.previous }}
       </Button>
       <Button
         variant="secondary"
         :disabled="offset + PAGE_SIZE >= store.playerCount"
-        @click="load(offset + PAGE_SIZE)"
+        @click="go(offset + PAGE_SIZE)"
       >
         {{ strings.leaderboard.next }}
       </Button>

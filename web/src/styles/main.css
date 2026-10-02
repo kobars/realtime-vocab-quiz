@@ -48,5 +48,7 @@
 
 @layer base {
   * { @apply border-border outline-ring/50; }
+  /* The browser's own focus outline is thin and translucent here; elements with ring classes set outline-none. */
+  :focus-visible { @apply outline-2 outline-solid outline-offset-2 outline-ring; }
   body { @apply bg-background text-foreground font-sans antialiased; }
 }
