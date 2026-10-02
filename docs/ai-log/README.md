@@ -27,7 +27,8 @@ ran, when, and where its findings went.
 
 Most entries also give the date, the phase (design, implementation or testing) and the commit.
 Every commit carries the trailer `AI-Assisted: Claude Code (<model>)`, and every source file
-the AI wrote or changed carries an `AI-ASSISTED:` marker.
+the AI wrote or changed carries an `AI-ASSISTED:` marker. Dependabot's commits are the
+exception: a bot writes them, so they carry no trailer, and a PR made only of them has no entry.
 
 **Where to start**, one or two entries per area:
 
