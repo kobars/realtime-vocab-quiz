@@ -1,11 +1,11 @@
 // AI-ASSISTED: tests for the host screen: the bank list, every create outcome, the host panel (link, QR code, polled player count, copy), the end with its confirm step, and the refresh that keeps the controls.
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { stackedFocusClasses } from '@quiz/clay/testing'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory } from 'vue-router'
 import App from '@/App.vue'
 import { HOST_KEY, POLL_MS } from '@/components/host/hosting'
-import { stackedFocusClasses } from '@/components/ui/focus.testing'
 import { createAppRouter } from '@/router'
 import { strings } from '@/strings'
 

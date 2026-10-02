@@ -13,9 +13,7 @@ import {
   readHostedQuiz,
   saveHostedQuiz,
 } from '@/components/host/hosting'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Badge, Button, Card } from '@quiz/clay'
 import { strings } from '@/strings'
 
 const hosted = ref<HostedQuiz | null>(readHostedQuiz())

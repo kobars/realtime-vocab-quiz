@@ -6,10 +6,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, wa
 import QrCode from '@/components/host/QrCode.vue'
 import { endQuiz, type HostedQuiz, POLL_MS } from '@/components/host/hosting'
 import { fetchQuizPreview } from '@/components/join/preview'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
+import { Badge, Button, Card, Input } from '@quiz/clay'
 import { strings } from '@/strings'
 
 /** How long "Link copied" stays. */
