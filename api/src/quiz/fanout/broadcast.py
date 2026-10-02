@@ -12,7 +12,7 @@ from typing import Any, Protocol
 
 from quiz.contracts import messages as m
 from quiz.contracts.codec import encode
-from quiz.ports.store import Limits, Ranks, Row, Store
+from quiz.ports.store import Limits, Place, Ranks, Store
 
 _HEAD, _TAIL = '{"frame":', ',"ranks":'  # user ids hold no quotes: the last _TAIL ends the frame
 
@@ -88,7 +88,7 @@ class Relay:
 
     async def _ended(self, frame: dict[str, Any], data: bytes) -> None:
         users = list(self._sockets.players(self._quiz_id))
-        rows: Mapping[str, Row | None] = {}
+        rows: Mapping[str, Place | None] = {}
         with suppress(ConnectionError, TimeoutError):  # the end still goes out, with you: null
             rows = (await self._store.ranks_of(self._quiz_id, users)).rows
         for user_id in users:

@@ -141,7 +141,7 @@ class RedisStore:
 
     async def _read(
         self, quiz_id: str, offset: int, limit: int, user_ids: Sequence[str] = ()
-    ) -> tuple[port.Snapshot, dict[str, port.Row | None]]:
+    ) -> tuple[port.Snapshot, dict[str, port.Place | None]]:
         """The standings at one seq and each asked user's row.
 
         ``limit`` 0 reads the broadcast rows, ``RANKS_ONLY`` no rows.
@@ -150,12 +150,12 @@ class RedisStore:
         reply = await self._run("read_standings", quiz_id, offset, limit, top_n, full, *user_ids)
         seq, count, online, status = reply[1:5]
         rows = cast("list[list[str]]", reply[5])
-        asked = cast("list[list[str] | None]", reply[6])
+        asked = cast("list[list[int] | None]", reply[6])
         table = tuple(port.Row(int(rank), uid, name, int(total)) for rank, uid, name, total in rows)
         state = cast("Literal['open', 'ended']", status)
         snap = port.Snapshot(int(seq or 0), state, int(count or 0), int(online or 0), table, None)
         return snap, {
-            uid: None if hit is None else port.Row(int(hit[0]), uid, hit[1], int(hit[2]))
+            uid: None if hit is None else port.Place(int(hit[0]), int(hit[1]))
             for uid, hit in zip(user_ids, asked, strict=True)
         }
 

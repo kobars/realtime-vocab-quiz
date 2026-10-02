@@ -15,7 +15,7 @@ from quiz.domain.errors import DomainError, ErrorCode
 from quiz.fanout import tick
 from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
-from quiz.ports.store import FeedStore, Limits, Publish, Ranks, Row, Store
+from quiz.ports.store import FeedStore, Limits, Place, Publish, Ranks, Store
 
 SEQ = 3  # the quiz's seq when the loop subscribes
 
@@ -43,7 +43,7 @@ class ScriptedStore:
     async def ranks_of(self, _quiz_id: str, _user_ids: Sequence[str]) -> Ranks:
         if self.ranks_error is not None:
             raise self.ranks_error
-        return Ranks(SEQ, "ended", 1, {"u": Row(1, "u", "U", 100)})
+        return Ranks(SEQ, "ended", 1, {"u": Place(1, 100)})
 
     @asynccontextmanager
     async def subscribe(self, _quiz_id: str) -> AsyncIterator[AsyncIterator[str]]:

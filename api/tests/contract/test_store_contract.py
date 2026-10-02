@@ -11,7 +11,7 @@ from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.session import Question
 from quiz.domain.standings import REACHED_BITS
-from quiz.ports.store import End, Finished, Publish, Renewed, Row, Served, Store
+from quiz.ports.store import End, Finished, Place, Publish, Renewed, Served, Store
 
 type Advance = Callable[[int], Awaitable[None]]
 type QuizStep = Callable[[str], Awaitable[None]]
@@ -78,7 +78,7 @@ async def test_join_is_idempotent(store: Store, quiz_id: str) -> None:
         (0, True, 0, len(QUESTIONS), None)
     )
     await store.join(quiz_id, "b", "B", "c-b")
-    assert (await store.ranks_of(quiz_id, ["b"])).rows["b"] == Row(2, "b", "B", 0)  # a counts once
+    assert (await store.ranks_of(quiz_id, ["b"])).rows["b"] == Place(2, 0)  # a counts once
 
 
 async def test_new_connection_replaces_and_fences_the_old(store: Store, quiz_id: str) -> None:
@@ -104,7 +104,7 @@ async def test_correct_answer_scores_once_into_the_standings(store: Store, quiz_
     r = (await store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-a")).result
     assert (r.correct, r.late, r.total, r.correct_choice) == (True, False, r.points, 0)
     assert 100 <= r.points <= 150
-    assert (await store.ranks_of(quiz_id, ["a"])).rows == {"a": Row(1, "a", "A", r.total)}
+    assert (await store.ranks_of(quiz_id, ["a"])).rows == {"a": Place(1, r.total)}
 
 
 async def test_wrong_and_late_score_zero(store: Store, advance: Advance, quiz_id: str) -> None:
@@ -122,7 +122,7 @@ async def test_replay_returns_same_result(store: Store, advance: Advance, quiz_i
     await advance(50)
     again = await store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-a")
     assert again.result == first.result
-    assert (await store.ranks_of(quiz_id, ["a"])).rows["a"] == Row(1, "a", "A", first.result.total)
+    assert (await store.ranks_of(quiz_id, ["a"])).rows["a"] == Place(1, first.result.total)
 
 
 async def test_submission_reused_for_other_question(store: Store, quiz_id: str) -> None:
@@ -143,7 +143,7 @@ async def test_closed_question_is_already_answered(store: Store, quiz_id: str) -
     await store.serve_next(quiz_id, "a", 2, "c-a")  # skips question 1
     skipped = store.apply_answer(quiz_id, "a", 1, 1, "s3", "c-a")
     assert await refused(skipped) == ErrorCode.ALREADY_ANSWERED
-    assert (await store.ranks_of(quiz_id, ["a"])).rows["a"] == Row(1, "a", "A", points)
+    assert (await store.ranks_of(quiz_id, ["a"])).rows["a"] == Place(1, points)
 
 
 async def test_serve_retry_order_and_finish(store: Store, quiz_id: str) -> None:
@@ -214,7 +214,7 @@ async def test_ranks_of_reads_many_users_at_one_seq(store: Store, quiz_id: str) 
     points = await answer(store, quiz_id, "b", 0, 0, "s1")
     ranks = await store.ranks_of(quiz_id, ["a", "b", "nobody"])
     assert (ranks.at_seq, ranks.status, ranks.player_count) == (0, "open", 2)  # no broadcast yet
-    assert ranks.rows == {"a": Row(2, "a", "A", 0), "b": Row(1, "b", "B", points), "nobody": None}
+    assert ranks.rows == {"a": Place(2, 0), "b": Place(1, points), "nobody": None}
 
 
 async def test_leave_compares_the_connection(store: Store, quiz_id: str) -> None:
@@ -292,7 +292,7 @@ async def test_snapshot_carries_the_top_n_only_above_full_list_max(
     snap = await store.snapshot(quiz_id, users[-1])
     assert (snap.player_count, snap.online_count, len(snap.rows)) == (players, players, shown)
     assert [row.rank for row in snap.rows] == list(range(1, shown + 1))
-    assert snap.you == Row(players, users[-1], "U", 0)
+    assert snap.you == Place(players, 0)
 
 
 async def test_dirty_gates_publish_and_tick_holds(

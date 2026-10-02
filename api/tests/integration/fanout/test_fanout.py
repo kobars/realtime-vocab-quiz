@@ -20,7 +20,7 @@ from quiz.app.service import Connection, QuizService
 from quiz.domain.session import Question
 from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
-from quiz.ports.store import FeedStore, Limits, Publish, Ranks, Row, Store
+from quiz.ports.store import FeedStore, Limits, Place, Publish, Ranks, Store
 
 QUESTIONS = (Question("q0", 1), Question("q1", 3), Question("q2", 0))
 
@@ -237,7 +237,7 @@ class Reads:
 
     async def ranks_of(self, _quiz_id: str, _user_ids: list[str]) -> Ranks:
         await self.during()
-        return Ranks(1, "open", 300, {"u": Row(120, "u", "U", 0)})
+        return Ranks(1, "open", 300, {"u": Place(120, 0)})
 
 
 def leaderboard(seq: int, *ranks: tuple[str, int, int]) -> str:

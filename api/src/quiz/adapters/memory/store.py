@@ -192,7 +192,7 @@ class MemoryStore:
     async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> port.Ranks:
         quiz = self._quiz(quiz_id)
         async with quiz.lock:
-            rows = {row.user_id: row for row in quiz.rows()}
+            rows = {row.user_id: row.place() for row in quiz.rows()}
             asked = {user_id: rows.get(user_id) for user_id in user_ids}
             return port.Ranks(quiz.state.seq, self._status(quiz), len(rows), asked)
 
@@ -209,7 +209,7 @@ class MemoryStore:
         quiz = self._quiz(quiz_id)
         async with quiz.lock:
             rows = quiz.rows()
-            you = next((row for row in rows if row.user_id == user_id), None)
+            you = next((row.place() for row in rows if row.user_id == user_id), None)
             status = self._status(quiz)
             shown = self._shown(rows)
             online = len(quiz.present)
