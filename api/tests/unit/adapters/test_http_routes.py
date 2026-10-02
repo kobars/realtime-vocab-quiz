@@ -180,6 +180,8 @@ async def test_a_quiz_body_takes_no_coerced_integer(
 
 @pytest.mark.parametrize("value", [123, True, None, ["Ana"]])
 async def test_a_session_body_takes_no_coerced_name(http: httpx.AsyncClient, value: object) -> None:
+    # Lax mode refuses these for a str field too (no JSON value tells the modes apart there):
+    # this pins the 422 shape and the field name, not the strict flag.
     resp = await http.post("/sessions", json={"displayName": value})
     assert (resp.status_code, resp.json()["error"]) == (422, "INVALID_MESSAGE")
     assert resp.json()["message"].startswith("displayName: ")
