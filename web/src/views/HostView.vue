@@ -139,7 +139,7 @@ function hostAnother(): void {
           variant="outline"
         >
           <RouterLink :to="ended.sharePath">
-            {{ strings.host.results }}
+            {{ strings.host.openLink }}
           </RouterLink>
         </Button>
       </div>

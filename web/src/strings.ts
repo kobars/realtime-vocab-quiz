@@ -65,7 +65,7 @@ export const strings = {
     forbidden: 'This tab can no longer end the quiz.',
     ended: (quizId: string) => `Quiz ${quizId} has ended`,
     endedBody: 'Players can still open the link to see the final results.',
-    results: 'See the results',
+    openLink: 'Open the player link',
     again: 'Host another quiz',
   },
   quiz: {
