@@ -42,6 +42,6 @@ DEMO_QUIZ_ID="$quiz_id" DEMO_BOTS="$bots" docker compose --progress quiet up -d 
 
 echo
 echo "$seeded"
-echo "Bots:       $bots playing $quiz_id until its window ends (make demo-stop stops them)."
+echo "Bots:       $bots each playing $quiz_id once (make demo-stop stops them)."
 echo "Open the player URL in two browser windows, join, and watch the leaderboard move."
 echo "End it with the command above: both windows then show the final podium."

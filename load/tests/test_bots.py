@@ -76,7 +76,7 @@ def test_the_cli_checks_its_options() -> None:
     assert opts.ws_url == "wss://quiz.example/ws"
     for bad in ("--quizzes 4", "--bots 0", "--procs 11", "--accuracy 1.5", "--duration -1",
                 "--duration 0", "--ramp nan", "--duration inf", "--think-ms -3", "--timeout-ms 499",
-                "--label baseline/2proc"):  # fmt: skip
+                "--label baseline/2proc", "--cohorts -1"):  # fmt: skip
         with pytest.raises(SystemExit):
             parse(bad.split())
 
@@ -216,6 +216,20 @@ async def test_a_swarm_plays_whole_quizzes_against_the_app(app_url: str) -> None
     assert rec.board_ms  # frames reached the bots: the leaderboard path ran
     for failure in ("answer_timeout", "answer_missing", "failed_opens", "reconnects"):
         assert rec.counts[failure] == 0
+
+
+@pytest.mark.usefixtures("exported_port")
+async def test_a_cohort_limit_stops_each_slot_after_its_players(app_url: str) -> None:
+    flags = "--bots 3 --cohorts 1 --think-ms 0 --duration 30 --ramp 0 --timeout-ms 500"
+    opts = parse([*flags.split(), "--url", app_url])
+    async with httpx.AsyncClient(base_url=app_url) as http:
+        admin = {"X-Admin-Token": "load-token"}
+        (await http.post("/admin/quizzes", json={"quizId": "VOCAB-42"}, headers=admin)).raise_for_status()
+        t0 = time.monotonic()
+        rec, _ = await swarm(opts)
+        quiz = (await http.get("/quizzes/VOCAB-42")).raise_for_status().json()
+    assert time.monotonic() - t0 < 20  # the slots stop once their one player has finished
+    assert (rec.counts["cohorts"], rec.counts["answers"], quiz["players"]) == (3, 30, 3)
 
 
 async def test_a_quiz_end_before_the_deadline_ends_the_cpu_window(

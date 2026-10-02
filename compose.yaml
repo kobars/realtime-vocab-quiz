@@ -127,8 +127,9 @@ services:
       QUIZ_PORT: ${QUIZ_PORT:-8080}
     command: ["python", "/opt/seed.py"]
 
-  # make demo: the bot swarm plays DEMO_QUIZ_ID with DEMO_BOTS bots until its window ends; make
-  # demo-stop removes it. Its result file stays in the container, so it writes as any user.
+  # make demo: DEMO_BOTS bots each play DEMO_QUIZ_ID once, so the board holds about the bots and
+  # the people who join; make demo-stop removes them. Its result file stays in the container, so
+  # it writes as any user.
   bots:
     <<: *load
     profiles: [demo]
@@ -137,6 +138,7 @@ services:
     command:
       - --quiz-ids=${DEMO_QUIZ_ID:-}
       - --bots=${DEMO_BOTS:-20}
+      - --cohorts=1
       - --duration=3600
       - --origin=http://localhost:${QUIZ_PORT:-8080} # an origin the API allows
       - --label=demo
