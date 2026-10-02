@@ -90,8 +90,9 @@ http {
         proxy_set_header Connection $connection_upgrade;
         # The client's own address, never one it sent: the nodes trust this header from nginx.
         proxy_set_header X-Forwarded-For $remote_addr;
-        # Fly's proxy answers the Flycast connect within milliseconds and picks a healthy Machine.
-        proxy_connect_timeout 250ms;
+        # Not the VM edge's 250 ms: the one upstream server is the Flycast address, so there is no
+        # other node to fail over to, and a shorter wait would only turn a slow connect into a 504.
+        proxy_connect_timeout 2s;
         proxy_next_upstream error timeout http_503;
 
         # HTTPS only, on every response, as Caddy sends it on the VM. The web app sends the other
