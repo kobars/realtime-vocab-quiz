@@ -205,10 +205,6 @@ class Store(Protocol):
         """Renew each (user id, connection id) still held; drop entries unseen for ``stale_ms``."""
         ...
 
-    async def mark_dirty(self, quiz_id: str) -> None:
-        """Make the next tick publish, as after a Redis restart (docs/spec/redis.md §5)."""
-        ...
-
 
 class Feed(Protocol):
     def subscribe(self, quiz_id: str) -> AbstractAsyncContextManager[AsyncIterator[str]]:

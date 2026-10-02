@@ -79,6 +79,7 @@ check: export ACCEPTANCE_STORE = memory
 check: ## Run every check a change must pass
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,pre-commit hooks,uv run --project api --locked pre-commit run --all-files)
+	$(call step,test citations,uv run --project api --locked python scripts/check_citations.py)
 	$(call step,actionlint,uv run --project api --locked actionlint)
 	$(call step,zizmor,$(ZIZMOR))
 	$(call step,mypy,cd api && uv run --locked mypy)

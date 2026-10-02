@@ -53,7 +53,7 @@ our choice: they make the scale-out claims of §10 real.
 |---|---|---|
 | Latency (C5) | p99 below 500 ms from "answer accepted" to "leaderboard delivered"; frames come from a 200 ms coalescing tick, so the tick spends up to 200 ms of it | The bot swarm (`load/bots.py`) times each answer → leaderboard pair on the client side; the measured runs go in §9 |
 | Throughput | Thousands of concurrent sockets over **two API nodes** behind nginx (a cap of 10,000 per process), and 1,000 answers per second in one quiz of 5,000 players (§9) | Bot swarm runs on one and on two nodes: sockets, messages per second, CPU and memory (§9) |
-| Availability | The service keeps running when one API node stops: its clients reconnect to the other node within the backoff (at most 10 s) and resync. Redis is the single point of failure: while it is down, requests get `UNAVAILABLE` | `/readyz` on each node (503 while Redis is unreachable); the failure table of §11 |
+| Availability | The service keeps running when one API node stops: its clients reconnect to the other node and resync. Retries follow a full-jitter backoff (protocol §7): a client that had stayed joined for 10 s makes its first retry within 250 ms, and each later retry waits at most 10 s (5 s more after an overload close, 1013); a socket that dies silently is detected after 50 s with no inbound message, then the same retries follow. Redis is the single point of failure: while it is down, requests get `UNAVAILABLE` | `make smoke-full` (`load/smoke_full.py`) stops the node that holds a protocol client's socket and requires the client back through nginx, resynced, within 10 s; that client retries every 250 ms on its own, so the browser client's backoff bounds are checked by `web/src/protocol/backoff.test.ts`; `/readyz` on each node (503 while Redis is unreachable); the failure table of §11 |
 
 **How the design meets each acceptance criterion.**
 
@@ -167,7 +167,7 @@ composition root alone wires them is a convention, not a check.
 | Contracts (`quiz/contracts/`) | The wire protocol, defined once | Pydantic models of every message and the codec; the source of the generated JSON Schema and TypeScript types | Used by the use cases, the gateway and the client (generated types) |
 | App (`quiz/app/`) | The use cases | `QuizService`: join, next, answer, ping, resync, leaderboard pages; turns store results into replies and errors | The ports (`Store`, `QuestionBank`, `Clock`) |
 | Ports (`quiz/ports/`) | The interfaces the core depends on | `Store`, `Clock`, `QuestionBank`, `TicketStore` | Implemented by the adapters |
-| Store (`quiz/adapters/redis/`, `quiz/adapters/memory/`) | Atomic quiz state | The Redis adapter: key names, script loading and every Lua script of [redis spec §3](docs/spec/redis.md#3-scripts) (`create_quiz`, `join`, `serve_question`, `score_answer`, `publish_leaderboard`, `leave`, `end_quiz`, `renew_presence`, `mark_dirty` and the read-only `read_standings`); the memory twin for unit tests, with an injected clock | Redis (scripts, `TIME`) |
+| Store (`quiz/adapters/redis/`, `quiz/adapters/memory/`) | Atomic quiz state | The Redis adapter: key names, script loading and every Lua script of [redis spec §3](docs/spec/redis.md#3-scripts) (`create_quiz`, `join`, `serve_question`, `score_answer`, `publish_leaderboard`, `leave`, `end_quiz`, `renew_presence` and the read-only `read_standings`); the memory twin for unit tests, with an injected clock | Redis (scripts, `TIME`) |
 | Gateway (`quiz/adapters/ws/`, `quiz/adapters/http/`) | The edge of a node | The `/ws` endpoint, the upgrade checks (origin, ticket, caps), limits before parsing, heartbeat and send buffers; `POST /sessions`, `POST /tickets`, `GET /quizzes/{quizId}`, `/healthz`, `/readyz`, `/metrics`; the mock admin `POST /admin/quizzes` and `POST /admin/quizzes/{quizId}/end` (only with `ADMIN_MOCK=1` and the `X-Admin-Token` header, else 404) | Clients through nginx; the use cases; the ticket store, the store and the question bank |
 | Fan-out (`quiz/fanout/`) | Leaderboard delivery across nodes | The 200 ms tick loop per served quiz, the pub/sub subscription, relay to local sockets, snapshots after a resubscribe | Redis (tick script, pub/sub); the gateway's sockets |
 | Mock identity (`quiz/adapters/mock_auth/`) | Stands in for an identity provider | Sessions and single-use tickets (Redis, or memory in tests), display-name rules | Redis |
@@ -395,6 +395,7 @@ formula is given), or a measurement from a load-run file. The measured table is 
 | A10 | Highest total | 1,500 (10 × 150), so a score has at most 4 digits | the scoring rule (ADR-002) |
 | A11 | Player pace | one answer per player every 5 s (reading plus thinking) | our assumption; the load bot's think time `think_s` (`load/player.py`) |
 | A12 | API nodes | 2, each one Python process on one event loop | ADR-001; ADR-003 |
+| A13 | Quiz subscriptions per node | active quizzes per node <= `REDIS_MAX_CONNECTIONS` (default 100): each quiz a node serves holds one connection of the node's subscription pool, which has that size | `connect_redis` in `api/src/quiz/main.py`; `redis_max_connections` in `api/src/quiz/config.py` |
 
 **Leaderboard frame size** (computed). One row is
 `{"rank":123,"userId":"u_…","displayName":"…","score":1234}`: 84 bytes with A8, a 12-character
@@ -440,7 +441,9 @@ link. Measured (the table below): one node held 2,500 sockets of one hot quiz wi
 385 ms) at 64 % of its core on average, peaking at a full core, and each node of the two-node run
 held about 2,500 at 64 % (p99 419 ms). So the practical number per node in one hot quiz is 2,500
 measured, and by extrapolating the CPU about 3,500 at most (an estimate, not measured), against
-the computed cap of 10,000: CPU, not memory, sets it.
+the computed cap of 10,000: CPU, not memory, sets it. Across many quizzes the first ceiling is
+A13: with the default pool a node serves at most 100 quizzes at once, so the 500-quiz run below
+set `REDIS_MAX_CONNECTIONS` to 1,000 (`load/compose.bank.yaml`).
 
 **Messages per question** (computed). For a quiz of `N` players, per player and question:
 
@@ -520,7 +523,8 @@ node.
 **How it scales out today.** Any node can take any socket and score any answer, because every
 write is one Lua script in Redis and no node owns a quiz (ADR-006). Adding an API node adds
 sockets and CPU for frame writes; each node subscribes once per quiz it serves and receives
-one copy of each frame from Redis. Redis is the shared part: every write and every tick of
+one copy of each frame from Redis. Each of those subscriptions holds one Redis connection, so a
+node serves at most `REDIS_MAX_CONNECTIONS` quizzes at once (A13 in §9). Redis is the shared part: every write and every tick of
 every quiz runs there.
 
 **Trade-offs.**
@@ -530,7 +534,9 @@ every quiz runs there.
    and a dead node then needs no failover step, and we accept the cost of having no owner: every
    node checks each active quiz's `dirty` flag 5 times a second, even when nothing changed.
    That is `5 × nodes × active quizzes` script calls per second; two nodes serving 500 quizzes
-   make 5,000 calls per second on an idle system.
+   make 5,000 calls per second on an idle system. Those 500 quizzes also need
+   `REDIS_MAX_CONNECTIONS` of at least 500 on each node that holds a socket of every quiz, and
+   Redis then holds up to 1,000 subscription connections besides the command pools.
 2. **Pub/sub against Streams.** We chose Redis pub/sub with a per-quiz `seq` and resync over
    Redis Streams, because frames carry full standings, so one snapshot heals any lost frame and
    resync is needed anyway, and we accept at-most-once delivery: when a node's subscription
@@ -565,7 +571,10 @@ every quiz runs there.
      and the quiz ID arrives later in `join`) and an L7 balancer that hashes on it, since an L4
      balancer sees only the TCP connection; a lookup before connecting that returns the node
      for the quiz also works. Past that, a `control` message when `dirty` is first set would
-     replace the polling.
+     replace the polling. The subscriptions grow the same way: at 6.5 nodes per quiz, Redis
+     holds about 65,000 subscription connections, above its default `maxclients` of 10,000,
+     and each node needs `REDIS_MAX_CONNECTIONS` of about 6,500. One subscriber connection per
+     node that carries every quiz's channel would make it one connection per node.
    - One quiz of 100,000: the nodes write `5 × 100,000` = 500,000 frames per second, 2.1 GB/s
      of egress for the top-50 frame, spread over the nodes. One Redis shard runs all of the
      quiz's scripts, because one quiz stays in one slot: 20,000 scoring and 20,000 serving
@@ -649,8 +658,17 @@ anonymous user ID and a session token (kept in `sessionStorage`); before every c
 use, 30 s). The client opens `GET /ws?ticket=…` with the subprotocol `quiz.v1`. Before the
 upgrade the node checks the `Origin` against `ALLOWED_ORIGINS` (403), the subprotocol (400),
 the ticket (401) and the connection caps (503, 429). The user ID comes from the ticket only;
-nothing the client sends later can change it. Logs record the path, never the query string
-that holds the ticket (`adapters/ws/endpoint.py`, nginx's `edge` log format).
+nothing the client sends later can change it. The API's logs and nginx's access log record the
+path, never the query string that holds the ticket (`adapters/ws/endpoint.py`, nginx's `edge`
+log format). nginx's error log (level `warn`, on its stderr) is the exception: when an upgrade
+fails at a node (a refused connect or a timeout), its line quotes the request line, ticket
+included. The node that failed may not have redeemed that ticket, so single use does not protect it
+by itself: nginx passes the upgrade on to the other node, which normally redeems it, but if that
+node fails too the ticket stays valid until it expires. That is low risk: the ticket lives 30 s
+and gives only an anonymous mock identity. The log goes to whoever runs the containers, and a
+failed run of the `stack` CI workflow uploads the stack's logs as an artifact; that stack
+listens only on the CI runner, so its tickets cannot be used from outside, and it is gone when
+the job ends.
 
 **Abuse limits.**
 
@@ -709,20 +727,21 @@ over a quiz; `/readyz` answers 200 while Redis is reachable. The load bots measu
   (answers scored at elapsed 0 after a Redis clock step back).
 - JSON logs (`obs/logs.py`, structlog): one `http_request` line per request with the path,
   status and duration; a line when a socket closes, with its code; each line carries the
-  `request_id` (a socket's connection ID) and the `quiz_id`. No line holds a ticket.
+  `request_id` (a socket's connection ID) and the `quiz_id`. No API log line holds a ticket.
 
 **Alerts a production setup would add.** `/readyz` failing on any node; the answer → leaderboard
 p99 above 500 ms (from client-side timings, which this build does not export); the p99 of
 `tick_duration_seconds` above 50 ms; `sum(rate(leaderboard_frames_total))` over all nodes at 0
-while `sum(rate(answers_total))` grows (only the node that wins a tick publishes, so one node's
-counter can stay flat on a healthy stack); `ws_connections` near the 10,000 cap; any increase of
+while `sum(rate(answers_total{result="correct"}))` grows (only a correct answer on time scores
+and sets `dirty`, so wrong and late answers alone publish nothing; and only the node that wins a
+tick publishes, so one node's counter can stay flat on a healthy stack); `ws_connections` near the 10,000 cap; any increase of
 `redis_clock_step_total`; a rise in 1013 and 1008 closes in the logs.
 
 **Diagnosis: "the leaderboard is slow".**
 
 1. Check `/readyz` on both nodes (`docker compose exec api-1 …`, README): a 503 means Redis.
 2. Check that frames are published: the sum of `leaderboard_frames_total` over both nodes must
-   grow while answers arrive (each node counts only the frames it published itself, so read
+   grow while correct answers arrive (each node counts only the frames it published itself, so read
    both). If it does not, look for `tick of quiz … store unreachable` or `fan-out of quiz … failed`
    in the logs.
 3. Check the tick time: a high `tick_duration_seconds` points at Redis (`SLOWLOG GET`,

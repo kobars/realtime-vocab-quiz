@@ -46,6 +46,15 @@ def test_two_api_nodes_with_distinct_ids_share_one_redis_and_trust_only_the_stac
     assert nodes[0]["TRUSTED_PROXIES"] == subnet["subnet"]
 
 
+def test_the_nodes_take_the_redis_pool_size_from_env_with_the_settings_default() -> None:
+    """Each quiz a node serves holds one subscription connection of a pool of this size."""
+    pool = Settings.model_fields["redis_max_connections"].default
+    for node in ("api-1", "api-2"):
+        assert FULL[node]["environment"]["REDIS_MAX_CONNECTIONS"] == (
+            f"${{REDIS_MAX_CONNECTIONS:-{pool}}}"
+        )
+
+
 def test_the_access_log_never_records_the_query_string() -> None:
     (log_format,) = re.findall(r"log_format edge ([^;]+);", NGINX)
     assert "$uri" in log_format

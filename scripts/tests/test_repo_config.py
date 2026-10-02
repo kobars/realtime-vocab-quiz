@@ -325,6 +325,16 @@ def test_workflow_lint_fails_on_an_action_that_is_not_pinned_to_a_commit(
     assert ("unpinned-uses" in result.stdout) is fails
 
 
+def test_make_check_checks_the_test_citations_of_the_docs() -> None:
+    recipe = _block(
+        ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
+    )
+    steps = [line.split(",")[1] for line in recipe if line.startswith("$(call step,")]
+    assert any("python scripts/check_citations.py)" in line for line in recipe)
+    # The static check reports a doc typo before the minutes of tests, right after pre-commit.
+    assert steps.index("test citations") == steps.index("pre-commit hooks") + 1, steps
+
+
 def _deptry_tools() -> tuple[list[str], list[str]]:
     """Return the roots and the flags of the Makefile's DEPTRY_TOOLS step."""
     line = next(
