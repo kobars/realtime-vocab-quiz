@@ -15,9 +15,10 @@ describe('Tailwind entry', () => {
     expect(base).toContain(':focus-visible { @apply outline-2 outline-solid outline-offset-2 outline-ring; }')
   })
 
-  it('focus-hug puts the focus outline on the control\'s own outline in --ring, or in --destructive on an invalid field', () => {
+  it('focus-hug paints the focus outline over the control\'s own outline and 2 px past it, in --ring or in --destructive on an invalid field', () => {
+    // All outline, so a border colour from hover, selection or a transition cannot show through the band.
     const rule = main.slice(main.indexOf('@utility focus-hug {'), main.indexOf('\n}', main.indexOf('@utility focus-hug {')))
-    expect(rule).toContain('&:focus-visible { outline-offset: 0; border-color: var(--ring); }')
+    expect(rule).toContain('&:focus-visible { outline-width: calc(var(--border-clay) + 2px); outline-offset: calc(-1 * var(--border-clay)); border-color: var(--ring); }')
     expect(rule).toContain("&[aria-invalid='true']:focus-visible { border-color: var(--destructive); outline-color: var(--destructive); }")
   })
 

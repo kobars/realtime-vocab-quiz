@@ -80,12 +80,13 @@
 @utility shadow-press-active { --tw-shadow: var(--shadow-press-active); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
 @utility shadow-inset { --tw-shadow: var(--shadow-inset); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
 /*
- * One focus indicator on a control that draws its own outline: the outline turns --ring and the 2 px focus outline
- * hugs it with no gap, so the two read as one band instead of an outline, a gap and a ring. An invalid field keeps
- * its --destructive outline and the band follows it.
+ * One focus indicator on a control that draws its own outline: the focus outline widens over that outline and 2 px
+ * past it, one band instead of an outline, a gap and a ring. The band is all outline, so a hover, selected or fading
+ * border colour under it never shows; the border turns --ring as well, which keeps anti-aliased corners in one colour.
+ * An invalid field keeps --destructive, and the band follows it.
  */
 @utility focus-hug {
-  &:focus-visible { outline-offset: 0; border-color: var(--ring); }
+  &:focus-visible { outline-width: calc(var(--border-clay) + 2px); outline-offset: calc(-1 * var(--border-clay)); border-color: var(--ring); }
   &[aria-invalid='true']:focus-visible { border-color: var(--destructive); outline-color: var(--destructive); }
 }
 @utility bg-gradient-primary { background-image: var(--gradient-primary); }
