@@ -86,7 +86,8 @@ Every pull request and every push to `main` runs these GitHub Actions workflows:
   covered (diff-cover). Each run keeps the JUnit reports (`reports-*`) and the coverage data
   (`coverage-*`) as artifacts for 7 days. On a pull request it also runs
   `scripts/check_pr.py` (the size limit, the frozen acceptance tests, the commit trailer and
-  the AI-LOG entry; the labels `size-exception` and `acceptance-change` waive the first two)
+  the AI-LOG entry; the labels `size-exception` and `acceptance-change` waive the first two,
+  and Dependabot's own commits skip the last two)
   and the review budget (`make review-budget`), which fails a PR whose diff plus changed files
   reach the `limit` in `api/pyproject.toml`. Neither counts the paths that `.gitattributes`
   marks `linguist-generated` (lock files, generated contracts, shadcn-vue components).
@@ -133,5 +134,6 @@ same option then reports the lock as out of date.
 ## Pull requests
 
 Rebase on `main`, run `make check`, and fill in the pull request template. Each PR adds its
-AI-LOG entry `docs/ai-log/PR-<n>.md`, written from [the template](docs/ai-log/TEMPLATE.md);
+AI-LOG entry `docs/ai-log/PR-<n>.md`, written from [the template](docs/ai-log/TEMPLATE.md)
+(a PR made only of Dependabot's commits needs none);
 [docs/ai-log/README.md](docs/ai-log/README.md) explains the entries.

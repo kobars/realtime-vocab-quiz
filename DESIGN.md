@@ -637,7 +637,7 @@ Test paths are under `api/tests/` (server) or `web/src/` (client). "Not tested" 
 
 | Failure | Detection | System behavior | User-visible effect | Mitigation | Proving test |
 |---|---|---|---|---|---|
-| API node crash or SIGTERM | The socket closes: 1006 on a crash, 1012 when uvicorn shuts down on SIGTERM; nginx's connect to the stopped node fails | No graceful drain: the node's sockets drop; nginx sends new connects to the other node; the dead node's grace timers die with it, and another node's presence renew drops its entries 13–16 s later | "Reconnecting", then play resumes on the other node with the same score and cursor | Client backoff (full jitter, at most 10 s), new ticket, `join`, `resync` | `integration/test_two_nodes.py::test_a_player_who_moves_to_the_other_node_within_the_grace_keeps_presence`; `integration/fanout/test_presence.py::test_another_nodes_renew_drops_presence_that_no_live_node_renews`; `web/src/protocol/client.test.ts` (reconnect with backoff). `make smoke-full` (`load/smoke_full.py`) stops the node that holds its socket in the running stack and checks that the player is back through nginx within 10 s with its score; it needs the stack, so it is not part of `make check` |
+| API node crash or SIGTERM | The socket closes: 1006 on a crash, 1012 when uvicorn shuts down on SIGTERM; nginx's connect to the stopped node fails | No graceful drain: the node's sockets drop; nginx sends new connects to the other node; the dead node's grace timers die with it, and another node's presence renew drops its entries 13–16 s later | "Reconnecting", then play resumes on the other node with the same score and cursor | Client backoff (full jitter, at most 10 s), new ticket, `join`, `resync`; compose restarts a crashed container (`restart: unless-stopped`) | `integration/test_two_nodes.py::test_a_player_who_moves_to_the_other_node_within_the_grace_keeps_presence`; `integration/fanout/test_presence.py::test_another_nodes_renew_drops_presence_that_no_live_node_renews`; `web/src/protocol/client.test.ts` (reconnect with backoff). `make smoke-full` (`load/smoke_full.py`) stops the node that holds its socket in the running stack and checks that the player is back through nginx within 10 s with its score; it needs the stack, so it is not part of `make check` |
 | Redis down | A store call raises a connection error; `/readyz` returns 503 | Every request that needs Redis gets `UNAVAILABLE`; ticket redeem fails, so new sockets get HTTP 503; ticks back off (full jitter, at most 10 s) and log at most one warning a second | Errors and "reconnecting" until Redis is back | The client retries with backoff; restore Redis (a replica with failover is the next step, §10) | `integration/http/test_endpoints.py::test_readyz_and_requests_report_an_unreachable_redis`; `integration/ws/test_gateway.py::test_an_unreachable_ticket_store_answers_503`; `unit/app/test_service.py::test_redis_faults_are_unavailable_and_ping_answers_null` |
 | Redis refuses writes (a read-only replica, a failed AOF write, `maxmemory` with `noeviction`) | A `READONLY`, `MISCONF` or `OOM` error reply; `/readyz` returns 503, because its probe is a write | Treated like Redis down (`adapters/redis_outage.py`): requests get `UNAVAILABLE` and keep their socket, HTTP gets 503; any other error reply stays `INTERNAL` | Errors until Redis takes writes again | Fix the cause (disk, memory, failover); the client retries with backoff | `unit/app/test_service.py::test_redis_write_refusals_are_unavailable_and_other_errors_internal`; `unit/adapters/test_http_routes.py::test_redis_write_refusals_answer_503_and_other_reply_errors_500`; `integration/test_main_redis.py::test_readyz_answers_503_while_redis_refuses_writes` |
 | A node's subscriptions are all taken (`REDIS_MAX_CONNECTIONS` quizzes) | The ticker counts the quizzes it follows and the joins in flight; `feed_subscribe_failures_total{reason="limit"}` | A `join` to one more open quiz gets `UNAVAILABLE` and close 1013 before it writes anything; the quizzes the node follows keep their feed, and an ended quiz still answers with its final standings | That player's client reconnects after 5 s plus the backoff, maybe to the other node | Raise `REDIS_MAX_CONNECTIONS` (§9, A13); one subscriber connection for every quiz is the next step (§10) | `integration/test_main_redis.py::test_a_join_to_a_quiz_past_the_subscription_limit_is_unavailable`; `unit/fanout/test_tick_faults.py::test_a_node_at_its_subscription_limit_admits_only_the_quizzes_it_follows`; `unit/fanout/test_tick_faults.py::test_a_join_in_flight_holds_its_subscription_until_the_bind_opens_the_loop` |
@@ -698,6 +698,7 @@ the job ends.
 | Message rate | 20 messages/s, burst 40, per connection; 10 s of abuse closes 1008 | `adapters/ws/limits.py` |
 | Connections | 10,000 per process (503), 50 per client address (429) | `adapters/ws/limits.py` |
 | Sessions and tickets | a bucket of 2 × 50 per client address, refilled in 60 s (429); nginx adds a flood ceiling for the whole stack | `adapters/http/routes.py`, `infra/nginx/nginx.conf` |
+| Slow HTTP clients | nginx cuts a client that stalls 10 s between two reads of its request head or body (408) or between two writes of a response (60 s on `/ws`, above the heartbeat), and lets 2,000 `/api/` requests be in flight for the whole stack (503) | `infra/nginx/nginx.conf` |
 | Resync | at most one per second per connection | `app/service.py` |
 | Send buffer | 64 KiB soft, 256 KiB hard (close 1013) | `adapters/ws/sender.py` |
 | Display name | at most 128 characters raw, 1–32 after trim and NFC | `contracts/messages.py`, `adapters/mock_auth/tokens.py` |
@@ -714,6 +715,11 @@ is free: one person with a second tab (a second identity) can answer each questi
 first, read the correct choice, and answer it in the first tab for full points. Real sign-in
 (one identity per person) and a per-player choice order are the fix; both are out of scope for
 this build (§2).
+
+**Players per quiz.** Nothing caps the unique players of a quiz, and a player's state stays after
+they leave (about 2 KB once they answered 10 questions): the session bucket bounds how fast new
+identities arrive, and the stack Redis runs with `maxmemory` (`REDIS_MAXMEMORY`, 256 MB by default)
+and `noeviction`, so a full store refuses writes rather than evicting a quiz's state.
 
 <!-- AI-ASSISTED-BEGIN: drafted with Claude Code from api/src/quiz/adapters/ws/heartbeat.py and the gateway's upgrade checks. -->
 
@@ -740,7 +746,14 @@ total, with missing and timed-out samples counted as misses.
 - `/healthz`: liveness, 200 `{"status":"ok"}` while the process answers HTTP.
 - `/readyz`: readiness, 200 `{"status":"ready"}`, or 503 `{"status":"unavailable"}` when Redis is
   unreachable.
-- `/metrics` (Prometheus text format, `obs/metrics.py`): `ws_connections` (open sockets),
+- `/metrics` (Prometheus text format, `obs/metrics.py`): `ws_connections` (sockets holding a
+  connection cap slot, from the cap check until the slot is freed), `ws_pending_close` (those of
+  them whose close frame the sender gave up on, waiting for the peer to read or go),
+  `ws_closes_total{code}` (closes by close code: 1013 for a slow client, 1008 for abuse; a code
+  a peer picks outside the ones the service and browsers use counts as `other`, so a client
+  cannot add series), `ws_send_delay_seconds` (histogram, observed by each socket's sender on
+  each frame it writes: the time from queueing the frame to the end of its write),
+  `event_loop_lag_seconds` (how late the node's event loop ran its latest 100 ms timer),
   `answers_total{result}` (correct, wrong, late), `leaderboard_frames_total` (frames this node
   published), `leaderboard_publish_lag_seconds` (histogram, observed by the tick on each frame
   it publishes: the time from the first change the frame carries, an answer that scored, a join
@@ -762,9 +775,11 @@ histogram_quantile(0.99, sum by (le) (rate(leaderboard_publish_lag_seconds_bucke
 ```
 
 It is per frame, not per answer: a frame's lag is that of its oldest change, so every answer it
-carries waited at most that long. It stays near the 200 ms tick on a healthy stack. It cannot see
-the relay to each node, the socket writes or the network, so true client delivery still needs
-client-side timings, which this build does not export; the bot swarm measures them in load runs.
+carries waited at most that long. It stays near the 200 ms tick on a healthy stack. The node's part
+after the publish, a frame's wait in a socket's send queue and its write, is
+`ws_send_delay_seconds`. Neither sees the relay to each node or the network, so true client
+delivery still needs client-side timings, which this build does not export; the bot swarm
+measures them in load runs.
 
 **Alerts a production setup would add.** `/readyz` failing on any node; the p99 of
 `leaderboard_publish_lag_seconds` above 300 ms (the store part leaves 200 ms of the 500 ms budget
@@ -773,9 +788,11 @@ timings; the p99 of
 `tick_duration_seconds` above 50 ms; `sum(rate(leaderboard_frames_total))` over all nodes at 0
 while `sum(rate(answers_total{result="correct"}))` grows (only a correct answer on time scores
 and sets `dirty`, so wrong and late answers alone publish nothing; and only the node that wins a
-tick publishes, so one node's counter can stay flat on a healthy stack); `ws_connections` near the 10,000 cap; any increase of
-`redis_clock_step_total` or `feed_subscribe_failures_total`; a rise in 1013 and 1008 closes in
-the logs.
+tick publishes, so one node's counter can stay flat on a healthy stack); `ws_connections` near the
+10,000 cap, or a growing `ws_pending_close`; the p99 of `ws_send_delay_seconds` above 100 ms;
+`event_loop_lag_seconds` above 50 ms for minutes; any increase of `redis_clock_step_total` or
+`feed_subscribe_failures_total`; a rise in `ws_closes_total{code="1013"}` or
+`ws_closes_total{code="1008"}`.
 
 **Diagnosis: "the leaderboard is slow".**
 
@@ -786,10 +803,12 @@ the logs.
    in the logs.
 3. Check the tick time: a high `tick_duration_seconds` points at Redis (`SLOWLOG GET`,
    `INFO commandstats` for the scripts; a quiz above 200 players ranks every scorer in the tick).
-4. Check the sockets: a growing `leaderboard_frames_conflated_total`, or many 1013 closes, means
-   slow clients or a saturated node (CPU of the node's one event loop; `ws_connections`). A
-   `leaderboard_publish_lag_seconds` p99 near 200 ms with slow clients puts the delay here, after
-   the publish.
+4. Check the sockets: a growing `leaderboard_frames_conflated_total`, a rising
+   `ws_closes_total{code="1013"}` or a high `ws_send_delay_seconds` p99 means slow clients or a
+   saturated node. A high `event_loop_lag_seconds` says it is the node: its one event loop runs
+   late, so every socket's writes wait (CPU of the node; `ws_connections`, `ws_pending_close`).
+   A `leaderboard_publish_lag_seconds` p99 near 200 ms with a high send delay puts the delay here,
+   after the publish.
 5. Check the clients: a growing `resyncs_total` means clients that see gaps, which points at lost
    frames, for example repeated pub/sub drops on their node (§11).
 6. Reproduce with the bot swarm against the stack and compare its answer → leaderboard

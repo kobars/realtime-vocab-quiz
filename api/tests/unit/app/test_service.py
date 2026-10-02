@@ -690,3 +690,32 @@ async def test_a_page_read_in_flight_when_the_cache_drops_is_not_kept() -> None:
     [old] = await pending
     [fresh] = await send(service, conn, page)
     assert (old.atSeq, fresh.atSeq, store.reads) == (1, 2, 2)
+
+
+class Sweeps[K, V](dict[K, V]):
+    """A page cache that counts the full scans of its entries."""
+
+    scans = 0
+
+    @override
+    def items(self) -> Any:
+        self.scans += 1
+        return super().items()
+
+
+async def test_the_page_cache_sweeps_its_expired_pages_at_most_once_per_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tick, store = Limits().tick_ms, Pages()
+    now = [tick]
+    store.release.set()
+    service = QuizService(store, Bank(), lambda: now[0])  # type: ignore[arg-type]
+    pages: Sweeps[Any, Any] = Sweeps()
+    monkeypatch.setattr(service, "_pages", pages)
+    conn = Connection("c-a", "a", quiz_id=QUIZ)
+    for offset in range(100):  # 100 distinct misses within one tick
+        await send(service, conn, m.GetLeaderboard(offset=offset, limit=1))
+    assert (len(pages), pages.scans) == (100, 1)
+    now[0] += tick  # every cached page has expired
+    await send(service, conn, m.GetLeaderboard(offset=0, limit=2))
+    assert (len(pages), pages.scans) == (1, 2)
