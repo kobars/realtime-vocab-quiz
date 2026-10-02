@@ -29,9 +29,12 @@ peak RSS, and a run where any swarm process used more than 80% of a core is inva
 the swarm, not the server, sets the latency. `slo_met` judges the server: `slo_within` is the
 share of leaderboard updates delivered below 500 ms, where a missing or timed-out sample counts
 as a miss, so a run cannot pass on the samples that arrived alone, and a total that a frame
-showed before its `answer_result` (`board_first`) counts as on time. `slo_met` is true when that
-share, unrounded, is at least 99%. The swarm exits with status 1 unless the run is valid and meets the
-SLO.
+showed before its `answer_result` (`board_first`) counts as on time. An answer whose own
+`answer_result` was missing or timed out opened no leaderboard wait, so nothing shows its update
+was on time: it counts as a miss too, even if it was a wrong answer that changed nothing.
+`slo_met` is true when that share, unrounded, is at least 99%; a run with no leaderboard sample at
+all is invalid (`no leaderboard samples`), since it measured nothing. The swarm exits with status
+1 unless the run is valid and meets the SLO.
 
 Bots behave like the web client: every bot sends an `Origin` header, gets a fresh ticket before
 each connect, reconnects with full-jitter backoff (none after close 1000, 1008 or 4001; 5 s more
@@ -69,7 +72,7 @@ host). Outside Docker, from the host against the same stack through nginx (the d
 | `--think-ms` | 2000 | mean think time before each answer (uniform, ±50%) |
 | `--duration`, `--ramp` | 60, 10 | seconds of answering after a ramp of this many seconds |
 | `--procs` | 1 | processes to spread the bots over |
-| `--timeout-ms` | 5000 | a sample slower than this counts as timed out |
+| `--timeout-ms` | 5000 | a sample slower than this counts as timed out; at least 500, the SLO, so a timed-out sample is a real miss |
 | `--label` | `run` | name part of the result file |
 
 **API node CPU and memory.** Start `load/node_stats.py` on the host next to `make load`, with the

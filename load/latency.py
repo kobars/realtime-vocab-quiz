@@ -53,9 +53,13 @@ def summary(rec: Recorder, procs: list[dict[str, float]], active_s: float) -> di
         problems.append(f"{early} bot slots stopped at a quiz end before the deadline")
     board = (rec.board_ms, c["board_missing"], c["board_timeout"])
     # A total a frame showed before its answer_result was delivered as the interval began: on time.
-    first = c["board_first"]
+    # An answer whose reply was lost or late opened no wait, so nothing proves its update was on
+    # time: a miss, even though a wrong answer among them would have changed nothing.
+    first, unproven = c["board_first"], c["answer_missing"] + c["answer_timeout"]
     on_time = sum(ms < SLO_MS for ms in rec.board_ms) + first
-    within = _share(on_time, len(rec.board_ms) + c["board_missing"] + c["board_timeout"] + first)
+    within = _share(on_time, len(rec.board_ms) + sum(board[1:]) + first + unproven)
+    if within is None:
+        problems.append("no leaderboard samples")
     return {
         "answer": _latency(rec.answer_ms, c["answer_missing"], c["answer_timeout"]),
         "leaderboard": _latency(*board),

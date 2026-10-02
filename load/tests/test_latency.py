@@ -37,11 +37,14 @@ def test_the_summary_marks_a_run_with_a_busy_swarm_invalid() -> None:
 
 def test_a_run_without_answer_samples_is_invalid() -> None:
     empty = summary(Recorder(), [{"cpu_pct": 10.0, "rss_mb": 1}], 60)
-    assert (empty["valid"], empty["problems"]) == (False, ["no answer samples"])
+    assert (empty["valid"], empty["problems"]) == (
+        False,
+        ["no answer samples", "no leaderboard samples"],
+    )
 
 
 def test_a_quiz_that_ends_before_the_deadline_makes_the_run_invalid() -> None:
-    rec = Recorder(answer_ms=[10.0])
+    rec = Recorder(answer_ms=[10.0], board_ms=[100.0])
     rec.counts["slots_ended_early"] = 2
     early = summary(rec, [{"cpu_pct": 10.0, "rss_mb": 1}], 60)
     assert early["problems"] == ["2 bot slots stopped at a quiz end before the deadline"]
@@ -66,6 +69,7 @@ def test_the_slo_needs_99_percent_of_updates_below_500_ms() -> None:
     assert not summary(on_time, [{"cpu_pct": 10.0, "rss_mb": 1}], 60)["slo_met"]
     unmeasured = summary(Recorder(answer_ms=[10.0]), [{"cpu_pct": 10.0, "rss_mb": 1}], 60)
     assert (unmeasured["slo_met"], unmeasured["slo_within"]) == (False, None)
+    assert unmeasured["problems"] == ["no leaderboard samples"]  # not measured, not missed
     assert unmeasured["leaderboard"]["completion"] is None
 
 
@@ -84,3 +88,11 @@ def test_a_total_shown_before_its_answer_result_counts_as_on_time() -> None:
     only_first = Recorder(answer_ms=[10.0])
     only_first.counts["board_first"] = 5
     assert summary(only_first, [{"cpu_pct": 10.0, "rss_mb": 1}], 60)["slo_met"]
+
+
+def test_an_answer_whose_reply_was_lost_or_late_misses_the_slo() -> None:
+    rec = Recorder(answer_ms=[10.0] * 70, board_ms=[100.0] * 70)
+    rec.counts.update(answer_timeout=20, answer_missing=10)  # these opened no leaderboard wait
+    missed = summary(rec, [{"cpu_pct": 10.0, "rss_mb": 1}], 60)
+    assert missed["valid"]
+    assert (missed["slo_met"], missed["slo_within"]) == (False, 0.7)
