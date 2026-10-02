@@ -1,14 +1,15 @@
-// AI-ASSISTED: shared UI components meet the focus-ring and touch-target rules, read only the clay tokens, keep press and lift behind motion-safe and fill Progress against max.
+// AI-ASSISTED: the Clay components render their variants, pass their accessibility attributes, bind Input with v-model, meet the focus-ring and touch-target rules, read only the clay tokens, keep press and lift behind motion-safe and fill Progress against max.
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import { h } from 'vue'
+import { stackedFocusClasses } from '../testing'
 import { cn } from '../utils'
 import { Badge, badgeVariants } from './badge'
-import { buttonVariants } from './button'
-import { Card } from './card'
+import { Button, buttonVariants } from './button'
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './card'
 import { Input } from './input'
 import { Progress } from './progress'
-import { stackedFocusClasses } from '../testing'
+import { Toaster } from './sonner'
 
 const classes = (value: string) => value.split(/\s+/)
 const inputClass = () => mount(Input).get('input').classes().join(' ')
@@ -144,5 +145,94 @@ describe('Progress', () => {
     [{ modelValue: 15, max: 10 }, 'translateX(-0%)'],
   ])('fills %j as %s', (props, transform) => {
     expect(offset(props)).toContain(transform)
+  })
+})
+
+describe('variants render', () => {
+  it.each(buttonVariantNames.flatMap((variant) => buttonSizes.map((size) => [variant, size] as const)))(
+    'button %s at size %s renders its classes and names them in data attributes',
+    (variant, size) => {
+      const button = mount(Button, { props: { variant, size }, slots: { default: 'Go' } }).get('button')
+      expect(button.attributes()).toMatchObject({ 'data-slot': 'button', 'data-variant': variant, 'data-size': size })
+      // cn() lets the size's text class replace the base one, as the caller's classes would.
+      expect(button.classes()).toEqual(classes(cn(buttonVariants({ variant, size }))))
+    },
+  )
+
+  it.each(badgeVariantNames)('badge %s renders its classes on a span', (variant) => {
+    const badge = mount(Badge, { props: { variant }, slots: { default: 'Live' } })
+    expect(badge.element.tagName).toBe('SPAN')
+    expect(badge.classes()).toEqual(classes(cn(badgeVariants({ variant }))))
+  })
+
+  it('a caller class wins over a variant class through cn()', () => {
+    const button = mount(Button, { props: { class: 'px-2' } }).get('button')
+    expect(button.classes()).toContain('px-2')
+    expect(button.classes()).not.toContain('px-6')
+  })
+
+  it('card renders every part in order, under its data-slot', () => {
+    const card = mount(() =>
+      h(Card, () => [
+        h(CardHeader, () => [h(CardTitle, () => 'Title'), h(CardDescription, () => 'Text'), h(CardAction, () => 'Act')]),
+        h(CardContent, () => 'Body'),
+        h(CardFooter, () => 'Foot'),
+      ]))
+    const slots = card.findAll('[data-slot]').map((part) => part.attributes('data-slot'))
+    expect(slots).toEqual(['card', 'card-header', 'card-title', 'card-description', 'card-action', 'card-content', 'card-footer'])
+  })
+})
+
+describe('accessibility attributes', () => {
+  it('button renders a native button, or the element that `as` names', () => {
+    expect(mount(Button).element.tagName).toBe('BUTTON')
+    const link = mount(Button, { props: { as: 'a' }, attrs: { href: '/next' } })
+    expect(link.element.tagName).toBe('A')
+    expect(link.attributes('href')).toBe('/next')
+  })
+
+  it('a disabled button is disabled for the browser, not only styled', () => {
+    expect(mount(Button, { attrs: { disabled: true } }).get('button').element.disabled).toBe(true)
+  })
+
+  it('card title is a heading, and card is a div unless `as` names a landmark', () => {
+    expect(mount(CardTitle).element.tagName).toBe('H3')
+    expect(mount(Card).element.tagName).toBe('DIV')
+    expect(mount(Card, { props: { as: 'section' } }).element.tagName).toBe('SECTION')
+  })
+
+  it('input passes its label and invalid state to the native field', () => {
+    const input = mount(Input, { attrs: { 'aria-label': 'Quiz ID', 'aria-invalid': 'true', 'aria-describedby': 'hint' } }).get('input')
+    expect(input.attributes()).toMatchObject({ 'aria-label': 'Quiz ID', 'aria-invalid': 'true', 'aria-describedby': 'hint' })
+  })
+
+  it('progress is a progressbar that reports its value against max', () => {
+    const bar = mount(Progress, { props: { modelValue: 3, max: 10 }, attrs: { 'aria-label': 'Question 3 of 10' } }).get('[role="progressbar"]')
+    expect(bar.attributes()).toMatchObject({ 'aria-valuenow': '3', 'aria-valuemax': '10', 'aria-label': 'Question 3 of 10' })
+  })
+
+  it('toaster renders the labelled notification region', () => {
+    const toaster = mount(Toaster)
+    expect(toaster.get('section').attributes('aria-label')).toMatch(/^Notifications/)
+  })
+})
+
+describe('Input v-model', () => {
+  it('shows the bound value and emits each edit', async () => {
+    const input = mount(Input, { props: { modelValue: 'VOCAB', 'onUpdate:modelValue': (value: string | number) => input.setProps({ modelValue: value }) } })
+    expect(input.get('input').element.value).toBe('VOCAB')
+    await input.get('input').setValue('VOCAB-42')
+    expect(input.emitted('update:modelValue')).toEqual([['VOCAB-42']])
+    expect(input.props('modelValue')).toBe('VOCAB-42')
+  })
+
+  it('follows a new bound value from the parent', async () => {
+    const input = mount(Input, { props: { modelValue: 'a' } })
+    await input.setProps({ modelValue: 'b' })
+    expect(input.get('input').element.value).toBe('b')
+  })
+
+  it('starts from defaultValue when nothing is bound', () => {
+    expect(mount(Input, { props: { defaultValue: 'draft' } }).get('input').element.value).toBe('draft')
   })
 })
