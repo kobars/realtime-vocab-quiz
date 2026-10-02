@@ -195,12 +195,16 @@ export const useQuizStore = defineStore('quiz', () => {
         if (!known && s.quiz !== null) client.value?.refresh()
         return
       }
-      case 'leaderboard_page':
+      case 'leaderboard_page': {
         // A page read before the end never shows after it: only the final standings do.
         if (s.ended && !message.final) return
-        s.page = { offset: message.offset, atSeq: message.atSeq, final: message.final, rows: message.entries }
+        // A live page read before my last answer was scored never shows my row below the header's score (protocol §3).
+        const rows = message.final ? message.entries : message.entries.map((entry) =>
+          (entry.userId === s.quiz?.userId ? { ...entry, score: ownScore(message.atSeq, entry.score) } : entry))
+        s.page = { offset: message.offset, atSeq: message.atSeq, final: message.final, rows }
         s.playerCount = message.playerCount
         return
+      }
       case 'error':
         return onError(message)
     }

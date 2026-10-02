@@ -500,3 +500,13 @@ it('a snapshot whose you holds a worse rank moves my row down, or off the list w
   socket.receive({ ...snapshot(4), entries: [{ ...me, rank: 1 }, { ...rival, rank: 2 }, third], you: { rank: 60, score: 0 } })
   expect([store.myRank, store.entries]).toEqual([60, [{ ...rival, rank: 1 }, { ...third, rank: 2 }]])
 })
+
+it('a live Show all players page read at or before my last answer never shows my row below my score', async () => {
+  const { store, socket } = await answered()
+  const page = (atSeq: number, score: number): ServerMessage =>
+    ({ v: 1, type: 'leaderboard_page', atSeq, offset: 0, playerCount: 2, final: false, entries: [rival, { ...me, score }] })
+  socket.receive(page(4, 50))
+  expect(store.page?.rows).toEqual([rival, { ...me, score: 150 }])
+  socket.receive(page(5, 160))
+  expect([store.myScore, store.page?.rows[1]?.score]).toEqual([150, 160])
+})
