@@ -159,6 +159,7 @@ layers need more:
 | `make demo-end ID=<id>` | End that quiz now as the mock host (`POST /admin/quizzes/{id}/end`): every player sees the final results |
 | `make smoke-full` | Smoke-test the running full stack through nginx: health checks on each node, one answer, then stop the node that holds the socket and check the player comes back on the other node (`load/smoke_full.py`) |
 | `make prod-up`, `make prod-down`, `make prod-logs`, `make prod-demo` | The full stack on a public host behind Caddy's HTTPS (`compose.yaml` with `compose.prod.yaml`, settings from `.env.prod.example`): build and start, stop, follow the logs, and start a fresh 60-minute quiz with its HTTPS player URL ([docs/operations.md](docs/operations.md)) |
+| `make prod-update`, `make prod-backup`, `make prod-restore FILE=…` | On the public host: pull and restart with a rollback when it does not get ready, and back up or restore the quiz data, the certificates and `.env` (`scripts/deploy/ops.sh`) |
 | `make load` | The bot swarm as a container on the stack network against the running full stack, with its options in `LOAD_ARGS` ([load/README.md](load/README.md) explains them and holds the measured runs) |
 | `make test` | The server unit, property and contract tests and the client tests, without Redis |
 | `make test-integration` | The tests that need Redis (a Redis container per run, or `REDIS_URL` when it is set), then the acceptance tests on Redis |
