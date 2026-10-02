@@ -19,12 +19,13 @@ class QuizKeys(NamedTuple):
     scored: str
     replaced: str
     tick: str
+    sweep: str
     events: str  # pub/sub channel, not a key: it has no TTL
     control: str  # pub/sub channel, not a key: it has no TTL
 
 
-# The fields that refresh() leaves alone: the tick token keeps its own tick_ms expiry.
-NO_QUIZ_TTL = frozenset({"tick", "events", "control"})
+# The fields that refresh() leaves alone: the tick and sweep tokens keep their own expiry.
+NO_QUIZ_TTL = frozenset({"tick", "sweep", "events", "control"})
 
 
 def quiz_keys(quiz_id: str, prefix: str = "") -> QuizKeys:

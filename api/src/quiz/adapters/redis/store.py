@@ -251,9 +251,10 @@ class RedisStore:
         return int(local)
 
     async def renew_presence(
-        self, quiz_id: str, stale_ms: int, pairs: Sequence[tuple[str, str]]
+        self, quiz_id: str, stale_ms: int, sweep_ms: int, pairs: Sequence[tuple[str, str]]
     ) -> port.Renewed:
-        reply = await self._run("renew_presence", quiz_id, stale_ms, *chain.from_iterable(pairs))
+        flat = chain.from_iterable(pairs)
+        reply = await self._run("renew_presence", quiz_id, stale_ms, sweep_ms, *flat)
         if reply[0] == "ended":
             return port.Renewed("ended")
         return port.Renewed("renewed", int(reply[1] or 0))

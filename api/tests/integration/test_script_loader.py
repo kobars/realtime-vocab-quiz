@@ -39,7 +39,7 @@ async def test_refresh_gives_every_data_key_the_quiz_ttl(
             assert ttl == -1, name
         else:
             assert QUIZ_TTL_MS - 5_000 < ttl <= QUIZ_TTL_MS, name
-    assert set(NO_QUIZ_TTL) == {"tick", "events", "control"}
+    assert set(NO_QUIZ_TTL) == {"tick", "sweep", "events", "control"}
 
 
 async def test_check_player_ends_the_quiz_at_the_deadline_ms_itself(

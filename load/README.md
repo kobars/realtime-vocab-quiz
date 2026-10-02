@@ -39,7 +39,9 @@ all is invalid (`no leaderboard samples`), since it measured nothing. The swarm 
 Bots behave like the web client: every bot sends an `Origin` header, gets a fresh ticket before
 each connect, reconnects with full-jitter backoff (none after close 1000, 1008 or 4001; 5 s more
 after 1013), rejoins, sends one `resync`, resends an open answer with the same `submissionId`, and
-resyncs after a `seq` gap. A bot learns the correct choice of each question from the
+resyncs after a `seq` gap. Like the web client, a bot holds a frame that arrives after a gap or
+during a resync until the snapshot, and times the leaderboard when it applies a frame that shows
+its new total, not when the frame arrives. A bot learns the correct choice of each question from the
 `answer_result` of the first bot that answers it; `--accuracy` applies from then on.
 
 ## Run it

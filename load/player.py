@@ -4,10 +4,11 @@
 Times are monotonic seconds; reported latencies are milliseconds. The bot follows the web
 client: full-jitter backoff (none after close 1000, 1008 or 4001; 5 s more after 1013), one
 ``resync`` after each ``joined``, after a ``seq`` gap and after a ``pong`` ahead of its ``seq``
-(at most one per second; broadcasts wait for the ``snapshot``), a refused request sent again
-after 1 s (``RATE_LIMITED``) or the backoff (``UNAVAILABLE``), and an open answer resent with
-the same ``submissionId``, also after a reconnect. A sample slower than the timeout counts as
-timed out, wherever it is taken.
+(at most one per second; every frame from a gap, or while a resync is due or in flight, waits
+for the ``snapshot``, and only an applied frame settles a leaderboard wait), a refused request
+sent again after 1 s (``RATE_LIMITED``) or the backoff (``UNAVAILABLE``), and an open answer
+resent with the same ``submissionId``, also after a reconnect. A sample slower than the timeout
+counts as timed out, wherever it is taken.
 """
 
 import math
@@ -130,7 +131,8 @@ class Player:
     resyncing: bool = False  # a resync is in flight: broadcasts wait in ``buffered``
     resync_at: float | None = None
     last_resync: float = -math.inf
-    buffered: list[tuple[int, bool]] = field(default_factory=list)  # (seq, rebase)
+    # the frames held for the snapshot: (seq, rebase, the own total it shows or None)
+    buffered: list[tuple[int, bool, int | None]] = field(default_factory=list)
     pong_check: tuple[int, float] | None = None  # (pong seq, when last_seq must have reached it)
     requests: dict[str, dict[str, Any]] = field(default_factory=dict)  # the last of each RETRIED
     retry_at: dict[str, float] = field(default_factory=dict)
@@ -153,16 +155,22 @@ class Player:
             return correct
         return random.choice([c for c in range(4) if c != correct])  # noqa: S311
 
-    def on_seq(self, seq: int, rebase: bool, now: float) -> None:  # noqa: FBT001
+    def on_seq(self, seq: int, rebase: bool, score: int | None, now: float) -> None:  # noqa: FBT001
+        """Apply a leaderboard frame in ``seq`` order, as the web client's ``SeqTracker`` does:
+        only an applied frame shows the own ``score``; one before the snapshot, after a gap or
+        while a resync is due or in flight waits in ``buffered``."""
         last = self.last_seq
-        if self.resyncing:
-            self.buffered.append((seq, rebase))
-        elif last is None or seq == last:
-            return
-        elif seq == last + 1 or (rebase and seq > last):
-            self.last_seq = seq
-        else:  # a gap, or the counter went back after a store restart
+        if last is not None and not self.resyncing and self.resync_at is None:
+            if seq == last:
+                return
+            if seq == last + 1 or (rebase and seq > last):
+                self.last_seq = seq
+                if score is not None:
+                    self.board.shown(score, now)
+                return
+            # a gap, or the counter went back after a store restart
             self.gap(now + (random.uniform(0, 0.25) if seq > last else 0))  # noqa: S311
+        self.buffered.append((seq, rebase, score))
 
     def gap(self, resync_at: float) -> None:
         """Count a gap and schedule its resync, once while a resync is pending or in flight."""
@@ -211,11 +219,8 @@ class Player:
         elif kind == "finished":
             self.finished = True
         elif kind == "leaderboard":
-            self.on_seq(msg["seq"], msg["rebase"], now)
-            for entry in msg["entries"]:
-                if entry["userId"] == self.user_id:
-                    self.board.shown(entry["score"], now)
-                    break
+            own = (e["score"] for e in msg["entries"] if e["userId"] == self.user_id)
+            self.on_seq(msg["seq"], msg["rebase"], next(own, None), now)
         elif kind == "rank_update":
             self.board.shown(msg["score"], now)
         elif kind == "snapshot":
@@ -260,8 +265,9 @@ class Player:
         if msg["you"] is not None:
             self.board.shown(msg["you"]["score"], now)
         buffered, self.buffered = self.buffered, []
-        for seq, rebase in sorted(frame for frame in buffered if frame[0] > msg["atSeq"]):
-            self.on_seq(seq, rebase, now)
+        newer = sorted((frame for frame in buffered if frame[0] > msg["atSeq"]), key=lambda f: f[0])
+        for seq, rebase, score in newer:
+            self.on_seq(seq, rebase, score, now)
 
     def refused(self, kind: str | None, code: str, now: float) -> None:
         """The server did not do the request: send it again after 1 s or the backoff."""

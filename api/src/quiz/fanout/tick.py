@@ -15,10 +15,10 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from functools import partial
 
-from quiz.app.service import OUTAGE_LOG_INTERVAL_MS, QuizService
+from quiz.app.service import OUTAGE_LOG_INTERVAL_MS, QuizService, rank_update
 from quiz.contracts.codec import encode
 from quiz.domain.errors import DomainError, ErrorCode
-from quiz.fanout.broadcast import Relay, Sockets
+from quiz.fanout.broadcast import Relay, Sockets, with_you, without_you
 from quiz.obs import metrics
 from quiz.obs.logs import Throttle
 from quiz.ports.clock import Clock
@@ -175,13 +175,17 @@ class Ticker:
             await asyncio.gather(relaying, return_exceptions=True)
 
     async def _repair(self, quiz_id: str, relay: Relay) -> None:
-        """Send each local player its standing, as for a resync, before relaying again."""
+        """Send each local player its standing, as for a resync, before relaying again. The
+        shared snapshot is built and encoded once; each player's bytes end in its own ``you``."""
         self._service.drop_cache(quiz_id)
         users = list(self._sockets.players(quiz_id))
-        ranks, standings = await self._service.standings(quiz_id, users)
-        for user_id, replies in standings.items():
-            for reply in replies:
-                self._sockets.send_to(quiz_id, user_id, encode(reply))
+        ranks, shared = await self._service.standings(quiz_id, users)
+        head = without_you(shared)
+        for user_id, row in ranks.rows.items():
+            you = None if row is None else row.you()
+            self._sockets.send_to(quiz_id, user_id, with_you(head, you))
+            if you is not None and (update := rank_update(shared, you)) is not None:
+                self._sockets.send_to(quiz_id, user_id, encode(update))
         relay.repaired(ranks)
 
     async def _tick(self, quiz_id: str, relay: Relay, progress: asyncio.Event) -> int | None:

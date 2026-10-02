@@ -14,6 +14,7 @@ from quiz.adapters.redis.keys import NO_QUIZ_TTL, QuizKeys
 from quiz.ports.store import QUIZ_TTL_MS
 
 _LUA = files("quiz.adapters.redis") / "lua"
+REFRESH_MARGIN_MS = 60_000  # how far the meta TTL drops before a write re-expires every data key
 
 
 def script_names(folder: Traversable) -> tuple[str, ...]:
@@ -29,13 +30,15 @@ type Reply = list[str | int | None]
 
 
 def _constants() -> str:
-    """``K``, ``DATA_KEYS`` and ``QUIZ_TTL_MS`` for Lua, from keys.py and the store port.
+    """``K``, ``DATA_KEYS``, ``QUIZ_TTL_MS`` and ``REFRESH_MARGIN_MS`` for Lua, from keys.py,
+    the store port and this module.
 
     The standings limits are settings, not constants: the store passes them through ARGV."""
     index = {name: i for i, name in enumerate(QuizKeys._fields, 1)}
     k = ", ".join(f"{name} = {i}" for name, i in index.items())
     data = ", ".join(str(i) for name, i in index.items() if name not in NO_QUIZ_TTL)
-    return f"local K = {{{k}}}\nlocal DATA_KEYS = {{{data}}}\nlocal QUIZ_TTL_MS = {QUIZ_TTL_MS}"
+    ttl = f"local QUIZ_TTL_MS, REFRESH_MARGIN_MS = {QUIZ_TTL_MS}, {REFRESH_MARGIN_MS}"
+    return f"local K = {{{k}}}\nlocal DATA_KEYS = {{{data}}}\n{ttl}"
 
 
 def compose(body: str, libs: Iterable[str] = ()) -> str:

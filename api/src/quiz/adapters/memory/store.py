@@ -46,6 +46,7 @@ class _Quiz:
     seen_ms: dict[str, int] = field(default_factory=dict)  # user id -> last join or renew
     replaced: set[str] = field(default_factory=set)  # connection ids a newer join took over
     tick_until_ms: int = 0  # the tick token, limits.tick_ms long
+    sweep_until_ms: int = 0  # the presence sweep token, sweep_ms long
     end_seq: int | None = None  # the seq of quiz_ended, once announced
     scored: set[str] = field(default_factory=set)  # who scored since the last broadcast
     dirty_ms: int | None = None  # the time of the first change since the last broadcast
@@ -356,7 +357,7 @@ class MemoryStore:
                 del self._feeds[quiz_id]
 
     async def renew_presence(
-        self, quiz_id: str, stale_ms: int, pairs: Sequence[tuple[str, str]]
+        self, quiz_id: str, stale_ms: int, sweep_ms: int, pairs: Sequence[tuple[str, str]]
     ) -> port.Renewed:
         quiz = self._quiz(quiz_id)
         async with quiz.lock:
@@ -366,7 +367,12 @@ class MemoryStore:
             for user_id, conn_id in pairs:
                 if quiz.present.get(user_id) == conn_id:
                     quiz.seen_ms[user_id] = now
-            stale = [user for user, seen in quiz.seen_ms.items() if seen < now - stale_ms]
+            stale: list[str] = []
+            if now >= quiz.sweep_until_ms:
+                quiz.sweep_until_ms = now + sweep_ms
+                stale = [user for user, seen in quiz.seen_ms.items() if seen < now - stale_ms]
+            else:  # as the Redis token, which a clock step back stretches to at most sweep_ms
+                quiz.sweep_until_ms = min(quiz.sweep_until_ms, now + sweep_ms)
             for user_id in stale:
                 del quiz.present[user_id], quiz.seen_ms[user_id]
             quiz.changed(replace(quiz.state, dirty=True) if stale else quiz.state, now)

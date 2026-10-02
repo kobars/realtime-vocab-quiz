@@ -172,6 +172,7 @@ async def test_converse_reads_frames_in_full_while_an_answer_is_out() -> None:
     ).decode()
     p, ws = bot(), Socket(raw)
     p.user_id, p.answer, p.sent_at = "u1", (0, "sub", 0), time.monotonic()
+    p.last_seq = 2  # synced by a snapshot: the frame applies
     await asyncio.wait_for(converse(ws, p, Backoff(), OPTS, time.monotonic() + 0.1), 2)  # type: ignore[arg-type]
     assert p.board.best == 150  # the total before its reply: the reply will not wait for it
 
