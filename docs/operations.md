@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: operating the stack: ports, endpoints, configuration, metrics, and the public-host deployment behind HTTPS: the published images, the Droplet from a laptop, install, update, backup and restore. -->
+<!-- AI-ASSISTED: operating the stack: ports, endpoints, configuration, metrics, and the public-host deployment behind HTTPS: the published images, the Droplet from a laptop, install, update, backup and restore; and the Fly.io deployment. -->
 # Operations
 
 ## Ports and endpoints
@@ -234,6 +234,79 @@ the stack and deletes its data, its certificates and its images; then `rm -rf
 
 The admin API stays the mock one (`ADMIN_MOCK=1`): anyone who holds `ADMIN_TOKEN` can create and
 end quizzes, and the token is its only guard, so keep `.env` private.
+
+## Deploy to Fly.io
+
+A second target runs the same stack on [Fly.io](https://fly.io) Machines in one region (default
+`sin`, Singapore), behind Fly's HTTPS proxy, from a laptop. It needs a Fly.io account,
+[flyctl](https://fly.io/docs/flyctl/install/) logged in with `fly auth login` (the script never
+reads or stores a token; it stops with "run fly auth login" when flyctl is logged out), and `uv`
+for `make fly-demo`. [infra/fly/](../infra/fly/) holds one config per app, and
+[scripts/deploy/fly.sh](../scripts/deploy/fly.sh) drives flyctl
+([ADR-014](DECISIONS.md#adr-014--flyio-as-a-second-target-three-apps-flycast-to-the-api-redis-on-a-volume)):
+
+| App | Machines | Reached at |
+|---|---|---|
+| `<prefix>-web` | 1 × shared-cpu-1x, 256 MB: the web image's nginx serves the client and runs [the edge config](../infra/fly/nginx.conf.template) | `https://<prefix>-web.fly.dev`, a shared IPv4 and an IPv6 address; HTTP redirects to HTTPS |
+| `<prefix>-api` | 2 × shared-cpu-1x, 512 MB, the API image | a private Flycast address only, `<prefix>-api.flycast:8000` |
+| `<prefix>-redis` | 1 × shared-cpu-1x, 512 MB, the pinned Redis image, a 1 GB volume | `<prefix>-redis.internal:6379` on the private network only, with a password |
+
+Every Machine keeps running with no traffic (auto-stop off: a live quiz must never wait for a
+cold start) and restarts after a crash. Fly's proxy terminates TLS for `<prefix>-web.fly.dev`, so
+Caddy is not used, and nginx takes each player's address from `Fly-Client-IP`, trusted only from
+the proxy's range (172.16.0.0/16), so the per-address caps count every player apart. nginx
+reaches both API nodes through the Flycast address, where the proxy balances each connection
+over the healthy nodes (a failing `/readyz` takes a node out); the nodes trust `X-Forwarded-For`
+from that range, which only Machines of the same organization can reach. Redis keeps the compose
+stack's settings: AOF `everysec`, a password, `maxmemory 256mb` and `noeviction`.
+
+```bash
+make fly-launch FLY_APP=myquiz   # FLY_REGION=sin and FLY_ORG=personal by default
+make fly-deploy
+make fly-demo
+```
+
+- **`make fly-launch`** creates the three apps (`FLY_APP` is a prefix of your choice: Fly app
+  names are global), the Redis volume, the API's Flycast address and the web app's shared IPv4
+  and IPv6 addresses, and generates `ADMIN_TOKEN` and `REDIS_PASSWORD` with openssl. It sets them
+  as Fly secrets through stdin, never on a command line, and keeps them with the prefix, region
+  and organization in `.env.fly` (mode 600, ignored by git and the image builds): Fly secrets
+  cannot be read back, and the other targets read the prefix from it. Running it again creates
+  only what is missing and keeps the secrets.
+- **`make fly-deploy`** deploys Redis, then the API (rolling, one node at a time, then scaled to
+  two Machines), then the web edge, each waiting for its health checks, then waits for
+  `https://<prefix>-web.fly.dev/api/readyz` and prints the URL. It deploys the published images
+  tagged `main` ([Image tags](#image-tags); the packages must be public), or another tag with
+  `FLY_IMAGE_TAG=1a2b3c4`; `BUILD=1` builds the images from the checkout on Fly's remote builder
+  instead.
+- **`make fly-demo`** starts a fresh 60-minute quiz through the admin API with the token of
+  `.env.fly` and prints its player URL; `make fly-status` shows the Machines and checks of the
+  three apps.
+- **`DRY_RUN=1`** on `fly-launch`, `fly-deploy` and `fly-destroy` runs no flyctl command, not even
+  the login check, and prints each one as for a first launch.
+
+**Cost (an estimate).** At Fly's published per-second rates and Singapore's regional markup, the
+four Machines cost about 17 USD a month when running all month: about 2.80 for the 256 MB web
+Machine and about 4.70 for each 512 MB one, plus 0.15 for the 1 GB volume and outbound traffic
+at 0.04 USD per GB; the shared IPv4 address is free. Check Fly's pricing page before you rely on
+it.
+
+**Update.** Run `make fly-deploy` again: the API rolls one node at a time, while the Redis Machine
+restarts for a few seconds (the nodes answer 503 and the clients retry; its AOF keeps every
+answer). `flyctl logs --app <prefix>-api` follows a node's logs (also `-web`, `-redis`).
+
+**Back up Redis.** Fly snapshots the volume every day and keeps each snapshot 5 days;
+`flyctl volumes list --app <prefix>-redis` shows its ID, and `flyctl volumes snapshots create
+<volume id>` takes one now. For a copy off Fly, write a snapshot and download it:
+
+```bash
+flyctl ssh console --app myquiz-redis -C 'sh -c "REDISCLI_AUTH=\$REDIS_PASSWORD redis-cli BGSAVE"'
+flyctl ssh sftp get --app myquiz-redis /data/redis/dump.rdb quiz-dump.rdb
+```
+
+**Tear down.** `make fly-destroy` lists the three apps and deletes them, with their Machines, the
+volume and its quiz data and the addresses, once you type the prefix back. `.env.fly` stays, so a
+new `make fly-launch` reuses its secrets; delete it when you are done.
 
 ## Redis timeouts
 

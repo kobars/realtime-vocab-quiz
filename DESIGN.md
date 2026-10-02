@@ -152,6 +152,11 @@ images for amd64 and arm64, scans them and publishes them to GitHub Container Re
 instead of building ([ADR-012](docs/DECISIONS.md#adr-012--prebuilt-images-on-ghcr-and-doctl-over-terraform-for-one-droplet)).
 `make do-deploy` creates the host as a DigitalOcean Droplet with doctl, and its cloud-init user
 data runs the install script ([docs/operations.md](docs/operations.md#deploy-to-a-vm)).
+On Fly.io, `make fly-launch` and `make fly-deploy` run the same images as three apps in one
+region: the web edge (Fly's proxy terminates HTTPS and names the client in `Fly-Client-IP`), two
+API Machines behind a private Flycast address and Redis on a volume, reached over the private
+network ([ADR-014](docs/DECISIONS.md#adr-014--flyio-as-a-second-target-three-apps-flycast-to-the-api-redis-on-a-volume);
+[docs/operations.md](docs/operations.md#deploy-to-flyio)).
 
 ## 4. Components
 
@@ -996,5 +1001,6 @@ Every decision is recorded in full (context, decision, alternatives considered, 
 | [ADR-011](docs/DECISIONS.md#adr-011--images-pinned-by-digest-the-runtime-stages-keep-the-os-package-upgrade) | Every image pinned by digest and updated by Dependabot; the runtime stages keep the OS package upgrade. |
 | [ADR-012](docs/DECISIONS.md#adr-012--prebuilt-images-on-ghcr-and-doctl-over-terraform-for-one-droplet) | CI publishes scanned, attested multi-arch images to GHCR and the public host pulls them by `IMAGE_TAG`; a doctl script, not Terraform, creates the one Droplet, its firewall and DNS record. |
 | [ADR-013](docs/DECISIONS.md#adr-013--the-clay-design-system-is-a-workspace-package-with-its-own-gallery) | The Clay design system is the pnpm workspace package `@quiz/clay` with a typed entry point, its own tests and a Vite gallery page instead of Storybook. |
+| [ADR-014](docs/DECISIONS.md#adr-014--flyio-as-a-second-target-three-apps-flycast-to-the-api-redis-on-a-volume) | A second target on Fly.io: web, API and Redis as three apps in one region; Fly's proxy terminates HTTPS and nginx trusts its `Fly-Client-IP`; nginx reaches the two API Machines through Flycast; Redis on a volume, not managed. |
 
 <!-- AI-ASSISTED-END -->

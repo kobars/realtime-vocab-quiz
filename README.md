@@ -38,7 +38,8 @@ running stack, and `make down` stops everything.
 
 To serve it over HTTPS from a fresh Ubuntu VM, one command installs it on the images that CI
 publishes, and `make do-deploy` creates that VM on DigitalOcean from a laptop: see
-[Deploy to a VM](docs/operations.md#deploy-to-a-vm).
+[Deploy to a VM](docs/operations.md#deploy-to-a-vm). `make fly-launch` and `make fly-deploy` run it
+on Fly.io instead: see [Deploy to Fly.io](docs/operations.md#deploy-to-flyio).
 
 ## What it does
 
@@ -95,5 +96,5 @@ tells how the design was made.
 - [docs/spec/](docs/spec/): the domain, protocol, Redis and UI specs
 - [docs/DECISIONS.md](docs/DECISIONS.md): the architecture decision records
 - [CONTRIBUTING.md](CONTRIBUTING.md): running the stack, development, the make targets, troubleshooting
-- [docs/operations.md](docs/operations.md): ports, endpoints, configuration, metrics and deploying to a VM
+- [docs/operations.md](docs/operations.md): ports, endpoints, configuration, metrics and deploying to a VM or to Fly.io
 - [SECURITY.md](SECURITY.md): how to report a vulnerability
