@@ -13,7 +13,7 @@ fan-out); the client is a Vue 3 single-page app.
 | Store | Redis 8 (sorted sets, Lua scripts, pub/sub) |
 | Server tests and quality | pytest, pytest-asyncio, pytest-cov, Hypothesis, httpx, ruff, mypy, import-linter, deptry |
 | Client | Node 24, pnpm 11, Vue 3, Vite, TypeScript, Pinia, Vue Router, Tailwind CSS, shadcn-vue, VueUse, lucide |
-| Client tests and quality | Vitest (v8 coverage), @vue/test-utils, happy-dom, ESLint, vue-tsc |
+| Client tests and quality | Vitest (v8 coverage), @vue/test-utils, happy-dom, Playwright, axe-core, ESLint, vue-tsc |
 | Infra | Docker Compose, nginx |
 
 ## Run and test
@@ -55,7 +55,7 @@ lint and format, ESLint, typos, and lychee in Docker on the relative links and
 anchors of the tracked Markdown); mypy (strict); import-linter; deptry (every
 import in `api/src` is a declared dependency and every runtime dependency is
 used; `api/tests`, `scripts/` and `load/` import only declared packages); pytest
-(without the `integration` and `acceptance` markers) with a unit branch-coverage
+(without the `integration`, `acceptance` and `system` markers) with a unit branch-coverage
 floor (`UNIT_COVERAGE_FLOOR` in the `Makefile`); the acceptance tests on the memory store; the contract drift check; vue-tsc; Vitest with coverage thresholds
 (`web/vitest.config.ts`); and the client build (`pnpm -C web build`). Every pull
 request and every push to `main` runs the same gate in GitHub Actions
@@ -97,6 +97,8 @@ dropped) and `/ws` to the nodes, round-robin. Only nginx publishes a port:
 cp .env.example .env                        # then set ADMIN_TOKEN and REDIS_PASSWORD
 make build                                  # the images the stack runs
 docker compose --profile full up -d --wait  # returns once every service is healthy
+make test-system                            # the system tests, through nginx (STACK_URL)
+make test-browser                           # the browser specs (Chromium; once: pnpm -C web exec playwright install chromium)
 make smoke-full                             # the smoke run below
 make down                                   # stops the stack and the development Redis
 ```
@@ -109,6 +111,23 @@ The stopped node then starts again. It starts the quiz `VOCAB-42` for an hour un
 is open already; after that hour a run needs another quiz
 (`uv run --project api python load/smoke_full.py --quiz-ids BIZ-20`) or a fresh stack
 Redis (`docker compose --profile full down -v`).
+
+`make test-system` (`api/tests/system/`) and `make test-browser` (`web/e2e/`, Playwright with an
+axe accessibility scan) drive a running stack at `STACK_URL` (default
+`http://localhost:$QUIZ_PORT`) and read its `ADMIN_TOKEN` from `.env` to start their quizzes. The
+two suites start different quizzes, which keep their players for 24 h in the stack's Redis volume,
+so running a suite again needs a fresh stack: `docker compose --profile full down -v`, then `up`
+again. The browser specs start `VOCAB-42`, which `make smoke-full` reuses while it is open, so
+they run before it. The system tests check what only the composed stack shows: a score on one node
+reaches a socket on the other within 500 ms (an accepted upgrade names its node in `X-Node-Id`), a
+foreign `Origin` gets 403, a spoofed `X-Forwarded-For` does not lift the per-address connection
+cap (skipped when `PER_IP_CONN_CAP` is above 100), `/api/metrics` is 404, a body above nginx's
+limit gets 413, and the security headers are sent. The browser specs join by ID, answer, watch
+another player's score arrive, and open an ended quiz read-only. The stack workflow
+(`.github/workflows/stack.yml`, gate job `stack-required`) runs both on every pull request that
+changes `api/`, `web/`, `infra/`, a compose file, a Dockerfile, the `Makefile` or the `.nvmrc` and
+`.python-version` files, and nightly; it uploads the Playwright report, and the stack's logs when
+a suite fails.
 
 The nodes publish no port, so check `/healthz` and `/readyz` on one from inside its
 container:

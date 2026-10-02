@@ -17,7 +17,7 @@ export default defineConfig(
   },
   {
     // A type-aware subset, not strictTypeChecked: unhandled union members and lost promises.
-    files: ['src/**/*.{ts,vue}', '*.config.ts'],
+    files: ['src/**/*.{ts,vue}', 'e2e/**/*.ts', '*.config.ts'],
     languageOptions: {
       parserOptions: {
         projectService: true,
