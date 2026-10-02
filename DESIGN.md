@@ -45,12 +45,15 @@ Host-led stays future work.
 | Time | The server decides time on one clock (Redis `TIME`); the client countdown is display only |
 | Clients | Current browsers with WebSocket support; phones and desktops |
 | Store | One Redis 8 (Valkey 8 also works) with AOF `everysec`; a crash can lose about 1 s of answers (§11) |
-| Load (our target) | Thousands of concurrent sockets over **two API nodes** behind nginx, with a cap of 10,000 sockets per process |
-| Latency (our target) | C5: p99 below 500 ms from "answer accepted" to "leaderboard delivered", measured by the load bots |
 
-There is no load number in the requirements; our targets are the rows above, run on one and on
-two nodes and reported in §9. Two nodes are our choice: they make the scale-out claims of §10
-real.
+**Targets.** There is no load number in the requirements; these targets are ours. Two nodes are
+our choice: they make the scale-out claims of §10 real.
+
+| Target | Value | How it is measured |
+|---|---|---|
+| Latency (C5) | p99 below 500 ms from "answer accepted" to "leaderboard delivered"; frames come from a 200 ms coalescing tick, so the tick spends up to 200 ms of it | The bot swarm (`load/bots.py`) times each answer → leaderboard pair on the client side; the runs are in §9 |
+| Throughput | Thousands of concurrent sockets over **two API nodes** behind nginx (a cap of 10,000 per process), and 1,000 answers per second in one quiz of 5,000 players (§9) | Bot swarm runs on one and on two nodes: sockets, messages per second, CPU and memory (§9) |
+| Availability | The service keeps running when one API node stops: its clients reconnect to the other node within the backoff (at most 10 s) and resync. Redis is the single point of failure: while it is down, requests get `UNAVAILABLE` | `/readyz` on each node (503 while Redis is unreachable); the failure table of §11 |
 
 **How the design meets each acceptance criterion.**
 
@@ -175,7 +178,140 @@ composition root alone wires them is a convention, not a check.
 <!-- AI-ASSISTED-END -->
 
 ## 5. Data flow
-TODO: the flow from joining a quiz to a leaderboard update.
+
+<!-- AI-ASSISTED-BEGIN: section 5 drafted with Claude Code from the gateway, use-case, fan-out and Redis adapter code and the Lua scripts, checked by hand against that code. -->
+
+Server paths are under `api/src/quiz/`; client paths under `web/src/`. Every Lua script is in
+`adapters/redis/lua/` and runs through `adapters/redis/store.py` (`RedisStore`), which passes
+no time and no points: each script reads Redis `TIME` itself.
+
+**Join.**
+
+1. The client (`protocol/identity.ts`) creates a mock session once per tab
+   (`POST /api/sessions`, kept in `sessionStorage`) and asks for a single-use, 30 s ticket
+   before every connect (`POST /api/tickets`). The mock identity
+   (`adapters/mock_auth/redis_store.py`) keeps both in Redis, so a ticket made on one node works
+   on the other.
+2. `protocol/client.ts` opens `GET /ws?ticket=…` with the subprotocol `quiz.v1`; nginx sends it
+   to either node.
+3. `adapters/ws/endpoint.py` checks, before the upgrade: the `Origin` (403), the subprotocol
+   (400), the ticket, redeemed once (401; 503 when the ticket store is unreachable), then the
+   connection caps (503 per process, 429 per client address). The identity comes from the
+   ticket only.
+4. The client sends `join {quizId, displayName}`. `adapters/ws/session.py` checks the frame
+   size, the token bucket and the strict parser (`contracts/codec.py`), then calls
+   `QuizService` (`app/service.py`).
+5. `join.lua` checks the quiz and its deadline, creates the player with score 0 on the
+   first join, writes the presence entry with this connection's ID and sets the quiz's `dirty`
+   flag. It never increments `seq` and never publishes. If the user already held
+   another connection, the script returns that connection's ID.
+6. The node replies `joined {atSeq, cursor, score, …}` and records the socket in its registry
+   (`adapters/ws/registry.py`). An older socket of the same user on this node gets
+   `SESSION_REPLACED` and close 4001; one on another node is refused with `SESSION_REPLACED` at
+   its next write, because the scripts compare the connection ID. The quiz's first socket on a
+   node starts that node's loop for the quiz (`fanout/tick.py`): it subscribes to
+   `quiz:{<quizId>}:events` and ticks.
+7. The client sends one `resync {lastSeq}` and gets a `snapshot`: the standings at one `seq`
+   from `read_standings.lua`, and its own row read fresh.
+8. The next tick's `leaderboard` frame carries the new player count to everyone.
+
+**Answer → leaderboard.**
+
+1. The client sends `next {questionIndex}`. `serve_question.lua` stores the serve time from
+   `TIME` once (a retry gets the same question and the same deadline) and returns the question
+   ID and the time left; the use case adds the prompt and the choices from the mock question
+   bank (`adapters/mock_questions/bank.py`) and replies `question`.
+2. The client sends `answer {questionIndex, choiceIndex, submissionId}`. `score_answer.lua`, in
+   one atomic step: a stored `submissionId` returns its stored result (`INVALID_MESSAGE` if it
+   was sent for another question); then the deadline and the player's connection are checked;
+   a question not served yet is `QUESTION_NOT_OPEN` and an answered one `ALREADY_ANSWERED`; then
+   it scores with `lib/points.lua` on the time since the serve (0 points when wrong or late) and
+   records the answer. When the answer scored, the same script adds the points to the total,
+   writes the packed sorted-set score and sets `dirty`.
+3. The node replies `answer_result` with the points, the new total and the correct choice.
+4. Every node that holds a socket of the quiz calls `publish_leaderboard.lua` every 200 ms. It
+   returns `clean` when `dirty` is unset and `busy` while another node's tick token lives;
+   otherwise it takes the token (`SET NX PX 200`), clears `dirty`, increments `seq`, builds the
+   frame (every player up to 200, else the top 50 and the ranks of the scorers outside them)
+   and publishes it once on `quiz:{<quizId>}:events`.
+5. On each node, `fanout/broadcast.py` (`Relay`) receives the frame, queues the same bytes on
+   every local socket of the quiz, and sends `rank_update` to each local scorer outside the top
+   50. Each socket's one writer (`adapters/ws/sender.py`) skips and conflates leaderboards for
+   a slow client.
+6. The client's `protocol/seq.ts` applies a frame whose `seq` is the last one plus 1, and the
+   Pinia store (`stores/quiz.ts`) redraws the leaderboard.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Browser A
+    participant N1 as api-1
+    participant R as Redis
+    participant N2 as api-2
+    participant B as Browser B
+    A->>N1: join (WebSocket, through nginx)
+    N1->>R: join.lua: player, presence, dirty
+    N1-->>A: joined
+    N1->>R: SUBSCRIBE quiz:{id}:events (first local socket)
+    B->>N2: join
+    N2->>R: join.lua
+    N2-->>B: joined
+    N2->>R: SUBSCRIBE quiz:{id}:events
+    A->>N1: next
+    N1->>R: serve_question.lua: serve time from TIME
+    N1-->>A: question
+    A->>N1: answer
+    N1->>R: score_answer.lua: score once, total and sorted set, dirty
+    N1-->>A: answer_result
+    N2->>R: publish_leaderboard.lua (200 ms tick)
+    R-->>N2: published: token, INCR seq, PUBLISH
+    R-->>N1: leaderboard frame (pub/sub)
+    R-->>N2: leaderboard frame (pub/sub)
+    N1-->>A: leaderboard
+    N2-->>B: leaderboard
+    N1->>R: publish_leaderboard.lua (same tick)
+    R-->>N1: busy: another node holds the token
+```
+
+**Reconnect → resync.**
+
+1. A socket drops (close 1006), or a side stops hearing the other: the client closes and
+   reconnects after 50 s with no inbound message, and the server closes a socket that missed the
+   pong of its 25 s heartbeat ping (`adapters/ws/heartbeat.py`). The registry starts a 10 s grace
+   timer; then `leave.lua` removes the presence only if this connection still holds it.
+2. The client waits a full-jitter backoff (`protocol/backoff.ts`), gets a new ticket with the
+   same session token (so the same user ID), and connects again, to either node.
+3. `join.lua` finds the player and keeps the cursor and the score; the new connection ID takes
+   over the presence, which makes the old connection's pending leave stale.
+4. The client sends exactly one `resync` with the last `seq` it applied. The use case answers
+   with a full `snapshot`: the shared standings cached per (`seq`, status, player count), and the
+   player's own row read fresh. At most one resync per second per connection (`RATE_LIMITED`).
+5. `protocol/seq.ts` resets to the snapshot's `atSeq` and applies the newer frames it buffered.
+   The client resends each answer that has no `answer_result` yet with the same
+   `submissionId`; `score_answer.lua` returns the stored result, so nothing scores twice.
+
+On a live socket the same repair runs on a gap: a frame above the last `seq` plus 1 makes the
+client wait 0–250 ms and resync; a lower `seq` (the store restarted) makes it resync at once;
+a `pong` whose `seq` is above the last one applied makes it check again after 1 s and resync if
+no frame arrived, which finds a lost last frame.
+
+**Quiz end.**
+
+1. At the deadline there is no timer: once `TIME` passes it, `publish_leaderboard.lua` returns
+   `ended`, and the first write refused at the deadline (a join, a serve or an answer gets
+   `QUIZ_ENDED`) also leads the use case to call `end_quiz.lua` with the reason `deadline`.
+2. The mock host end (`POST /admin/quizzes/{quizId}/end`) runs `RedisStore.end_by_host`: an end
+   mark, `WAITAOF 1 0 2000` until the mark is on disk (else 503 `UNAVAILABLE`, retry), then
+   `end_quiz.lua` with the reason `host`.
+3. `end_quiz.lua` announces once: it increments `seq`, stores it as `endSeq` and publishes
+   `quiz_ended` with the top 50; every later call returns the same `endSeq`.
+4. Each node's `Relay` reads its local players' final rows and sends each player `quiz_ended`
+   with their own rank and score; then the node's loop for the quiz ends.
+5. The client always applies `quiz_ended` and drops later frames. A `join` after the end is read
+   only: a final `snapshot` and `QUIZ_ENDED`, and `get_leaderboard` pages still answer. The
+   quiz's keys expire 24 h after the last write.
+
+<!-- AI-ASSISTED-END -->
 
 ## 6. Technologies and justification
 
@@ -202,10 +338,37 @@ Exact versions: `api/uv.lock` and `web/pnpm-lock.yaml`; runtimes in `.python-ver
 <!-- AI-ASSISTED-END -->
 
 ## 7. Consistency contract
-TODO: the scoring and ordering guarantees, their mechanisms and the tests that prove them.
+
+<!-- AI-ASSISTED-BEGIN: sections 7 and 8 drafted with Claude Code from docs/spec/domain.md §8 and the scripts that enforce it. -->
+
+What the design guarantees about scores and standings. The full contract, with the code that
+enforces each guarantee and the tests that prove it, is
+[domain spec §8](docs/spec/domain.md#8-the-consistency-contract-c1c6).
+
+- **C1, scored once.** Each (player, question) scores at most once, even with retries and the
+  same answer sent to both nodes at once: the `submissionId` and the "already answered" check
+  run in the same atomic script as the write.
+- **C2, no gaps.** `seq` grows by exactly 1 per broadcast: only the scripts that publish
+  (`publish_leaderboard.lua`, `end_quiz.lua`) increment it.
+- **C3, one total.** The total in `answer_result` is the total in the next frame (or
+  `rank_update`) unless the player scored again first: one script writes both.
+- **C4, convergence.** All clients show the same standings after a quiet period: the tick runs
+  while `dirty` is set, and a client that sees a gap resyncs.
+- **C5, latency.** p99 below 500 ms from "answer accepted" to "leaderboard delivered" (§8).
+- **C6, one clock.** The server decides time on Redis `TIME`; lateness and the deadline need no
+  timer.
+
+The self-paced model keeps this small: no rule depends on a timer firing or on which node
+serves a player, so any node can run any write, and the only ordering that matters is `seq`.
 
 ## 8. Non-functional requirements
-TODO: latency, throughput, availability and durability targets.
+
+The latency, throughput and availability targets, each with how it is measured, are in
+[§2](#2-assumptions-and-non-goals) ("Targets"); §9 holds the measured numbers and §11 the
+failure modes. Durability: Redis AOF `everysec`, so a Redis crash can lose about the last
+second of answers (§11).
+
+<!-- AI-ASSISTED-END -->
 
 ## 9. Capacity estimate
 
@@ -407,13 +570,122 @@ and each node would hold one `SSUBSCRIBE` connection per shard.
 <!-- AI-ASSISTED-END -->
 
 ## 11. Reliability and failure modes
-TODO: the failure table (failure, detection, system behavior, user-visible effect, mitigation, proving test).
+
+<!-- AI-ASSISTED-BEGIN: sections 11 to 13 drafted with Claude Code from the gateway, fan-out, Redis adapter, nginx and client code and the named tests, checked by hand against that code. -->
+
+Test paths are under `api/tests/` (server) or `web/src/` (client). "Not tested" says why.
+
+| Failure | Detection | System behavior | User-visible effect | Mitigation | Proving test |
+|---|---|---|---|---|---|
+| API node crash or SIGTERM | The socket closes (1006); nginx's connect to the dead node fails | No graceful drain: the node's sockets drop; nginx sends new connects to the other node; the player's presence stays until its grace timer, which died with the node (see the limits below) | "Reconnecting", then play resumes on the other node with the same score and cursor | Client backoff (full jitter, at most 10 s), new ticket, `join`, `resync` | `web/src/protocol/client.test.ts` (reconnect with backoff); `integration/test_join_script.py::test_reconnect_keeps_player_state_and_replaces_old_connection`. The stop of a node in the full stack is not tested: no automated two-node test runs the Compose stack |
+| Redis down | A store call raises a connection error; `/readyz` returns 503 | Every request that needs Redis gets `UNAVAILABLE`; ticket redeem fails, so new sockets get HTTP 503; ticks log and retry | Errors and "reconnecting" until Redis is back | The client retries with backoff; restore Redis (a replica with failover is the next step, §10) | `integration/http/test_endpoints.py::test_readyz_and_requests_report_an_unreachable_redis`; `integration/ws/test_gateway.py::test_an_unreachable_ticket_store_answers_503`; `unit/app/test_service.py::test_redis_faults_are_unavailable_and_ping_answers_null` |
+| Redis restart (AOF loss window) | The client sees a lower `seq` on the next frame, or a gap | AOF `everysec`: the last second of writes can be lost, acknowledged answers included; a host end is announced only after its mark is on disk | A score can step back by the answers of that second; standings repair on the resync | `WAITAOF` before the host end; the client resyncs on `seq < lastSeq` | `integration/test_deadline.py::test_host_end_announces_only_after_the_mark_is_fsynced`; `web/src/protocol/seq.test.ts` (a lower `seq` resyncs at once). The loss itself is not tested: it needs a Redis killed between a write and its fsync |
+| Slow consumer | The socket's send buffer passes 64 KiB, then 256 KiB | Above 64 KiB, leaderboards are skipped and the newest one is sent with `rebase: true`; above 256 KiB, `error`, then close 1013 | A slow client sees fewer frames; past the hard limit it reconnects after 5 s plus the backoff | Per-socket buffer limits; one writer per socket | `integration/ws/test_connections.py::test_a_client_that_never_reads_is_conflated_then_closed_with_1013`, `::test_a_conflated_client_gets_rebase_true_and_sends_no_resync` |
+| Network drop (silent) | Server: no pong to its 25 s ping; client: no inbound message for 50 s | The server closes the socket and starts the 10 s grace; the client closes and reconnects | "Reconnecting", then resync | Heartbeat both ways; grace before the player counts as gone | `integration/ws/test_connections.py::test_the_server_pings_and_drops_a_socket_that_never_pongs`, `::test_a_drop_leaves_after_the_grace_unless_the_player_comes_back`; `web/src/protocol/client.test.ts` (reconnects after 50 s without an inbound message) |
+| Pub/sub disconnect | redis-py's subscription connection fails | redis-py reconnects and subscribes again when Redis answers; frames published meanwhile are lost. The node sends no snapshots after it (planned, not built); if the reconnect fails, that node stops relaying the quiz while its tick continues | Players on that node miss frames until their client finds the gap | The client resyncs on the next frame's gap, or on a `pong.seq` above its last `seq` within one 25 s ping | Not tested: it needs Redis to drop one connection while the others stay up |
+| Duplicate answer | The stored `submissionId`, or the "already answered" field | The same `submissionId` returns the stored result; a new one for an answered question is `ALREADY_ANSWERED`; the score does not change | None: the retry gets the same `answer_result` | Two idempotency checks in `score_answer.lua` | `contract/test_store_contract.py::test_replay_returns_same_result`; `integration/test_scoring_concurrency.py::test_concurrent_copies_of_one_answer_score_once` |
+| Late answer | Elapsed time on Redis `TIME` above `T` | Recorded with 0 points; not an error | `answer_result` with 0 points and the correct choice | One clock in the script | `unit/test_scoring.py::test_late_by_one_ms_scores_zero`; `integration/test_score_script.py::test_writes_after_the_deadline_write_nothing_and_a_replay_still_answers` |
+| Replayed ticket | The ticket store redeems a ticket once | The second upgrade gets HTTP 401 | The client gets a fresh ticket on its next connect | Single use, 30 s | `unit/adapters/test_mock_auth.py::test_ticket_redeems_once`, `::test_ticket_expires_after_30_s` |
+| Oversize frame | Frame size above 16 KiB, checked before parsing | `MESSAGE_TOO_LARGE`, then close 1009 | The client reconnects and never resends that frame | Size check first; uvicorn's own cap is 4 × 16 KiB | `integration/ws/test_gateway.py::test_a_frame_of_max_payload_passes_and_one_byte_more_gets_close_1009` |
+| Message flood | The per-connection token bucket (20/s, burst 40), before parsing | Dropped messages get `RATE_LIMITED`; 10 s of abuse closes 1008 | The flooding client is cut off | Bucket before the parser; caps per address and per process | `integration/ws/test_gateway.py::test_the_token_bucket_runs_before_the_parser`, `::test_ten_seconds_of_abuse_get_rate_limited_then_close_1008` |
+| Lost last frame (no later `seq` shows the gap) | `pong.seq` above the last applied `seq` | The client checks again 1 s later and resyncs if no frame arrived | Standings lag by at most one ping (25 s) plus 1 s | `pong` carries the counter read from Redis | `web/src/protocol/seq.test.ts` (the pong check); `unit/app/test_service.py::test_ping_reads_only_the_counter` |
+| Redis restore that moves `seq` back | A broadcast with `seq` below the last applied one | The client resyncs at once and accepts the lower snapshot | Standings jump back to the restored state | Resync on a lower `seq`; an epoch next to `seq` would also catch a counter that climbs past `lastSeq` first (§10) | `web/src/protocol/seq.test.ts` (resyncs at once on a lower `seq`). A counter that climbs past `lastSeq` before the client sees a frame is not caught: no epoch yet |
+| Reconnect with a new ticket | `join.lua` finds the user's player and presence | Same user, same score and cursor; the new connection takes over the presence; the older socket gets `SESSION_REPLACED` | Play continues; an older tab shows "opened elsewhere" (4001) | Session token per tab; ticket per connect | `web/src/protocol/identity.test.ts`; `unit/adapters/test_mock_auth.py::test_tickets_of_one_session_share_the_user`; `unit/app/test_service.py::test_session_replaced_closes_the_older_socket` |
+
+**Known limits.**
+
+- **A crash leaves stale presence.** The 10 s grace timer lives in the node; when the node dies,
+  `leave` never runs, and the presence sweep (`renew_presence`) is specified but not built
+  ([redis spec §3](docs/spec/redis.md#3-scripts)). The online count stays too high until the
+  quiz's keys expire. Scores and standings are not affected.
+- **No epoch on a Redis failover.** `seq` can go back after a failover or a restore; a client
+  resyncs on a lower `seq`, but a counter that climbs past its `lastSeq` first goes unnoticed
+  until the next gap. The fix is a `seq` epoch (§10).
+- **The AOF loss window.** AOF `everysec` can lose about the last second of acknowledged
+  answers on a Redis crash; only the host end waits for the fsync.
+- **A replaced socket on another node is closed late.** `join.lua` publishes the replacement on
+  the quiz's `control` channel, but no node listens to it yet: the older socket is refused
+  with `SESSION_REPLACED` at its next write instead of being closed at once.
 
 ## 12. Security
-TODO: authentication, input limits, origin checks and abuse limits.
+
+**Authentication.** Identity is a mock with the real shape. `POST /sessions` gives a tab an
+anonymous user ID and a session token (kept in `sessionStorage`); before every connect,
+`POST /tickets` with that token as a bearer gives a ticket (32 random bytes, base64url, single
+use, 30 s). The client opens `GET /ws?ticket=…` with the subprotocol `quiz.v1`. Before the
+upgrade the node checks the `Origin` against `ALLOWED_ORIGINS` (403), the subprotocol (400),
+the ticket (401) and the connection caps (503, 429). The user ID comes from the ticket only;
+nothing the client sends later can change it. Logs record the path, never the query string
+that holds the ticket (`adapters/ws/endpoint.py`, nginx's `edge` log format).
+
+**Abuse limits.**
+
+| Limit | Value | Where |
+|---|---|---|
+| Inbound message size | 16 KiB, checked before parsing; close 1009 | `contracts/codec.py`, `adapters/ws/session.py` |
+| JSON nesting | depth 8, checked before parsing | `contracts/codec.py` |
+| Strict messages | unknown types and unknown fields rejected | `contracts/messages.py` |
+| Message rate | 20 messages/s, burst 40, per connection; 10 s of abuse closes 1008 | `adapters/ws/limits.py` |
+| Connections | 10,000 per process (503), 50 per client address (429) | `adapters/ws/limits.py` |
+| Sessions and tickets | a bucket of 2 × 50 per client address, refilled in 60 s (429); nginx adds a flood ceiling for the whole stack | `adapters/http/routes.py`, `infra/nginx/nginx.conf` |
+| Resync | at most one per second per connection | `app/service.py` |
+| Send buffer | 64 KiB soft, 256 KiB hard (close 1013) | `adapters/ws/sender.py` |
+| Display name | at most 128 characters raw, 1–32 after trim and NFC | `contracts/messages.py`, `adapters/mock_auth/tokens.py` |
+
+The client address comes from `X-Forwarded-For` only when the peer is a trusted proxy (nginx,
+`TRUSTED_PROXIES`). The mock admin API exists only with `ADMIN_MOCK=1`; without the
+`X-Admin-Token` header (compared in constant time) its paths answer 404 like unknown paths.
+nginx answers 404 for `/api/metrics`. The containers run as non-root users on read-only root
+filesystems with every capability dropped, and the web image sends a CSP and the other
+security headers (`web/security-headers.conf`). [SECURITY.md](SECURITY.md) lists the scans.
+
+**The reveal abuse.** `answer_result` reveals the correct choice at once, and a mock identity
+is free: one person with a second tab (a second identity) can answer each question there
+first, read the correct choice, and answer it in the first tab for full points. Real sign-in
+(one identity per person) and a per-player choice order are the fix; both are out of scope for
+this build (§2).
 
 ## 13. Observability
-TODO: logs, metrics and how to diagnose a slow or stuck quiz.
+
+**SLO.** 99% of leaderboard updates reach the client within 500 ms of "answer accepted" (C5),
+over a quiz; `/readyz` answers 200 while Redis is reachable. The load bots measure the first
+(`load/bots.py`, §9).
+
+**What each node exposes.**
+
+- `/healthz`: liveness, 200 `{"status":"ok"}` while the process answers HTTP.
+- `/readyz`: readiness, 200 `{"status":"ready"}`, or 503 `{"status":"unavailable"}` when Redis is
+  unreachable.
+- `/metrics` (Prometheus text format, `obs/metrics.py`): `ws_connections` (open sockets),
+  `answers_total{result}` (correct, wrong, late), `leaderboard_frames_total` (frames this node
+  published), `tick_duration_seconds` (histogram of one tick) and `redis_clock_step_total`
+  (answers scored at elapsed 0 after a Redis clock step back).
+- JSON logs (`obs/logs.py`, structlog): one `http_request` line per request with the path,
+  status and duration; a line when a socket closes, with its code; each line carries the
+  `request_id` (a socket's connection ID) and the `quiz_id`. No line holds a ticket.
+
+**Alerts a production setup would add.** `/readyz` failing on any node; the answer → leaderboard
+p99 above 500 ms (from client-side timings, which this build does not export); the p99 of
+`tick_duration_seconds` above 50 ms; `rate(leaderboard_frames_total)` at 0 while
+`answers_total` grows; `ws_connections` near the 10,000 cap; any increase of
+`redis_clock_step_total`; a rise in 1013 and 1008 closes in the logs.
+
+**Diagnosis: "the leaderboard is slow".**
+
+1. Check `/readyz` on both nodes (`docker compose exec api-1 …`, README): a 503 means Redis.
+2. Check that frames are published: `leaderboard_frames_total` must grow while answers arrive.
+   If it does not, look for `tick of quiz … store unreachable` or `fan-out of quiz … stopped`
+   in the logs.
+3. Check the tick time: a high `tick_duration_seconds` points at Redis (`SLOWLOG GET`,
+   `INFO commandstats` for the scripts; a quiz above 200 players ranks every scorer in the tick).
+4. Check the sockets: many 1013 closes, or conflated frames, mean slow clients or a saturated
+   node (CPU of the node's one event loop; `ws_connections`).
+5. Check the client: a client that keeps resyncing (gaps) points at lost frames, for example a
+   pub/sub reconnect on its node (§11).
+6. Reproduce with the bot swarm against the stack and compare its answer → leaderboard
+   percentiles with §9.
+
+<!-- AI-ASSISTED-END -->
 
 ## 14. Implemented and mocked
 
