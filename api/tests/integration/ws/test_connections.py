@@ -320,7 +320,7 @@ def test_an_unfinished_request_head_is_cut_at_its_size_limit_and_at_its_deadline
     settings = Settings(header_timeout_ms=1_000)
     app = create_app(settings)
     with served(app, settings) as live:
-        with urlopen(f"http://127.0.0.1:{live.port}/healthz", timeout=2) as ok:  # noqa: S310
+        with urlopen(f"http://127.0.0.1:{live.port}/healthz", timeout=2) as ok:
             assert ok.status == 200
         head = b"GET /healthz HTTP/1.1\r\nHost: x\r\n"
         with socket.create_connection(("127.0.0.1", live.port), timeout=2) as endless:

@@ -81,20 +81,29 @@ class Gateway:
         # Each attempt below costs a ticket lookup in the store: one attempt per socket the
         # address may hold, and one reconnect each.
         burst = 2 * settings.per_ip_conn_cap
-        self.upgrades = AddressRateLimiter(burst / ADDRESS_REFILL_S, burst, lambda: self.clock())
+        self.upgrades = AddressRateLimiter(burst / ADDRESS_REFILL_S, burst, self._now)
         for name in UVICORN_LOGGERS:  # adding it twice is a no-op
             logging.getLogger(name).addFilter(path_only)
         logging.getLogger("uvicorn.error").addFilter(not_after_a_denial)
 
+    def _now(self) -> int:  # reads ``clock`` on each call, so a test can replace it
+        return self.clock()
+
+    def _refusal(self, ws: WebSocket, ip: str) -> tuple[int, str] | None:
+        """The status and reason that refuse the upgrade before its ticket is looked up."""
+        if ws.headers.get("origin") not in self._settings.allowed_origins:
+            return 403, "origin not allowed"
+        if SUBPROTOCOL not in ws.scope.get("subprotocols", ()):
+            return 400, f"subprotocol {SUBPROTOCOL} not offered"
+        if not self.upgrades.allow(ip):
+            return 429, "too many upgrade attempts"
+        return None
+
     async def endpoint(self, ws: WebSocket) -> None:
         settings = self._settings
-        if ws.headers.get("origin") not in settings.allowed_origins:
-            return await _refuse(ws, 403, "origin not allowed")
-        if SUBPROTOCOL not in ws.scope.get("subprotocols", ()):
-            return await _refuse(ws, 400, f"subprotocol {SUBPROTOCOL} not offered")
         ip = connection_ip(ws, settings.trusted_proxies)
-        if not self.upgrades.allow(ip):
-            return await _refuse(ws, 429, "too many upgrade attempts")
+        if (refusal := self._refusal(ws, ip)) is not None:
+            return await _refuse(ws, *refusal)
         ticket = ws.query_params.get("ticket")
         try:
             identity = await self._tickets.redeem(ticket) if ticket else None

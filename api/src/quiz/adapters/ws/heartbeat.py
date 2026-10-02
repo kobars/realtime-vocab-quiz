@@ -20,7 +20,7 @@ limit is counted by uvicorn's ``limit_concurrency``, so a node is never publishe
 nginx stands in front of it."""
 
 import asyncio
-from typing import override
+from typing import ClassVar, override
 
 import uvicorn
 from starlette.types import ASGIApp
@@ -35,51 +35,56 @@ MAX_FRAGMENTS = 64  # the frames of one WebSocket message; empty fragments count
 GRACEFUL_SHUTDOWN_S = 5  # then open requests are cancelled; below the engine's 10 s stop grace
 
 
-def bounded_head(timeout_s: float) -> type[HttpToolsProtocol]:
-    class BoundedHead(HttpToolsProtocol):
-        head_bytes = 0
-        deadline: asyncio.TimerHandle | None = None  # set while a request head is unfinished
+class BoundedHead(HttpToolsProtocol):
+    head_timeout_s: ClassVar[float]  # set by ``bounded_head``
+    head_bytes = 0
+    deadline: asyncio.TimerHandle | None = None  # set while a request head is unfinished
 
-        def _start_deadline(self) -> None:
-            if self.deadline is None:
-                self.deadline = self.loop.call_later(timeout_s, self.transport.close)
+    def _start_deadline(self) -> None:
+        if self.deadline is None:
+            self.deadline = self.loop.call_later(self.head_timeout_s, self.transport.close)
 
-        def _stop_deadline(self) -> None:
-            if self.deadline is not None:
-                self.deadline.cancel()
-                self.deadline = None
+    def _stop_deadline(self) -> None:
+        if self.deadline is not None:
+            self.deadline.cancel()
+            self.deadline = None
 
-        @override
-        def connection_made(self, transport: asyncio.Transport) -> None:  # type: ignore[override]
-            super().connection_made(transport)
-            self._start_deadline()
+    @override
+    def connection_made(self, transport: asyncio.Transport) -> None:  # type: ignore[override]
+        super().connection_made(transport)
+        self._start_deadline()
 
-        @override
-        def connection_lost(self, exc: Exception | None) -> None:
-            self._stop_deadline()
-            super().connection_lost(exc)
+    @override
+    def connection_lost(self, exc: Exception | None) -> None:
+        self._stop_deadline()
+        super().connection_lost(exc)
 
-        @override
-        def data_received(self, data: bytes) -> None:
-            super().data_received(data)
-            if self.deadline is None or self.transport.is_closing():
-                return
-            self.head_bytes += len(data)  # the head is still unfinished: all of it is head
-            if self.head_bytes > MAX_HEAD_BYTES:
-                self.send_400_response("Request head too large.")
+    @override
+    def data_received(self, data: bytes) -> None:
+        super().data_received(data)
+        if self.deadline is None or self.transport.is_closing():
+            return
+        self.head_bytes += len(data)  # the head is still unfinished: all of it is head
+        if self.head_bytes > MAX_HEAD_BYTES:
+            self.send_400_response("Request head too large.")
 
-        @override
-        def on_message_begin(self) -> None:
-            super().on_message_begin()
-            self.head_bytes = 0
-            self._start_deadline()
+    @override
+    def on_message_begin(self) -> None:
+        super().on_message_begin()
+        self.head_bytes = 0
+        self._start_deadline()
 
-        @override
-        def on_headers_complete(self) -> None:
-            self._stop_deadline()
-            super().on_headers_complete()
+    @override
+    def on_headers_complete(self) -> None:
+        self._stop_deadline()
+        super().on_headers_complete()
 
-    return BoundedHead
+
+def bounded_head(timeout_s: float) -> type[BoundedHead]:
+    class Configured(BoundedHead):
+        head_timeout_s = timeout_s
+
+    return Configured
 
 
 class BoundedFragments(WebSocketsSansIOProtocol):
