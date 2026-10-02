@@ -232,7 +232,8 @@ def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
     for command in (
         "hadolint/hadolint:",
         "xargs -0 --no-run-if-empty shellcheck",
-        "docker compose -f {} config -q",
+        "docker compose config -q",
+        "docker compose -f compose.yaml -f compose.prod.yaml config -q",
         "make build",
         'scripts/smoke_images.sh "$IMAGE_TAG"',
         'scripts/check_nginx.sh "$IMAGE_TAG"',

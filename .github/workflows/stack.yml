@@ -1,4 +1,4 @@
-# AI-ASSISTED: the composed stack behind nginx: the system tests and the browser specs, on PRs that change it and nightly.
+# AI-ASSISTED: the composed stack behind nginx, and behind Caddy's HTTPS: the system tests and the browser specs, on PRs that change it and nightly.
 name: stack
 
 on:
@@ -95,10 +95,49 @@ jobs:
           path: web/playwright-report/
           if-no-files-found: ignore
 
+  # compose.prod.yaml on top: Caddy in front with a certificate from its local CA, and the system
+  # tests over HTTPS and wss, the edge's per-client addresses included (tests/system/test_edge.py).
+  prod:
+    needs: changes
+    if: needs.changes.outputs.stack == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      IMAGE_TAG: ci
+      STACK_URL: https://localhost
+      SSL_CERT_FILE: ${{ github.workspace }}/caddy-root.crt
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: api/uv.lock
+      - name: stack settings
+        run: printf 'DOMAIN=localhost\nALLOWED_ORIGINS=https://localhost\nTLS_ISSUER=internal\nADMIN_TOKEN=%s\nREDIS_PASSWORD=%s\n' "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" > .env
+      - run: make prod-up
+      - name: trust Caddy's local CA
+        # Caddy writes its root certificate once it has issued the first one.
+        run: |
+          for _ in $(seq 30); do
+            docker compose -f compose.yaml -f compose.prod.yaml cp caddy:/data/caddy/pki/authorities/local/root.crt "$SSL_CERT_FILE" && break
+            sleep 1
+          done
+          curl --fail --silent --show-error --retry 10 --retry-all-errors --cacert "$SSL_CERT_FILE" "$STACK_URL/api/readyz"
+      - run: make test-system
+      - if: failure()
+        run: docker compose -f compose.yaml -f compose.prod.yaml --profile full logs --no-color --timestamps > stack-logs.txt
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stack-logs-prod
+          path: stack-logs.txt
+
   # A job joins the gate by being listed in needs.
   stack-required:
     if: always()
-    needs: [changes, stack]
+    needs: [changes, stack, prod]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -108,7 +147,7 @@ jobs:
 
   scheduled-failure:
     if: failure() && github.event_name == 'schedule'
-    needs: [changes, stack]
+    needs: [changes, stack, prod]
     permissions:
       issues: write
     uses: ./.github/workflows/scheduled-failure.yml
