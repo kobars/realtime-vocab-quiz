@@ -295,7 +295,7 @@ class MemoryStore:
                 return port.Publish("busy", retry_ms=quiz.tick_until_ms - now)
             if not quiz.state.dirty:
                 return port.Publish("clean")
-            lag_ms = max(0, now - (now if quiz.dirty_ms is None else quiz.dirty_ms))
+            lag_ms = None if quiz.dirty_ms is None else max(0, now - quiz.dirty_ms)
             quiz.state, quiz.dirty_ms = s.transition(quiz.state, s.Tick(), now).state, None
             quiz.tick_until_ms, quiz.last_write_ms = now + tick_ms, now
             rows = quiz.rows()
@@ -327,7 +327,7 @@ class MemoryStore:
             if reason == "host" and not quiz.state.marked:  # refuse writes; announce next call
                 deadline_ms = min(now, quiz.state.deadline_ms)
                 quiz.state = replace(quiz.state, deadline_ms=deadline_ms, marked=True, dirty=False)
-                quiz.last_write_ms = now
+                quiz.dirty_ms, quiz.last_write_ms = None, now  # as Redis deletes dirty
                 return port.End("marked")
             quiz.state = s.transition(quiz.state, s.End(), now).state
             quiz.end_seq, quiz.last_write_ms = quiz.state.seq, now

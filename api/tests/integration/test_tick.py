@@ -117,3 +117,15 @@ async def test_tick_token_stretched_by_a_clock_step_back_is_cut_to_one_tick(
     assert at_most_one_tick(await redis_client.pttl(keys.tick))
     await asyncio.sleep(0.25)
     assert await redis_store.publish_if_dirty(quiz_id, "n2") == Publish("published", 2)
+
+
+@pytest.mark.parametrize("dirty", ["1", "x"])
+async def test_a_dirty_value_that_is_no_change_time_publishes_without_a_lag(
+    redis_store: RedisStore, redis_client: Redis, keys: QuizKeys, quiz_id: str, dirty: str
+) -> None:
+    await created(redis_store, quiz_id, "a")
+    assert (await redis_store.publish_if_dirty(quiz_id, "n1")).lag_ms is not None
+    await asyncio.sleep(0.25)
+    await redis_client.set(keys.dirty, dirty)  # as an older script, or a stray write, left it
+    published = await redis_store.publish_if_dirty(quiz_id, "n1")
+    assert (published.status, published.lag_ms) == ("published", None)

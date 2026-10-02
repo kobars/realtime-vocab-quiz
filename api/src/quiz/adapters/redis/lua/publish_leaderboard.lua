@@ -1,9 +1,10 @@
 -- AI-ASSISTED: publish_leaderboard of docs/spec/redis.md §3 and §5: the dirty gate and tick token.
 -- ARGV: nodeId, tickMs, topN, fullListMax. At most one frame per tick window across all nodes, and only while dirty;
 -- INCR seq and PUBLISH happen here together, so seq grows by 1 per broadcast (C2). A frame's lag runs
--- from the first change it carries, the time dirty holds; a clock step back clamps it to 0.
+-- from the first change it carries, the time dirty holds; a clock step back clamps it to 0. A dirty
+-- value before the quiz start is no change time (older scripts wrote 1): the frame has no lag.
 local tick_ms, top_n, full_list_max = tonumber(ARGV[2]), tonumber(ARGV[3]), tonumber(ARGV[4])
-local meta = redis.call('HMGET', KEYS[K.meta], 'deadlineMs', 'endedMs', 'endSeq')
+local meta = redis.call('HMGET', KEYS[K.meta], 'deadlineMs', 'endedMs', 'endSeq', 'startMs')
 if not meta[1] then
   return {'QUIZ_NOT_FOUND'}
 end
@@ -41,4 +42,8 @@ publish_frame({v = 1, type = 'leaderboard', seq = seq, rebase = false, playerCou
   onlineCount = redis.call('HLEN', KEYS[K.present])}, standing_rows(0, frame_last(count, top_n, full_list_max)), ranks)
 redis.call('DEL', KEYS[K.scored])
 refresh()
-return {'published', seq, math.max(0, now - tonumber(dirty_ms))}
+local dirty_at, lag = tonumber(dirty_ms), false
+if dirty_at and dirty_at >= tonumber(meta[4]) then
+  lag = math.max(0, now - dirty_at)
+end
+return {'published', seq, lag}

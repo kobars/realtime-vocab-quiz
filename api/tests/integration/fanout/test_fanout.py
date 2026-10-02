@@ -133,8 +133,10 @@ async def test_each_tick_is_timed_and_each_published_frame_counted(
     assert metric("leaderboard_frames_total") - frames == 2
     assert metric("tick_duration_seconds_count") - timed == ticks[0] >= 3
     assert metric("leaderboard_publish_lag_seconds_count") - lags == 2
-    assert metric(LAG_SUM) - lag_s == pytest.approx(sum(r.lag_ms for r in published) / 1000)
-    assert published[1].lag_ms > 0  # the answer waited for the next tick
+    lag_ms = [r.lag_ms for r in published]
+    assert metric(LAG_SUM) - lag_s == pytest.approx(sum(ms or 0 for ms in lag_ms) / 1000)
+    assert None not in lag_ms
+    assert (lag_ms[1] or 0) > 0  # the answer waited for the next tick
 
 
 async def test_the_tick_runs_only_while_the_quiz_has_local_sockets(

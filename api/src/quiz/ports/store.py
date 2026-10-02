@@ -126,8 +126,9 @@ class Publish:
     status: Literal["published", "clean", "busy", "ended"]
     seq: int | None = None  # published: the new seq; ended: the end seq, if announced
     retry_ms: int = 0  # busy: how long the tick token still holds
-    # published: ms from the first change the frame carries; a timing, not part of the result
-    lag_ms: int = field(default=0, compare=False)
+    # published: ms from the first change the frame carries, None when that time is unknown;
+    # a timing, not part of the result
+    lag_ms: int | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
