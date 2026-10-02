@@ -111,16 +111,10 @@ def _response(tmp_path: Path, missing: str = "") -> Path:
 
 def _lua_files(tmp_path: Path, missing: str = "") -> Path:
     """The repo's Lua scripts, relative to the lua/ folder, except ``missing``."""
-    tracked = subprocess.run(
-        ["git", "ls-files", f"{LUA}*.lua"],  # noqa: S607
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.split()
-    names = sorted(path.removeprefix(LUA) for path in tracked if path != f"{LUA}{missing}")
+    lua = ROOT / LUA
+    names = sorted(str(path.relative_to(lua)) for path in lua.rglob("*.lua"))
     listing = tmp_path / "lua.txt"
-    listing.write_text("".join(f"{name}\n" for name in names), encoding="utf-8")
+    listing.write_text("".join(f"{name}\n" for name in names if name != missing), encoding="utf-8")
     return listing
 
 

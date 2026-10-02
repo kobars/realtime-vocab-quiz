@@ -84,7 +84,9 @@ check_api_image() {
     echo "$image defaults to STORE=$store, not redis" >&2
     return 1
   fi
-  expected="$(git -C "$root" ls-files "$lua_dir/*.lua" | sed "s|^$lua_dir/||" | sort)"
+  # The image is built from this checkout, so it should hold every Lua file of its lua/ folder,
+  # listed in the order of Python's sorted().
+  expected="$(cd "$root/$lua_dir" && find . -name '*.lua' | sed 's|^\./||' | LC_ALL=C sort)"
   actual="$(docker run --rm --entrypoint python "$image" -c "from importlib.resources import files; lua = files('quiz.adapters.redis') / 'lua'; print(*sorted(str(p.relative_to(lua)) for p in lua.rglob('*.lua')), sep='\n')")"
   if [[ "$actual" != "$expected" ]]; then
     echo "API image Lua scripts differ from the repo (< repo, > image):" >&2
