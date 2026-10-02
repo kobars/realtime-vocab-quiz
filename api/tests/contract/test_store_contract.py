@@ -74,10 +74,11 @@ async def test_a_quiz_keeps_the_bank_quiz_it_plays(store: Store, quiz_id: str) -
 
 async def test_a_host_token_hash_is_kept_with_its_quiz(store: Store, quiz_id: str) -> None:
     assert await store.host_token_hash(quiz_id) is None  # unknown
+    digest = "ab12"  # what the store gets: a hash, never the token
     await store.create_quiz(
-        quiz_id, QUESTIONS, window_ms=WINDOW_MS, time_limit_ms=LIMIT_MS, host_token_hash="ab12"
+        quiz_id, QUESTIONS, window_ms=WINDOW_MS, time_limit_ms=LIMIT_MS, host_token_hash=digest
     )
-    assert await store.host_token_hash(quiz_id) == "ab12"
+    assert await store.host_token_hash(quiz_id) == digest
     await started(store, other := f"{quiz_id}-B")
     assert await store.host_token_hash(other) is None  # created without one
 

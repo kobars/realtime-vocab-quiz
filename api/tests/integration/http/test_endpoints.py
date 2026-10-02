@@ -1,4 +1,5 @@
-# AI-ASSISTED: the HTTP edge in process: sessions, tickets, quiz info, mock admin, probes, logs.
+# AI-ASSISTED: the HTTP edge in process: sessions, tickets, quiz info, mock admin, probes, logs;
+# the self-service hosting routes on the OpenAPI page.
 import io
 import json
 from collections.abc import AsyncIterator
@@ -200,7 +201,8 @@ async def test_openapi_shows_every_endpoint_with_an_example(http: httpx.AsyncCli
     schemas = spec["components"]["schemas"]
     expected = {
         ("post", "/sessions"), ("post", "/tickets"), ("get", "/quizzes/{quiz_id}"),
-        ("get", "/healthz"), ("get", "/readyz"), ("get", "/metrics"),
+        ("get", "/healthz"), ("get", "/readyz"), ("get", "/metrics"), ("get", "/banks"),
+        ("post", "/quizzes"), ("post", "/quizzes/{quiz_id}/end"),
     }  # fmt: skip
     found = {(verb, path) for path, ops in spec["paths"].items() for verb in ops}
     assert expected <= found

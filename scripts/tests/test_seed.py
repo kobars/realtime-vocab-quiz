@@ -11,6 +11,7 @@ from typing import Any, cast, override
 import pytest
 
 import seed
+from quiz.adapters.http.hosting import run_id
 from quiz.adapters.http.routes import QUIZ_ID
 
 TOKEN = "seed-test-token"  # noqa: S105 - the fake server's token
@@ -87,7 +88,7 @@ def test_a_long_bank_quiz_id_is_cut_to_keep_the_run_id_valid(admin: FakeAdmin) -
 
 
 def test_a_cut_bank_quiz_id_leaves_no_double_hyphen() -> None:
-    assert seed.run_id("ABCDEFGHIJ-KLMNO", "AAAA") == "ABCDEFGHIJ-AAAA"
+    assert run_id("ABCDEFGHIJ-KLMNO", "AAAA") == "ABCDEFGHIJ-AAAA"
 
 
 def test_end_ends_the_quiz_as_the_host(

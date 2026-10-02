@@ -1,4 +1,5 @@
-# AI-ASSISTED: the composition root: settings in, adapters, use cases and HTTP wired, app out.
+# AI-ASSISTED: the composition root: settings in, adapters, use cases and HTTP wired, app out;
+# the self-service hosting routes when PUBLIC_HOSTING is on.
 """``create_app()`` is the one place that picks adapters and hands them their dependencies.
 Start hooks run in order; stop hooks run in reverse, also after a failed start, and a failing
 stop hook never skips the others. ``quiz.main:app`` is built once, on first access, so importing
@@ -15,14 +16,14 @@ from fastapi import FastAPI
 from redis import exceptions as redis_errors
 from redis.asyncio import BlockingConnectionPool, Redis
 
-from quiz.adapters.http import HttpDeps, install
+from quiz.adapters.http import HttpDeps, hosting, install
 from quiz.adapters.memory import MemoryStore
 from quiz.adapters.mock_auth import MemoryTicketStore, RedisTicketStore
 from quiz.adapters.mock_auth.tokens import TICKET_TTL_S
 from quiz.adapters.mock_questions import MockQuestionBank
 from quiz.adapters.redis import RedisStore
 from quiz.adapters.ws.endpoint import Gateway
-from quiz.adapters.ws.limits import address_limiter
+from quiz.adapters.ws.limits import AddressRateLimiter, address_limiter
 from quiz.app.service import QuizService
 from quiz.config import Settings
 from quiz.fanout.presence import PresenceRenewer
@@ -187,7 +188,15 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
     limit = address_limiter(s.per_ip_conn_cap, monotonic_ms)
     deps = HttpDeps(services.store, services.tickets, services.bank, services.ready, ttl_ms, limit)
     proxies = s.trusted_proxies
-    install(app, replace(deps, trusted_proxies=proxies, admin_token=token, outages=OUTAGES))
+    deps = replace(deps, trusted_proxies=proxies, admin_token=token, outages=OUTAGES)
+    install(app, deps)
+    if s.public_hosting:
+        per_s = s.hosting_per_ip / s.hosting_per_ip_window_s
+        creations = AddressRateLimiter(per_s, s.hosting_per_ip, monotonic_ms)
+        hosts = hosting.Hosting(
+            s.hosting_window_ms, s.hosting_max_open, creations, s.allowed_origins, s.hosting_banks
+        )
+        hosting.install(app, deps, hosts)
     return app
 
 
