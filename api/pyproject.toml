@@ -120,6 +120,7 @@ markers = [
     "contract: wire-contract tests (set by folder)",
     "integration: tests that need Redis; REDIS_URL or a container (set by folder)",
     "acceptance: the locked acceptance tests (set by folder)",
+    "system: tests of a running full stack at STACK_URL (set by folder)",
     "slow: tests that take more than a second",
 ]
 
