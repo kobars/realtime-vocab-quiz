@@ -141,7 +141,7 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
     <ResultsView v-if="store.blocked === null && (store.phase === 'finished' || store.phase === 'results')" />
     <div
       v-else-if="store.blocked === null"
-      class="grid gap-6 lg:grid-cols-[minmax(0,640px)_360px] lg:justify-between"
+      class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,640px)_360px] lg:justify-between"
     >
       <div
         v-if="!wide"

@@ -14,16 +14,21 @@ defineExpose({ focus: () => input.value?.$el.focus() })
 
 /**
  * A parent that rewrites the typed value (the quiz ID upper-cases it) makes Vue set the input's value, which moves
- * the caret to the end. The selection seen at the input event is put back once the new value is in the DOM.
+ * the caret to the end. The selection is read when the new value arrives, before the DOM has it, and put back after.
+ * Reading it in an input listener instead fails in browsers: Vue flushes between the input listeners, so a listener
+ * that runs after v-model's sees the caret that the restore has already moved.
  */
 let selection: [number | null, number | null] | null = null
-function onInput(event: Event): void {
-  const el = event.target as HTMLInputElement
-  selection = [el.selectionStart, el.selectionEnd]
+const focusedInput = (): HTMLInputElement | null => {
+  const el = input.value?.$el
+  return el !== undefined && document.activeElement === el ? el : null
 }
 watch(model, () => {
-  const el = input.value?.$el
-  if (selection !== null && el !== undefined && document.activeElement === el) el.setSelectionRange(...selection)
+  const el = focusedInput()
+  selection = el === null ? null : [el.selectionStart, el.selectionEnd]
+}, { flush: 'pre' })
+watch(model, () => {
+  if (selection !== null) focusedInput()?.setSelectionRange(...selection)
   selection = null
 }, { flush: 'post' })
 </script>
@@ -41,7 +46,6 @@ watch(model, () => {
       v-bind="$attrs"
       :aria-invalid="error === null ? undefined : 'true'"
       :aria-describedby="describedBy"
-      @input="onInput"
     />
     <p
       v-if="hint"
