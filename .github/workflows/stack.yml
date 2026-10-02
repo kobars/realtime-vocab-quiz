@@ -1,0 +1,107 @@
+# AI-ASSISTED: the composed stack behind nginx: the system tests and the browser specs, on PRs that change it and nightly.
+name: stack
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push to a PR replaces its older run; runs on main always finish.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The filter is a job, not on.pull_request.paths, so the gate below reports on every PR.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      stack: ${{ steps.diff.outputs.stack }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
+            echo stack=true >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE...$HEAD" | grep -qE '^(api/|web/|infra/|compose[^/]*\.ya?ml$|(.*/)?Dockerfile$|\.dockerignore$|Makefile$|\.github/workflows/stack\.yml$)'; then
+            echo stack=true >> "$GITHUB_OUTPUT"
+          else
+            echo stack=false >> "$GITHUB_OUTPUT"
+          fi
+
+  stack:
+    needs: changes
+    if: needs.changes.outputs.stack == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [system, browser]
+    env:
+      IMAGE_TAG: ci
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - if: matrix.suite == 'system'
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: api/uv.lock
+      - if: matrix.suite == 'browser'
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - if: matrix.suite == 'browser'
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - if: matrix.suite == 'browser'
+        run: |
+          pnpm -C web install --frozen-lockfile
+          pnpm -C web exec playwright install --with-deps chromium
+      - name: stack secrets
+        run: printf 'ADMIN_TOKEN=%s\nREDIS_PASSWORD=%s\n' "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" > .env
+      - run: make build
+      - run: docker compose --profile full up --wait --wait-timeout 120
+      - run: make test-${{ matrix.suite }}
+      - if: failure()
+        run: docker compose --profile full logs --no-color --timestamps > stack-logs.txt
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stack-logs-${{ matrix.suite }}
+          path: stack-logs.txt
+      - if: always() && matrix.suite == 'browser'
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          if-no-files-found: ignore
+
+  # A job joins the gate by being listed in needs.
+  stack-required:
+    if: always()
+    needs: [changes, stack]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # A skipped job passes, so a PR that leaves the stack alone never blocks a merge.
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

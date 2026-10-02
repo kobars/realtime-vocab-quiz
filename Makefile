@@ -5,6 +5,11 @@ SHELL := /bin/bash
 # Runs one named step of a recipe; on failure it names the step and stops make.
 step = @printf '==> %s\n' '$(1)'; $(2) || { printf 'make: step "%s" failed\n' '$(1)' >&2; exit 1; }
 PYTEST = cd api && uv run --locked pytest
+# The tests that need neither Redis nor a running stack.
+UNIT_MARKERS = not integration and not acceptance and not system
+# The full stack's nginx, for the system and browser tests; they read its ADMIN_TOKEN from .env.
+STACK_URL ?= http://localhost:8080
+STACK_ENV = set -a; [ ! -f .env ] || . ./.env; STACK_URL='$(STACK_URL)'; set +a
 VITEST = pnpm -C web exec vitest run
 # With REPORTS set to a folder (CI sets it), each test step also writes a JUnit report there.
 pytest_junit = $(if $(REPORTS),--junitxml=$(abspath $(REPORTS))/$(1).xml)
@@ -39,7 +44,7 @@ DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
 # even to start the development Redis or to stop anything. Placeholders: never start the stack with it.
 COMPOSE_NO_SECRETS = ADMIN_TOKEN="$${ADMIN_TOKEN:-unused}" REDIS_PASSWORD="$${REDIS_PASSWORD:-unused}" docker compose
 
-.PHONY: help build up down smoke-full dev-api test test-integration check acceptance contracts audit audit-python audit-web audit-secrets review-budget
+.PHONY: help build up down smoke-full dev-api test test-integration test-system test-browser check acceptance contracts audit audit-python audit-web audit-secrets review-budget
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -57,12 +62,16 @@ smoke-full: ## Smoke-test the running full stack through nginx, stopping one API
 dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)
 	cd api && ALLOWED_ORIGINS='$(DEV_ORIGINS)' uv run --locked python -m quiz --host 127.0.0.1 --port $(DEV_API_PORT)
 test: ## Run unit, property and contract tests (no Redis)
-	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance")
+	$(call step,pytest,$(PYTEST) -m "$(UNIT_MARKERS)")
 	$(call step,vitest,$(VITEST))
 test-integration: export ACCEPTANCE_STORE = redis
 test-integration: ## Run the tests that need Redis, the acceptance tests included (REDIS_URL or a container per run)
 	$(call step,pytest integration,$(PYTEST) tests/integration tests/contract -m integration $(call pytest_junit,integration))
 	$(acceptance_steps)
+test-system: ## Run the system tests against a running full stack at STACK_URL
+	$(call step,pytest system,$(STACK_ENV); $(PYTEST) tests/system -m system)
+test-browser: ## Run the browser specs in Chromium against a running full stack at STACK_URL
+	$(call step,playwright,$(STACK_ENV); pnpm -C web exec playwright test)
 check: export ACCEPTANCE_STORE = memory
 check: ## Run every check a change must pass
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
@@ -71,7 +80,7 @@ check: ## Run every check a change must pass
 	$(call step,import layers,cd api && uv run --locked lint-imports)
 	$(call step,dependencies,cd api && uv run --locked deptry src)
 	$(call step,tool dependencies,$(DEPTRY_TOOLS))
-	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance" --cov --cov-fail-under=$(UNIT_COVERAGE_FLOOR) $(call pytest_junit,unit))
+	$(call step,pytest,$(PYTEST) -m "$(UNIT_MARKERS)" --cov --cov-fail-under=$(UNIT_COVERAGE_FLOOR) $(call pytest_junit,unit))
 	$(acceptance_steps)
 	$(call step,contracts drift,uv run --project api --locked python scripts/gen_contracts.py --check)
 	$(call step,vue-tsc,pnpm -C web exec vue-tsc --noEmit)
