@@ -65,7 +65,7 @@ BOTS ?= 20
 # built here.
 PROD_COMPOSE = scripts/deploy/ops.sh compose
 
-.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget prod-up prod-down prod-logs prod-demo prod-update prod-backup prod-restore
+.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget prod-up prod-down prod-logs prod-demo prod-update prod-backup prod-restore do-deploy do-destroy
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -102,6 +102,10 @@ prod-backup: ## Back up the public host's quiz data, certificates and .env to FI
 prod-restore: ## Restore FILE, a make prod-backup file, onto the public host's stack and restart it
 	$(if $(FILE),,$(error set FILE=<backup .tar.gz>, as make prod-backup printed it))
 	scripts/deploy/ops.sh restore '$(FILE)'
+do-deploy: ## Create a DigitalOcean Droplet that installs the stack, with doctl (DOMAIN, REGION, SIZE, DRY_RUN=1)
+	scripts/deploy/droplet.sh deploy $(if $(DOMAIN),--domain '$(DOMAIN)') $(if $(REGION),--region '$(REGION)') $(if $(SIZE),--size '$(SIZE)') $(if $(DRY_RUN),--dry-run)
+do-destroy: ## Delete the Droplet, firewall and DNS record that make do-deploy created, after a prompt (DRY_RUN=1)
+	scripts/deploy/droplet.sh destroy $(if $(DRY_RUN),--dry-run)
 smoke-full: ## Smoke-test the running full stack through nginx, stopping one API node
 	uv run --project api --locked python load/smoke_full.py
 dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)
