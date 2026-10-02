@@ -97,6 +97,13 @@ async def test_hosted_quizzes_count_up_to_the_cap_until_released(
     assert not await store.hold_hosted(first, WINDOW_MS, 2)
 
 
+async def test_the_host_end_stops_counting_a_hosted_quiz(store: Store, quiz_id: str) -> None:
+    assert await store.hold_hosted(quiz_id, WINDOW_MS, 1)
+    await started(store, quiz_id)
+    await store.end_by_host(quiz_id)
+    assert await store.hold_hosted(f"{quiz_id}-B", WINDOW_MS, 1)
+
+
 async def test_a_hosted_quiz_stops_counting_after_its_window(
     store: Store, advance: Advance, quiz_id: str
 ) -> None:

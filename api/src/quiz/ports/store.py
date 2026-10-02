@@ -183,7 +183,7 @@ class Store(Protocol):
         ...
 
     async def release_hosted(self, quiz_id: str) -> None:
-        """Stop counting ``quiz_id`` among the open self-hosted quizzes (its host ended it)."""
+        """Stop counting ``quiz_id`` among the open self-hosted quizzes (it has ended)."""
         ...
 
     async def join(self, quiz_id: str, user_id: str, display_name: str, conn_id: str) -> Joined: ...
@@ -228,6 +228,7 @@ class Store(Protocol):
 
     async def end_by_host(self, quiz_id: str) -> int:
         """The host's "end now": mark, wait for the mark to be durable, announce; the end seq.
+        An announced quiz stops counting among the open self-hosted quizzes, whoever ended it.
 
         Raises ``DomainError(UNAVAILABLE)`` when the mark is not durable or the end is not
         announced; nothing is announced then, and a retry is safe (redis.md §3.1 step 3)."""

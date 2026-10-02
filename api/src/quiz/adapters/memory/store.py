@@ -362,7 +362,9 @@ class MemoryStore:
         end = await self.end_quiz(quiz_id, "host")
         if end.status == "marked":  # memory has no fsync to wait for
             end = await self.end_quiz(quiz_id, "host")
-        return port.announced(end)
+        end_seq = port.announced(end)
+        await self.release_hosted(quiz_id)
+        return end_seq
 
     @asynccontextmanager
     async def subscribe(self, quiz_id: str) -> AsyncIterator[AsyncIterator[str]]:

@@ -321,7 +321,7 @@ on by default).
 3. Players join the share path `/q/<quizId>` as above. The host ends the quiz early with
    `POST /api/quizzes/{quizId}/end` and the `X-Host-Token` header: the node compares the
    token's hash with the stored one in constant time (403 on a mismatch), then runs the host
-   end below and takes the run out of `quiz:hosted`.
+   end below, which takes the run out of `quiz:hosted` (the admin end does too).
 
 **Quiz end.**
 

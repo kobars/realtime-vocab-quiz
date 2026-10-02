@@ -261,7 +261,9 @@ class RedisStore:
                 if await self._fsynced(conn) < 1:
                     raise DomainError(ErrorCode.UNAVAILABLE, "the end mark was not fsynced")
                 end = await self.end_quiz(quiz_id, "host", on=conn)
-        return port.announced(end)
+        end_seq = port.announced(end)
+        await self.release_hosted(quiz_id)  # after the end: a failed end keeps it counted
+        return end_seq
 
     async def _fsynced(self, conn: Redis) -> int:
         """``WAITAOF 1 0 2000`` on ``conn``: 1 when the local AOF fsync covers its writes."""

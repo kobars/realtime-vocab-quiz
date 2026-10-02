@@ -120,10 +120,9 @@ async def _end(deps: HttpDeps, quiz_id: str, token: str) -> int:
     if not (stored and given and hmac.compare_digest(given, stored)):
         raise Refusal(403, "FORBIDDEN", "not the host of this quiz")
     if (await deps.store.ranks_of(quiz_id, ())).status == "ended":
+        await deps.store.release_hosted(quiz_id)  # in case the end's own release failed
         raise DomainError(ErrorCode.QUIZ_ENDED, "the quiz has ended")
-    end_seq = await deps.store.end_by_host(quiz_id)
-    await deps.store.release_hosted(quiz_id)
-    return end_seq
+    return await deps.store.end_by_host(quiz_id)
 
 
 def _router(deps: HttpDeps, hosting: Hosting) -> APIRouter:

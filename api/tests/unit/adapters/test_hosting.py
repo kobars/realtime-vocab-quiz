@@ -131,6 +131,36 @@ async def test_the_cap_of_open_hosted_quizzes_answers_hosting_full(now: list[int
         assert (await host(http)).status_code == 201  # and so does the end of the window
 
 
+async def test_the_admin_end_also_frees_the_place(now: list[int]) -> None:
+    async with client_of(app_with(now, hosting_max_open=1)) as http:
+        first = (await host(http)).json()
+        path = f"/admin/quizzes/{first['quizId']}/end"
+        assert (await http.post(path, headers=ADMIN)).status_code == 200
+        assert (await host(http)).status_code == 201
+
+
+async def test_a_retried_end_frees_the_place_its_first_try_kept(
+    now: list[int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = app_with(now, hosting_max_open=1)
+    store = services_of(app).store
+    release = store.release_hosted
+    failures = iter([ConnectionError("store unreachable")])
+
+    async def flaky(quiz_id: str) -> None:
+        if (error := next(failures, None)) is not None:
+            raise error
+        await release(quiz_id)
+
+    monkeypatch.setattr(store, "release_hosted", flaky)
+    async with client_of(app) as http:
+        first = (await host(http)).json()
+        assert (await end(http, first["quizId"], first["hostToken"])).status_code == 503
+        again = await end(http, first["quizId"], first["hostToken"])
+        assert (again.status_code, again.json()["error"]) == (409, "QUIZ_ENDED")
+        assert (await host(http)).status_code == 201
+
+
 async def test_the_host_token_ends_the_quiz_once(http: httpx.AsyncClient) -> None:
     hosted = (await host(http)).json()
     resp = await end(http, hosted["quizId"], hosted["hostToken"])
