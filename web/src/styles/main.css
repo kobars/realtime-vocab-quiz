@@ -90,7 +90,7 @@
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(1rem); } }
 @utility animate-pop { animation: pop var(--motion-pop) var(--ease-spring); }
-@utility animate-fade-in { animation: fade-in var(--motion-base) var(--ease-standard); }
+@utility animate-fade-in { animation: fade-in var(--motion-slow) var(--ease-standard); }
 @utility animate-rise { animation: rise var(--motion-pop) var(--ease-spring) backwards; }
 /* rise-delay-N starts a podium step N stagger steps late. */
 @utility rise-delay-* { animation-delay: calc(var(--stagger) * --value(integer)); }

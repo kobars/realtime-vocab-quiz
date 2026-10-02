@@ -74,7 +74,8 @@ Shown on `answer_result`.
 A panel on every quiz screen (intro, question, feedback, finished).
 
 - **Rows:** rank, display name, score (tabular numerals, right-aligned). At most 50 rows are rendered: the top 50 of the latest `leaderboard` or `snapshot` (frames up to 200 players carry everyone; the client still renders 50).
-- **My row:** highlighted with the `--highlight` tint and "(you)". If I am not in the top 50, a pinned row under the list shows my rank and score.
+- **My row:** highlighted with the `--highlight` tint inside a 3 px `--primary` outline, and "(you)". If I am not in the top 50, a pinned row under the list shows my rank and score.
+- **Look:** each row is at least 48 px tall with a 2 px outline. The rank sits in a round chip: first place on `--sun`, second on a silver tint (`--muted` with a `--border` outline), third on a bronze tint (`--warning-soft`), all under dark text; the others on `--muted`. A long name is cut with an ellipsis and keeps the full name in its `title`.
 - **Where my rank and score come from** (the pinned row and the header): each `snapshot.you` and `quiz_ended.you` sets them, because no `rank_update` follows a join or a reconnect while the standings stay the same (protocol §4). A `snapshot` with `you: null` clears them: the user is not a player. A `quiz_ended` with `you: null` and no row of mine means the node could not read my rank, so the last values stay and the client sends one `resync` after the same random 0–250 ms wait as a gap (protocol §3), with its reply deadline and retries; the final `snapshot` it gets sets them. After that, a `leaderboard` frame updates them from its `entries` up to 200 players; above 200, each `rank_update` does.
 - **Header:** "340 players · 312 online" (`playerCount`, `onlineCount`).
 - Rows are keyed by `userId`, so a rank change moves the row instead of re-drawing it (§5.1). Ties cannot happen: ranks are unique.
@@ -83,7 +84,7 @@ A panel on every quiz screen (intro, question, feedback, finished).
 ### 3.6 Finished and results
 
 - **Finished** (`finished`, or `joined` with `finished: true`): "You finished!", my score, my provisional rank, and "Your rank can still change until the quiz ends in 4:12" (from `quizRemainingMs`). The live leaderboard keeps updating next to it.
-- **Results** (`quiz_ended`, or a `snapshot` with `status: "ended"`): a podium for ranks 1–3 (the first place in the middle and highest, each step with rank, name and score), my final rank and score from `you` in a card under it ("You placed #12 of 340"), then the rest of the top 50 as a list. "Show all players" loads `get_leaderboard` pages of 100 rows, with the result in `leaderboard_page` (`final: true`). A viewer with no player (`you: null`) sees the podium and the list only.
+- **Results** (`quiz_ended`, or a `snapshot` with `status: "ended"`): a podium for ranks 1–3 (the first place in the middle and highest, each step with a decorative medal emoji hidden from assistive tech, the name, the score and the rank as text, on the place fills of §3.5; it rises once, §5.5), my final rank and score from `you` in a card under it ("You placed #12 of 340"), then the rest of the top 50 as a list. "Show all players" loads `get_leaderboard` pages of 100 rows, with the result in `leaderboard_page` (`final: true`). A viewer with no player (`you: null`) sees the podium and the list only.
 - With fewer than 3 players the podium shows only the steps it has.
 
 ### 3.7 Connection and error states
@@ -237,7 +238,8 @@ Nothing is lost: every animated change also has a static end state that carries 
 ### 5.5 Touch feedback, the answer pop and the podium rise
 
 - **Press and lift:** a button or a choice lifts by 2 px on hover (its hard shadow grows from 4 px to 6 px) and sinks by 2 px when pressed (the shadow shrinks to 2 px), over `--motion-fast` with `--ease-spring`. A card that acts as a control lifts by 4 px with `--shadow-clay-lift` over `--motion-slow`. Transforms and shadows only, never layout.
-- **Answer pop:** the feedback card scales from 0.85 to 1 and fades in once, over `--motion-pop` (360 ms) with `--ease-spring` (`animate-pop`). A wrong answer gets the same fade and pop, never a shake. The end state is the card at full size and opacity.
+- **Answer pop:** after a correct answer the feedback card scales from 0.85 to 1 and fades in once, over `--motion-pop` (360 ms) with `--ease-spring` (`animate-pop`). After a wrong answer it only fades in, over `--motion-slow` with `--ease-standard` (`animate-fade-in`), never a shake. The end state is the card at full size and opacity.
+- **"Show all players":** the panel fades in over `--motion-slow` with `--ease-standard` (`animate-fade-in`).
 - **Podium rise:** each step rises 16 px and fades in once, over `--motion-pop` with `--ease-spring` (`animate-rise`), third place first, then second, then first, `--stagger` (120 ms) apart. The end state is the final podium.
 
 ## 6. Accessibility
@@ -315,7 +317,7 @@ Each row gives the light value (on `:root`) and the dark value (under `prefers-c
 | `--secondary` / `--secondary-foreground` | `#F2EEFF` / `#4B3199` | `#1E1A3C` / `#B197FF` | Secondary buttons, the default badge | 8.39:1; 6.89:1 |
 | `--accent` / `--accent-foreground` | `#F2EEFF` / `#181233` | `#1E1A3C` / `#F9F6FF` | Hover background of ghost buttons and menus (shadcn-vue's use) | 15.73:1; 15.50:1 |
 | `--border` | `#E5DCFF` | `#322066` | Card and badge outlines (decorative) | — |
-| `--input` | `#9774FF` | `#9774FF` | Outlines of choices and inputs | 3.14:1 on page, 3.36:1 on card; 5.32:1 on card |
+| `--input` | `#9774FF` | `#9774FF` | Outlines of choices and inputs; the first key-hint chip, under `--night` text (6.06:1) | 3.14:1 on page, 3.36:1 on card; 5.32:1 on card |
 | `--primary` | `#6441CC` | `#9774FF` | Brand violet: primary text, the ring's stroke, focused inputs, my row's border | 6.20:1 on page, 6.62:1 on card; 5.32:1 on card |
 | `--primary-foreground` | `#FFFFFF` | `#050024` | Text on primary and on the primary gradient | 6.62:1 on primary, 4.67:1 on the gradient end; 6.06:1 |
 | `--primary-hover` | `#4B3199` | `#B197FF` | The outline button's hover fill | primary-foreground on it 9.55:1; 8.47:1 |

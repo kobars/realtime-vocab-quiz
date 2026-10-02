@@ -257,6 +257,18 @@ it('my row gets a 1 s tint when it moves up, and none when it moves down', async
   expect(mine()).not.toContain('lb-rise')
 })
 
+it('the top 3 rank chips sit on the place fills under dark text; the rest are muted', () => {
+  const chips = rows(top(4)).findAll('li').map((li) => li.get('span').classes())
+  expect(chips.map((c) => c.find((name) => name.startsWith('bg-')))).toEqual(['bg-sun', 'bg-muted', 'bg-warning-soft', 'bg-muted'])
+  expect(chips.map((c) => c.find((name) => name.startsWith('text-') && !name.startsWith('text-sm')))).toEqual(['text-night', 'text-foreground', 'text-foreground', 'text-muted-foreground'])
+})
+
+it('a long name truncates and keeps the full name in its title', () => {
+  const name = 'A very long display name that does not fit'
+  const span = rows([{ rank: 1, userId: 'p1', displayName: name, score: 10 }]).get('li').findAll('span')[1]
+  expect([span?.classes(), span?.attributes('title')]).toEqual([expect.arrayContaining(['truncate', 'min-w-0']), name])
+})
+
 it('a leaving row fades where it was, not at the top of the list', async () => {
   const w = rows(top(3))
   const leaving = w.find('[data-user="p2"]').element as HTMLElement

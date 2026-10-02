@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: "Show all players": get_leaderboard pages with their atSeq, read again (at most once per second, on the monotonic clock) while the standings move or no reply came (UI spec §3.6, §6.1; protocol §3, §7). -->
+<!-- AI-ASSISTED: "Show all players": get_leaderboard pages with their atSeq, read again (at most once per second, on the monotonic clock) while the standings move or no reply came in a lifted clay panel that fades in behind motion-safe (UI spec §3.6, §6.1; protocol §3, §7). -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
@@ -84,7 +84,7 @@ onBeforeUnmount(cancel)
     v-else
     ref="panel"
     tabindex="-1"
-    class="flex flex-col gap-2"
+    class="flex flex-col gap-3 rounded-card border-clay bg-card p-4 shadow-clay-lift motion-safe:animate-fade-in"
     :aria-label="strings.leaderboard.showAll"
     @keydown.esc="hide"
   >
@@ -98,7 +98,7 @@ onBeforeUnmount(cancel)
       :limit="PAGE_SIZE"
       :animate="false"
     />
-    <div class="flex gap-2">
+    <div class="flex flex-wrap gap-2">
       <Button
         variant="secondary"
         :disabled="offset === 0"

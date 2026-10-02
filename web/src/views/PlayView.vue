@@ -193,6 +193,7 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
         />
         <Card
           v-else-if="intro && store.quiz"
+          as="section"
           class="items-start gap-4"
         >
           <span

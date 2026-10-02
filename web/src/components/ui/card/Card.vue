@@ -1,16 +1,18 @@
-<!-- AI-ASSISTED: shadcn-vue card as a clay card: card radius, 3 px outline, hard tinted shadow; `interactive` adds a lift on hover behind motion-safe. -->
+<!-- AI-ASSISTED: shadcn-vue card as a clay card: card radius, 3 px outline, hard tinted shadow; `interactive` adds a lift on hover behind motion-safe; `as` picks the element. -->
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue"
 import { cn } from "@/lib/utils"
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   class?: HTMLAttributes["class"]
   interactive?: boolean
-}>()
+  as?: string
+}>(), { as: "div" })
 </script>
 
 <template>
-  <div
+  <component
+    :is="as"
     data-slot="card"
     :class="
       cn(
@@ -21,5 +23,5 @@ const props = defineProps<{
     "
   >
     <slot />
-  </div>
+  </component>
 </template>
