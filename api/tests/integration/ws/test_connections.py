@@ -370,6 +370,65 @@ def test_a_message_of_more_than_max_fragments_closes_1009() -> None:
         assert drain(sock) == b""
 
 
+def test_a_finished_head_above_the_limit_gets_400() -> None:
+    settings = Settings()
+    app = create_app(settings)
+    with served(app, settings) as live:
+        headers = b"".join(b"X-%d: aaaa\r\n" % i for i in range(2_000))  # about 22 KiB
+        with socket.create_connection(("127.0.0.1", live.port), timeout=3) as big:
+            big.sendall(b"GET /healthz HTTP/1.1\r\nHost: x\r\n" + headers + b"\r\n")
+            assert drain(big).startswith(b"HTTP/1.1 400")
+
+
+def test_a_pipelined_body_does_not_count_toward_the_next_head() -> None:
+    settings = Settings()
+    app = create_app(settings)
+    with (
+        served(app, settings) as live,
+        socket.create_connection(("127.0.0.1", live.port), timeout=3) as sock,
+    ):
+        body = b"a" * 20_000  # above the head limit, in the same read as the next head's start
+        sock.sendall(
+            b"GET /healthz HTTP/1.1\r\nHost: x\r\nContent-Length: 20000\r\n\r\n"
+            + body
+            + b"GET /healthz HTTP/1.1\r\nHost: x\r\n"
+        )
+        time.sleep(0.2)
+        sock.sendall(b"Connection: close\r\n\r\n")
+        assert drain(sock).count(b"HTTP/1.1 200") == 2
+
+
+def fragmented_upgrade(port: int, ticket: str | None) -> socket.socket:
+    """An accepted raw socket, past the 101 response."""
+    sock = raw_upgrade(port, ticket)
+    response = b""
+    while not response.endswith(b"\r\n\r\n"):
+        response += sock.recv(1)
+    assert response.startswith(b"HTTP/1.1 101")
+    return sock
+
+
+def test_fragments_past_the_limit_in_one_read_close_once_and_log_no_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    settings = Settings()
+    app = create_app(settings)
+    text, cont, close = 0x1, 0x0, 0x8
+    with served(app, settings) as live:
+        first, second = tickets_of(app, 2)
+        with fragmented_upgrade(live.port, first) as sock:  # two refusals' worth in one read
+            sock.sendall(frame(text, fin=False) + frame(cont, fin=False) * (3 * MAX_FRAGMENTS))
+            opcode, payload = read_frame(sock)
+            assert (opcode, int.from_bytes(payload[:2])) == (close, 1009)
+            assert drain(sock) == b""
+        with fragmented_upgrade(live.port, second) as sock:  # the peer's close in the same read
+            too_many = [frame(cont, fin=False)] * MAX_FRAGMENTS + [frame(cont, fin=True)]
+            sock.sendall(b"".join([frame(text, fin=False), *too_many, frame(close, fin=True)]))
+            drain(sock)
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
 def test_a_refused_upgrade_logs_its_refusal_and_no_error(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO)
     settings = Settings()
