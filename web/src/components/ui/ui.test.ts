@@ -83,7 +83,7 @@ describe('clay look', () => {
   })
 
   it.each([
-    ['default', ['bg-gradient-primary', 'text-primary-foreground', 'shadow-press', 'border-clay']],
+    ['default', ['bg-primary', 'bg-gradient-primary', 'text-primary-foreground', 'shadow-press', 'border-clay']],
     ['mint', ['bg-mint', 'text-night', 'shadow-press']],
     ['outline', ['border-input', 'bg-card', 'text-primary', 'hover:bg-primary-hover', 'hover:text-primary-foreground']],
     ['destructive', ['bg-destructive', 'text-destructive-foreground']],

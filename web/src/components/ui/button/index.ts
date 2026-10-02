@@ -10,7 +10,7 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "border-night/10 bg-gradient-primary text-primary-foreground shadow-press hover:shadow-press-hover active:shadow-press-active motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0.5",
+          "border-night/10 bg-primary bg-gradient-primary text-primary-foreground shadow-press hover:shadow-press-hover active:shadow-press-active motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0.5",
         destructive:
           "border-night/10 bg-destructive text-destructive-foreground shadow-press hover:shadow-press-hover active:shadow-press-active motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0.5",
         mint:
