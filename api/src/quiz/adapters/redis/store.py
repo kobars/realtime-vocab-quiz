@@ -56,6 +56,9 @@ async def _messages(pubsub: PubSub) -> AsyncGenerator[str]:
         async for message in pubsub.listen():
             if message["type"] == "message":
                 yield message["data"]
+            elif message["type"] == "subscribe":  # redis-py reconnected: messages may be lost
+                msg = "the subscription dropped"
+                raise ConnectionError(msg)
 
 
 class RedisStore:

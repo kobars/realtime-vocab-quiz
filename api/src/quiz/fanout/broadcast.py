@@ -12,7 +12,7 @@ from typing import Any, Protocol
 
 from quiz.contracts import messages as m
 from quiz.contracts.codec import encode
-from quiz.ports.store import Limits, Row, Store
+from quiz.ports.store import Limits, Ranks, Row, Store
 
 _HEAD, _TAIL = '{"frame":', ',"ranks":'  # user ids hold no quotes: the last _TAIL ends the frame
 
@@ -33,6 +33,7 @@ class Relay:
         self._sent: dict[str, tuple[int, int, int]] = {}  # user id → (atSeq, rank, score) it got
         self._player_count = 0
         self._seq = self._read_seq = -1  # the newest leaderboard relayed; the last shifted read
+        self._repaired = -1  # the newest seq of a repair snapshot: no leaderboard at or below it
 
     async def relay(self, message: str) -> bool:
         """Queue the frame on every local socket; True once it was the last one, ``quiz_ended``."""
@@ -41,6 +42,8 @@ class Relay:
         if frame["type"] == "quiz_ended":
             await self._ended(frame, data)
             return True
+        if frame["seq"] <= self._repaired:  # older than a snapshot sent: seq < lastSeq resyncs
+            return False
         self._sockets.broadcast(self._quiz_id, data, leaderboard=True)
         self._player_count, self._seq = frame["playerCount"], frame["seq"]
         local = self._sockets.players(self._quiz_id)
@@ -48,6 +51,17 @@ class Relay:
             if user_id in local:
                 self._send(user_id, rank, score, frame["seq"])
         return False
+
+    def repaired(self, ranks: Ranks) -> None:
+        """After a resubscribe, each local player got its snapshot and rank at ``ranks``: skip the
+        queued leaderboards it holds and track ranks from there, as ``seq`` may have gone back."""
+        self._repaired = self._seq = self._read_seq = ranks.at_seq
+        self._player_count = ranks.player_count
+        self._sent = {
+            user_id: (ranks.at_seq, row.rank, row.score)
+            for user_id, row in ranks.rows.items()
+            if row is not None
+        }
 
     async def shifted(self) -> None:
         """Send each local player outside the top its rank, if it moved since it last got one."""

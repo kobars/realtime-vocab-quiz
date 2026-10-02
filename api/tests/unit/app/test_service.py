@@ -301,6 +301,29 @@ async def test_snapshot_rereads_both_parts_when_a_join_lands_between_reads(
     )
 
 
+async def test_standings_read_every_player_at_one_seq(
+    service: QuizService, store: SpyStore
+) -> None:
+    for user in ("a", "b"):
+        await joined(service, user)
+    reads: list[Sequence[str]] = []
+    ranks_of = store.ranks_of
+
+    async def join_after(quiz_id: str, users: Sequence[str]) -> Ranks:
+        reads.append(users)
+        ranks = await ranks_of(quiz_id, users)
+        if len(reads) == 1:  # lands between the rank read and the standings read
+            await store.join(quiz_id, "c", "C", "c-c")
+        return ranks
+
+    store.ranks_of = join_after  # type: ignore[method-assign, assignment]
+    ranks, standings = await service.standings(QUIZ, ["a", "b"])
+    assert reads == [["a", "b"], ["a", "b"]]  # one read for all the players, per try
+    snapshots = [replies[0] for replies in standings.values()]
+    assert {(s.atSeq, s.playerCount) for s in snapshots} == {(ranks.at_seq, 3)}
+    assert [s.you for s in snapshots] == [m.You(rank=1, score=0), m.You(rank=2, score=0)]
+
+
 async def test_joined_echoes_the_stored_name(service: QuizService) -> None:
     await joined(service, "a")
     rejoin = m.Join(quizId=QUIZ, displayName="Renamed")

@@ -56,3 +56,20 @@ async def test_a_second_shifted_read_waits_for_a_newer_frame(sockets: Mock) -> N
     await relay.shifted()
     await relay.shifted()  # no frame since the read at seq 1
     assert store.ranks_of.call_count == 1
+
+
+async def test_a_repair_at_an_older_seq_tracks_ranks_from_the_snapshots(sockets: Mock) -> None:
+    store = store_reading(Ranks(100, "open", 4, {"u": Row(4, "u", "U", 100)}))
+    relay = Relay("Q", store, sockets, LIMITS)
+    await relay.relay(leaderboard(100, 4))
+    await relay.shifted()  # rank 4 at seq 100
+    relay.repaired(Ranks(95, "open", 4, {"u": Row(3, "u", "U", 90)}))  # the store lost seq 96-100
+    store.ranks_of.return_value = Ranks(96, "open", 4, {"u": Row(3, "u", "U", 90)})
+    await relay.relay(leaderboard(95, 4))  # the snapshot holds it
+    await relay.relay(leaderboard(96, 4))
+    await relay.shifted()  # the rank the snapshot gave: no second one
+    store.ranks_of.return_value = Ranks(97, "open", 4, {"u": Row(5, "u", "U", 90)})
+    await relay.relay(leaderboard(97, 4))
+    await relay.shifted()
+    assert (sockets.broadcast.call_count, store.ranks_of.call_count) == (3, 3)
+    assert sockets.send_to.call_count == 2  # rank 4 at seq 100, rank 5 at seq 97

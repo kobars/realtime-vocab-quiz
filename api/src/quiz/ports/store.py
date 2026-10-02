@@ -203,7 +203,9 @@ class Feed(Protocol):
 
         Subscribed once entered: every later broadcast arrives, in ``seq`` order. The quiz need
         not exist yet: its broadcasts arrive once it is created. Read the iterator in the task
-        that entered; leaving the context closes it, so a later read ends the iteration.
+        that entered; leaving the context closes it, so a later read ends the iteration. The
+        iterator raises ``ConnectionError`` once the subscription dropped, even if the client
+        reconnected on its own: the broadcasts published meanwhile are lost.
         """
         ...
 
