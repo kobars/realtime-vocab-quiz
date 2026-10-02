@@ -1,7 +1,7 @@
 <!-- AI-ASSISTED: domain rules of the self-paced quiz, drafted with Claude Code and checked by hand against the scoring examples. -->
 # Domain spec: the self-paced quiz
 
-This document is the single definition of the quiz rules. Code, tests and the other documents refer to it, so "the scoring is accurate and consistent" (AC-4) has one meaning. The wire format lives in `docs/spec/protocol.md` and the Redis keys and scripts in `docs/spec/redis.md`; where they disagree with this file, this file wins and the other one is fixed. The model and its alternatives are recorded in [ADR-002](../adr/002-self-paced-quiz-and-integer-scoring.md).
+This document is the single definition of the quiz rules. Code, tests and the other documents refer to it, so "the scoring is accurate and consistent" has one meaning. The wire format lives in `docs/spec/protocol.md` and the Redis keys and scripts in `docs/spec/redis.md`; where they disagree with this file, this file wins and the other one is fixed. The model and its alternatives are recorded in [ADR-002](../adr/002-self-paced-quiz-and-integer-scoring.md).
 
 ## 1. The model in one paragraph
 

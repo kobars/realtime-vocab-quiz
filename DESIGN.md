@@ -30,7 +30,7 @@ Short on time: read §1, then §3 to §6 for the design, §9 for the measured re
 
 **The problem.** Players join a vocabulary quiz with a quiz ID, answer timed questions, and
 watch one shared leaderboard that changes as anyone scores. Scores must be accurate and
-consistent (AC-4) even when many players answer at once through several server nodes.
+consistent even when many players answer at once through several server nodes.
 
 **The solution.** The quiz is **self-paced**: every player gets the same questions in the same
 order, one at a time, at their own pace, and all players share one live leaderboard (ADR-002).
@@ -76,14 +76,14 @@ The latency, throughput and availability targets are in [§8](#8-non-functional-
 
 **How the design meets each acceptance criterion.**
 
-| ID | Criterion | How the design meets it |
-|---|---|---|
-| AC-1 | Join a quiz session with a unique quiz ID | `join {quizId}` on the socket; the `join` script registers the player once per quiz; IDs match `^[A-Z0-9-]{3,16}$` |
-| AC-2 | Many users join the same session at the same time | Joins only set `dirty`, so 5,000 joins cost one frame per tick, not one per join; any node accepts any join |
-| AC-3 | Scores update in real time | The scoring script returns `answer_result` with the new total at once; the next tick carries it to everyone |
-| AC-4 | Scoring is accurate and consistent | One integer formula; two idempotency layers and the deadline check in one atomic script on one clock (C1–C6, §7) |
-| AC-5 | A leaderboard shows all participants | Every frame carries every player up to 200; above that the top 50, each other player's own rank, and `get_leaderboard` pages |
-| AC-6 | The leaderboard updates promptly | A 200 ms coalescing tick with `seq` and resync; target p99 below 500 ms (C5) |
+| Criterion | How the design meets it |
+|---|---|
+| Join a quiz session with a unique quiz ID | `join {quizId}` on the socket; the `join` script registers the player once per quiz; IDs match `^[A-Z0-9-]{3,16}$` |
+| Many users join the same session at the same time | Joins only set `dirty`, so 5,000 joins cost one frame per tick, not one per join; any node accepts any join |
+| Scores update in real time | The scoring script returns `answer_result` with the new total at once; the next tick carries it to everyone |
+| Scoring is accurate and consistent | One integer formula; two idempotency layers and the deadline check in one atomic script on one clock (C1–C6, §7) |
+| A leaderboard shows all participants | Every frame carries every player up to 200; above that the top 50, each other player's own rank, and `get_leaderboard` pages |
+| The leaderboard updates promptly | A 200 ms coalescing tick with `seq` and resync; target p99 below 500 ms (C5) |
 
 **Non-goals.** Real accounts or an identity provider; an admin UI or question authoring; a
 host-led mode; a per-player question order; results that outlive the 24 h key TTL or a durable

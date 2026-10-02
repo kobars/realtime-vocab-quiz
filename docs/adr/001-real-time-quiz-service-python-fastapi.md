@@ -9,7 +9,7 @@
 
 ## Context
 
-The product needs one real-time quiz service built for real; identity, questions and admin sit behind ports and are mocked. A real-time quiz needs a client, a server that holds the sockets and scores answers, a store, an identity provider, a source of questions and some way to create and end quizzes. The part that carries the hard requirements is the path from an answer to a leaderboard on every screen: atomic scoring (AC-4), many joins at once (AC-2) and prompt updates across nodes (AC-6). The server must hold thousands of mostly idle sockets per node, validate every inbound frame strictly, and share its message definitions with a TypeScript client.
+The product needs one real-time quiz service built for real; identity, questions and admin sit behind ports and are mocked. A real-time quiz needs a client, a server that holds the sockets and scores answers, a store, an identity provider, a source of questions and some way to create and end quizzes. The part that carries the hard requirements is the path from an answer to a leaderboard on every screen: accurate and consistent scoring, many players joining one quiz at once, and prompt leaderboard updates across nodes. The server must hold thousands of mostly idle sockets per node, validate every inbound frame strictly, and share its message definitions with a TypeScript client.
 
 ## Decision
 
@@ -19,7 +19,7 @@ The product needs one real-time quiz service built for real; identity, questions
 
 ## Alternatives considered
 
-- **Build the leaderboard only, over a mocked scoring feed:** smaller, but it skips the part where consistency is won or lost (two nodes scoring the same player at once), and the AC-4 claims could not be tested. Rejected.
+- **Build the leaderboard only, over a mocked scoring feed:** smaller, but it skips the part where consistency is won or lost (two nodes scoring the same player at once), and the claim that scoring is accurate and consistent could not be tested. Rejected.
 - **Build a real identity flow (OIDC):** large effort on a part every company already has; the single-use ticket before the upgrade is the only piece the real-time path needs, and it is built for real. Rejected.
 - **Node.js (Fastify with `ws`):** one language with the client and a mature WebSocket library, but message validation and schema generation need a second tool (zod or TypeBox) and the property tests a second framework. Python gives Pydantic for both validation and schema generation, and Hypothesis. Rejected by a small margin.
 - **Go:** more sockets per core and real parallelism in one process, but no shared models with the client without a code generator, and more code for strict JSON validation. Its strength, raw socket density, matters less here than correctness of the scoring path, which lives in Redis scripts whatever the server language. Rejected for this build.
