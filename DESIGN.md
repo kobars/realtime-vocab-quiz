@@ -16,7 +16,8 @@ Lua script that reads the time from Redis `TIME`, so any node can score any answ
 and a (player, question) scores at most once. Score changes only mark the quiz dirty; a 200 ms
 coalescing tick publishes one full leaderboard frame per quiz over Redis pub/sub, numbered by a
 per-quiz `seq`, and a client that sees a gap asks for a snapshot. Identity and the question bank
-are mocks behind ports, and quiz admin is a mock host action (§14).
+are mocks behind ports. Any visitor can host a quiz through the self-service hosting API and end
+it with the host token it gets; a token-gated mock admin API serves the make targets (§14).
 
 **Headline numbers.** The load runs and §9 fill in the measured column.
 
@@ -41,7 +42,7 @@ Host-led stays future work.
 | Topic | Assumption |
 |---|---|
 | Players | Anonymous: a mock session gives a user ID; the player types a display name (1–32 characters). One open tab per player and quiz; a second tab replaces the first |
-| Quiz shape | 10 questions, 4 choices each, `T` = 20 s per question; the quiz is open for a window from its creation (default 10 min, at most 60 min) or until a mock host ends it |
+| Quiz shape | 10 questions, 4 choices each, `T` = 20 s per question; the quiz is open for a window from its creation (default 10 min, at most 60 min) or until its host ends it (with the host token, or through the mock admin API) |
 | Time | The server decides time on one clock (Redis `TIME`); the client countdown is display only |
 | Clients | Current browsers with WebSocket support; phones and desktops |
 | Store | One Redis 8 (Valkey 8 also works) with AOF `everysec`; a crash can lose about 1 s of answers (§11) |
@@ -76,23 +77,25 @@ translations.
 
 **Context.** The quiz service is the one component built for real. The identity provider and the
 content service are mocks behind ports, so a real one can replace each without touching the
-core; the quiz host uses a token-gated mock admin API. All three are dashed.
+core; both are dashed. A quiz host starts a quiz and ends it early through the self-service
+hosting API with a host token; the make targets use the token-gated mock admin API (dashed).
 
 ```mermaid
 flowchart LR
     player(["Player<br/>(browser)"])
-    host(["Quiz host<br/>(make new-quiz, end now)"])
+    host(["Quiz host<br/>(hosting API; make new-quiz, make demo-end)"])
     subgraph built["Built for real"]
         quiz["Real-time quiz service<br/>Vue client + API nodes + Redis"]
     end
     idp["Identity provider<br/>(mock: sessions and tickets)"]
     content["Content service<br/>(mock: question bank)"]
     player -- "HTTPS + WebSocket" --> quiz
-    host -. "mock admin" .-> quiz
+    host -- "HTTPS: host a quiz, end it (host token)" --> quiz
+    host -. "mock admin (make targets)" .-> quiz
     quiz -. "who is this user?" .-> idp
     quiz -. "quiz questions" .-> content
     classDef mock stroke-dasharray: 5 5
-    class idp,content,host mock
+    class idp,content mock
 ```
 
 **Containers.** The two mocks are not containers of their own: each API node loads them
@@ -315,8 +318,9 @@ no frame arrived, which finds a lost last frame.
 **Hosting a quiz.** Any visitor can start a quiz without the admin token (`PUBLIC_HOSTING`,
 on by default).
 
-1. The host page lists the bank quizzes (`GET /api/banks`) and posts `POST /api/quizzes
-   {bankQuizId}`. `adapters/http/hosting.py` checks the `Origin` (403 from another site), the
+1. The host's client lists the bank quizzes (`GET /api/banks`) and posts `POST /api/quizzes
+   {bankQuizId}`; the web client has no host page yet, so today that client is an HTTP call
+   such as `curl`. `adapters/http/hosting.py` checks the `Origin` (403 from another site), the
    client address's creation limit (429 `RATE_LIMITED`), then draws a run ID such as
    `VOCAB-42-7K3Q`.
 2. `hold_hosted.lua` counts the run in `quiz:hosted`, one sorted set for every node, unless
@@ -751,6 +755,19 @@ nginx answers 404 for `/api/metrics`. The containers run as non-root users on re
 filesystems with every capability dropped, and the web image sends a CSP and the other
 security headers (`web/security-headers.conf`). [SECURITY.md](SECURITY.md) lists the scans.
 
+**Self-service hosting.** Any visitor can host a quiz (`PUBLIC_HOSTING`, on by default; `0`
+removes the routes, which then answer 404). The host token is 32 random bytes (base64url),
+returned once; the store keeps only its SHA-256 with the quiz, the node compares hashes in
+constant time (`hmac.compare_digest`), and no log line carries the token
+(`adapters/http/hosting.py`). A request whose `Origin` names a site outside `ALLOWED_ORIGINS`
+gets 403 on all three routes; a request without `Origin` comes from no browser, so no other site
+can make a visitor send it. Creation has two limits: `HOSTING_PER_IP` (5) creations per client
+address in each `HOSTING_PER_IP_WINDOW_S` (600 s), a token bucket on each node, so up to twice
+that through nginx's two nodes (429 with `Retry-After`); and at most `HOSTING_MAX_OPEN` (50) open
+self-hosted quizzes across every node, counted in Redis by `hold_hosted.lua` (503
+`HOSTING_FULL`). Each self-hosted quiz is open for `HOSTING_WINDOW_MS` (30 min). The routes and
+their errors are in [protocol §8](docs/spec/protocol.md#8-authentication).
+
 **The reveal abuse.** `answer_result` reveals the correct choice at once, and a mock identity
 is free: one person with a second tab (a second identity) can answer each question there
 first, read the correct choice, and answer it in the first tab for full points. Real sign-in
@@ -878,6 +895,7 @@ it.
 | Gateway and fan-out | The `/ws` endpoint, limits, heartbeat, send buffers; the tick, pub/sub relay, `seq` and resync |
 | Client | The Vue 3 app: protocol client with backoff and resync, Pinia store, screens |
 | Scale-out | Two API nodes, nginx, one Redis, a two-node integration test and load runs |
+| Self-service hosting | `GET /banks`, `POST /quizzes {bankQuizId}` (a fresh run ID and a host token, kept as its SHA-256) and the host-token end `POST /quizzes/{quizId}/end`; a creation limit per client address on each node and a cap on the open self-hosted quizzes across nodes; on unless `PUBLIC_HOSTING=0` (§12) |
 
 **Mocked.** The identity and question-bank mocks sit behind ports (`TicketStore`,
 `QuestionBank`); quiz admin is a token-gated mock admin API in the HTTP adapter, off unless
