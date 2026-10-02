@@ -28,6 +28,24 @@ describe('display name', () => {
     expect(displayNameError('🦊'.repeat(32))).toBeNull()
   })
 
+  it.each([
+    ['a zero-width space', '\u200B'],
+    ['direction marks', '\u200E\u200F'],
+    ['format characters', '\u2060\uFEFF\u00AD'],
+    ['control characters', '\u0007\u001B'],
+    ['combining marks alone', '\u0301\u0301'],
+    ['Hangul fillers', '\u3164\u115F'],
+    ['the blank Braille pattern', '\u2800'],
+  ])('rejects a name of only %s, like the server', (_, name) => expect(displayNameError(name)).toBe(strings.join.nameInvisible))
+
+  it.each([
+    ['visible text with a zero-width space', 'A\u200Bna'],
+    ['a direction mark before the text', '\u200FAna'],
+    ['an emoji', '🦊'],
+    ['an emoji sequence with a zero-width joiner', '👩\u200D💻'],
+    ['right-to-left script', 'مريم'],
+  ])('accepts %s', (_, name) => expect(displayNameError(name)).toBeNull())
+
   it('counts characters after NFC normalization, like the server', () => {
     const decomposed = 'é'.repeat(20)
     expect([...decomposed].length).toBe(40)

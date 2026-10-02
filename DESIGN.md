@@ -707,7 +707,7 @@ the job ends.
 | Slow HTTP clients | nginx cuts a client that stalls 10 s between two reads of its request head or body (408) or between two writes of a response (60 s on `/ws`, above the heartbeat), and lets 2,000 `/api/` requests be in flight for the whole stack (503) | `infra/nginx/nginx.conf` |
 | Resync | at most one per second per connection | `app/service.py` |
 | Send buffer | 64 KiB soft, 256 KiB hard (close 1013) | `adapters/ws/sender.py` |
-| Display name | at most 128 characters raw, 1–32 after trim and NFC | `contracts/messages.py`, `adapters/mock_auth/tokens.py` |
+| Display name | at most 128 characters raw, 1–32 after trim and NFC, at least one visible | `contracts/messages.py`, `domain/names.py` |
 
 The client address comes from `X-Forwarded-For` only when the peer is a trusted proxy (nginx,
 `TRUSTED_PROXIES`). On a public host (`compose.prod.yaml`), Caddy terminates HTTPS, sends HSTS

@@ -14,6 +14,7 @@ export const strings = {
     quizIdInvalid: 'Use 3–16 letters, digits or dashes, like VOCAB-42-7K3Q',
     nameRequired: 'Enter your name',
     nameTooLong: 'Use at most 32 characters',
+    nameInvisible: 'Use at least one visible character',
     notFound: 'No quiz with this ID',
     failed: 'Could not join, try again',
     resume: (quizId: string) => `Resume quiz ${quizId}`,
