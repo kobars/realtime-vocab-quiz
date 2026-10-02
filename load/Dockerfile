@@ -12,7 +12,7 @@ WORKDIR /app
 COPY api/pyproject.toml api/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --only-group load --no-install-project
-COPY load/bots.py load/latency.py load/player.py ./
+COPY load/*.py ./
 # make load runs it as the host user, so its result files in the bind-mounted load/results are
 # the user's; a run is a batch job with no service to probe.
 USER 10001:10001
