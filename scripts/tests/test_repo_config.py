@@ -61,20 +61,28 @@ def _run_commands(path: Path) -> list[str]:
     """Return the command of every one-line ``run:`` step of a workflow."""
     text = path.read_text(encoding="utf-8")
     lines = (line.strip().removeprefix("- ") for line in text.splitlines())
-    return [line.removeprefix("run:").strip() for line in lines if line.startswith("run:")]
+    return [
+        line.removeprefix("run:").strip() for line in lines if line.startswith("run:")
+    ]
 
 
 def test_eslint_hook_runs_one_process_so_the_typescript_program_is_built_once() -> None:
     assert _hook("eslint")["require_serial"] is True
 
 
-GATE_FAILS = "- if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')"
+GATE_FAILS = (
+    "- if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')"
+)
 
 
 @pytest.mark.parametrize(
     ("workflow", "gate", "needs"),
     [
-        ("ci.yml", "ci-required", "[check, integration, ui, coverage, guards, review-budget]"),
+        (
+            "ci.yml",
+            "ci-required",
+            "[check, integration, ui, coverage, guards, review-budget]",
+        ),
         (
             "security.yml",
             "security-required",
@@ -119,7 +127,11 @@ def test_coverage_job_combines_every_job_that_uploads_test_results() -> None:
 
 def _make_dry_run(target: str, *variables: str) -> str:
     """Return the commands ``make -n`` prints for ``target``, unaffected by an outer REPORTS."""
-    env = {k: v for k, v in os.environ.items() if k not in {"REPORTS", "MAKEFLAGS", "MAKELEVEL"}}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in {"REPORTS", "MAKEFLAGS", "MAKELEVEL"}
+    }
     return subprocess.run(
         ["make", "-n", target, *variables],  # noqa: S607
         cwd=ROOT,
@@ -130,10 +142,13 @@ def _make_dry_run(target: str, *variables: str) -> str:
     ).stdout
 
 
-def test_test_steps_write_junit_reports_only_when_reports_is_set(tmp_path: Path) -> None:
+def test_test_steps_write_junit_reports_only_when_reports_is_set(
+    tmp_path: Path,
+) -> None:
     reports = tmp_path / "reports"
     commands = "".join(
-        _make_dry_run(target, f"REPORTS={reports}") for target in ("check", "test-integration")
+        _make_dry_run(target, f"REPORTS={reports}")
+        for target in ("check", "test-integration")
     )
     assert f"--junitxml={reports}/unit.xml" in commands
     assert f"--junitxml={reports}/integration.xml" in commands
@@ -188,7 +203,9 @@ def test_pull_request_checks_read_the_whole_history_of_the_pr_head(job: str) -> 
     assert "fetch-depth: 0" in lines
 
 
-def test_ui_specs_run_in_the_playwright_image_of_the_locked_version_pinned_by_digest() -> None:
+def test_ui_specs_run_in_the_playwright_image_of_the_locked_version_pinned_by_digest() -> (
+    None
+):
     # The baselines render in this image: its browser must be the one @playwright/test drives.
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     image = re.search(r"^PLAYWRIGHT_IMAGE = (\S+)$", makefile, re.MULTILINE)
@@ -202,7 +219,9 @@ def test_ui_specs_run_in_the_playwright_image_of_the_locked_version_pinned_by_di
     assert "make ui-check" in _run_commands(WORKFLOWS / "ci.yml")
 
 
-def test_ui_container_hands_its_files_back_and_takes_ui_args_from_the_environment() -> None:
+def test_ui_container_hands_its_files_back_and_takes_ui_args_from_the_environment() -> (
+    None
+):
     # The container runs as root on a bind mount: without the chown a Linux host's next build
     # cannot empty web/dist. UI_ARGS inside the single-quoted sh -c would end the quote at its
     # first single quote.
@@ -217,12 +236,16 @@ def test_ui_container_hands_its_files_back_and_takes_ui_args_from_the_environmen
     assert "$(UI_ARGS)" not in makefile
 
 
-@pytest.mark.parametrize("workflow", ["ci.yml", "security.yml", "containers.yml", "codeql.yml"])
+@pytest.mark.parametrize(
+    "workflow", ["ci.yml", "security.yml", "containers.yml", "codeql.yml"]
+)
 def test_only_a_newer_pull_request_run_cancels_an_older_one(workflow: str) -> None:
     concurrency = _section(WORKFLOWS / workflow, "concurrency", 0)
     group = "group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}"
     assert group in concurrency
-    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in concurrency
+    assert (
+        "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in concurrency
+    )
 
 
 def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
@@ -241,9 +264,41 @@ def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
         assert any(command in run for run in runs), command
     workflow = path.read_text(encoding="utf-8")
     assert "scan-type: config" in workflow
-    # Image scans fail on CRITICAL and HIGH findings that have a fix, for both images.
-    assert workflow.count("ignore-unfixed: true") == workflow.count("image-ref:") == 2
-    assert workflow.count("severity: CRITICAL,HIGH") == 2
+    # Image scans fail on CRITICAL and HIGH findings that have a fix, for both images: once as
+    # built on every run, and per platform before a publish.
+    assert workflow.count("ignore-unfixed: true") == workflow.count("image-ref:") == 4
+    assert workflow.count("severity: CRITICAL,HIGH") == 4
+
+
+def test_only_the_publish_jobs_can_write_packages_after_every_check_and_scan() -> None:
+    path = WORKFLOWS / "containers.yml"
+    writers = {
+        job: [line for line in _section(path, job, 2) if line.endswith(": write")]
+        for job in _job_ids(path)
+    }
+    assert writers["publish"] == ["packages: write"]
+    assert writers["publish-tags"] == [
+        "packages: write",
+        "id-token: write",
+        "attestations: write",
+        "artifact-metadata: write",
+    ]
+    assert not any(
+        "packages: write" in w or "id-token: write" in w
+        for job, w in writers.items()
+        if job not in {"publish", "publish-tags"}
+    )
+    publish = _section(path, "publish", 2)
+    assert "if: github.event_name == 'push'" in publish
+    assert "needs: [config, images]" in publish
+    assert "needs: [publish]" in _section(path, "publish-tags", 2)
+    # Pushed by digest only, then scanned; only publish-tags gives the images a tag.
+    assert sum("push-by-digest=true" in line for line in publish) == 2
+    steps = [line for line in publish if line.startswith("- name:")]
+    assert steps.index("- name: trivy image (web)") < steps.index(
+        "- name: record the digests"
+    )
+    assert 'tags: ["v*.*.*"]' in _section(path, "on", 0)
 
 
 def test_web_image_scan_runs_only_when_the_images_were_built() -> None:
@@ -260,7 +315,9 @@ def test_web_image_scan_runs_only_when_the_images_were_built() -> None:
 def _audit_inputs() -> re.Pattern[str]:
     """Return the pattern of the changed paths that make a pull request run the audits."""
     lines = _section(WORKFLOWS / "security.yml", "audit-inputs", 2)
-    (pattern,) = [line.split(": ", 1)[1].strip("'") for line in lines if line.startswith("PATHS:")]
+    (pattern,) = [
+        line.split(": ", 1)[1].strip("'") for line in lines if line.startswith("PATHS:")
+    ]
     assert any('grep -qE "$PATHS"' in line for line in lines)
     return re.compile(pattern)
 
@@ -281,7 +338,9 @@ def test_a_pull_request_that_changes_how_the_audits_run_runs_them(path: str) -> 
     assert _audit_inputs().search(path)
 
 
-@pytest.mark.parametrize("path", ["README.md", "api/src/quiz/app.py", "web/Makefile.txt"])
+@pytest.mark.parametrize(
+    "path", ["README.md", "api/src/quiz/app.py", "web/Makefile.txt"]
+)
 def test_a_pull_request_that_leaves_the_audits_alone_skips_them(path: str) -> None:
     assert not _audit_inputs().search(path)
 
@@ -301,7 +360,9 @@ def test_make_check_lints_the_workflows() -> None:
     assert any("$(ZIZMOR)" in line for line in recipe)
 
 
-def test_workflow_lint_runs_the_locked_shellcheck_on_run_scripts(tmp_path: Path) -> None:
+def test_workflow_lint_runs_the_locked_shellcheck_on_run_scripts(
+    tmp_path: Path,
+) -> None:
     """actionlint skips shellcheck when it is not on PATH; the dev group locks one."""
     workflow = tmp_path / "probe.yml"
     workflow.write_text(
@@ -398,7 +459,9 @@ def test_make_check_runs_the_dependency_check_on_every_python_root() -> None:
     assert roots == ["tests", "../scripts", "../load"]
 
 
-def test_tool_dependency_check_fails_on_missing_and_transitive_imports(tmp_path: Path) -> None:
+def test_tool_dependency_check_fails_on_missing_and_transitive_imports(
+    tmp_path: Path,
+) -> None:
     # A folder named tests is skipped by deptry's default exclude; the step must still scan it.
     probe = tmp_path / "tests" / "test_probe.py"
     probe.parent.mkdir()
@@ -408,7 +471,9 @@ def test_tool_dependency_check_fails_on_missing_and_transitive_imports(tmp_path:
     result = _deptry("tests", *flags, "--config", config, cwd=tmp_path)
     assert result.returncode == 1
     assert "DEP001 'no_such_package' imported but missing" in result.stderr
-    assert "DEP003 'httpcore' imported but it is a transitive dependency" in result.stderr
+    assert (
+        "DEP003 'httpcore' imported but it is a transitive dependency" in result.stderr
+    )
     assert "pydantic_core" not in result.stderr
 
 
@@ -419,10 +484,15 @@ def test_dependency_check_fails_when_src_imports_pydantic_core(tmp_path: Path) -
     probe.write_text("import pydantic_core\n")
     result = _deptry(str(tmp_path / "src"))
     assert result.returncode == 1
-    assert "DEP003 'pydantic_core' imported but it is a transitive dependency" in result.stderr
+    assert (
+        "DEP003 'pydantic_core' imported but it is a transitive dependency"
+        in result.stderr
+    )
 
 
-def test_dependency_check_fails_when_a_direct_import_is_undeclared(tmp_path: Path) -> None:
+def test_dependency_check_fails_when_a_direct_import_is_undeclared(
+    tmp_path: Path,
+) -> None:
     # src imports starlette directly; without its own entry it only arrives through fastapi.
     config, removed = re.subn(
         r'^\s*"starlette[^"]*",\n',
@@ -434,7 +504,9 @@ def test_dependency_check_fails_when_a_direct_import_is_undeclared(tmp_path: Pat
     (tmp_path / "pyproject.toml").write_text(config, encoding="utf-8")
     result = _deptry("src", "--config", str(tmp_path / "pyproject.toml"))
     assert result.returncode == 1
-    assert "DEP003 'starlette' imported but it is a transitive dependency" in result.stderr
+    assert (
+        "DEP003 'starlette' imported but it is a transitive dependency" in result.stderr
+    )
 
 
 def _phony_and_targets(makefile: str) -> tuple[list[str], list[str]]:
@@ -442,7 +514,9 @@ def _phony_and_targets(makefile: str) -> tuple[list[str], list[str]]:
     with a target-specific variable has two rule lines and counts once."""
     phony = re.search(r"^\.PHONY:(.*)$", makefile, re.MULTILINE)
     assert phony is not None
-    targets = re.findall(r"^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?!=)", makefile, re.MULTILINE)
+    targets = re.findall(
+        r"^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?!=)", makefile, re.MULTILINE
+    )
     return sorted(phony.group(1).split()), sorted(set(targets))
 
 
