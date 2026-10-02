@@ -25,8 +25,9 @@ weaknesses are known limits, not vulnerabilities:
 
 Reports about the real-time service itself are in scope: the WebSocket gateway and its
 limits, the ticket check, the self-service hosting routes (`GET /api/banks`,
-`POST /api/quizzes` and `POST /api/quizzes/{id}/end`) and the host token that ends a quiz, the
-Redis scripts and the client.
+`POST /api/quizzes` and `POST /api/quizzes/{quizId}/end`, on unless `PUBLIC_HOSTING=0`) with
+their creation limit, their cap on open quizzes and the host token that ends a quiz, the Redis
+scripts and the client.
 
 ## Deployment assumption
 
