@@ -1,6 +1,8 @@
 # AI-ASSISTED: tests for the pull-request guards, one throwaway repository per failure.
 """Tests for scripts/check_pr.py."""
 
+import subprocess
+
 import pytest
 from conftest import TRAILER, Repo
 
@@ -92,9 +94,12 @@ def test_size_limit_counts_changed_lines_without_generated_files(
     ("message", "problem"),
     [
         ("Add the tick", "has no AI-Assisted: trailer"),
-        (f"fixup! Add the tick\n\n{TRAILER}", "is a fixup, squash or WIP commit"),
-        (f"squash! Add the tick\n\n{TRAILER}", "is a fixup, squash or WIP commit"),
-        (f"WIP tick\n\n{TRAILER}", "is a fixup, squash or WIP commit"),
+        (f"fixup! Add the tick\n\n{TRAILER}", "is a fixup, squash, amend or WIP commit"),
+        (f"squash! Add the tick\n\n{TRAILER}", "is a fixup, squash, amend or WIP commit"),
+        (f"amend! Add the tick\n\n{TRAILER}", "is a fixup, squash, amend or WIP commit"),
+        (f"WIP tick\n\n{TRAILER}", "is a fixup, squash, amend or WIP commit"),
+        (f"WIP: tick\n\n{TRAILER}", "is a fixup, squash, amend or WIP commit"),
+        (f"WIP\n\n{TRAILER}", "is a fixup, squash, amend or WIP commit"),
         (f"{'a' * (check_pr.MAX_SUBJECT + 1)}\n\n{TRAILER}", "has a subject over"),
     ],
 )
@@ -106,6 +111,32 @@ def test_each_commit_needs_the_trailer_and_a_plain_short_subject(
     status, out = _check(base, capsys)
     assert status == 1
     assert problem in out
+
+
+def test_a_subject_that_is_not_utf8_is_reported(
+    pr_repo: Repo, base: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pr_repo.commit(ENTRY)
+    # git commit turns a Latin-1 message into UTF-8, so write the commit object directly.
+    head = pr_repo.git("cat-file", "commit", "HEAD").split("\n\n")[0]
+    raw = f"{head}\n\nWIP caf\udce9\n\n{TRAILER}\n".encode(errors="surrogateescape")
+    sha = subprocess.run(
+        ["git", "hash-object", "-t", "commit", "-w", "--stdin"],  # noqa: S607
+        input=raw,
+        capture_output=True,
+        check=True,
+    ).stdout.decode()
+    pr_repo.git("reset", "-q", sha.strip())
+    status, out = _check(base, capsys)
+    assert status == 1
+    assert out.endswith("is a fixup, squash, amend or WIP commit: WIP caf\ufffd\n")
+
+
+def test_a_subject_that_starts_with_a_longer_word_than_wip_passes(
+    pr_repo: Repo, base: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pr_repo.commit(ENTRY, f"WIPE stale sessions on shutdown\n\n{TRAILER}")
+    assert _check(base, capsys)[0] == 0
 
 
 def test_a_subject_at_the_length_limit_and_a_merge_commit_pass(

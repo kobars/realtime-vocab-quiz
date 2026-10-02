@@ -9,13 +9,14 @@
 2. Size: at most 400 changed lines, generated files (scripts/pr_changes.py) not counted,
    unless the label size-exception is present.
 3. Commits: every commit but a merge has the AI-Assisted: trailer, and a subject of at most
-   100 characters that does not start with fixup!, squash! or WIP.
+   100 characters that does not start with fixup!, squash!, amend! or the word WIP.
 4. The AI-LOG entry docs/ai-log/PR-<n>.md exists at the head commit.
 
 Every failure is printed as a GitHub error annotation. Exit status: 0 clean, 1 failures.
 """
 
 import argparse
+import re
 import subprocess
 import sys
 import tomllib
@@ -27,7 +28,7 @@ ACCEPTANCE_LABEL = "acceptance-change"
 SIZE_LABEL = "size-exception"
 MAX_CHANGED_LINES = 400
 MAX_SUBJECT = 100
-BAD_SUBJECT_PREFIXES = ("fixup!", "squash!", "WIP")
+BAD_SUBJECT = re.compile(r"(fixup|squash|amend)!|WIP\b")
 FROZEN_FOLDER = "api/tests/acceptance/"
 FROZEN_FILE = "api/tests/conftest.py"
 PYPROJECT = "api/pyproject.toml"
@@ -71,8 +72,8 @@ def commit_problems(start: str, head: str) -> list[str]:
         sha, subject, trailer = record.split("\x1f")
         if not trailer.strip():
             problems.append(f"commit {sha} has no AI-Assisted: trailer")
-        if subject.startswith(BAD_SUBJECT_PREFIXES):
-            problems.append(f"commit {sha} is a fixup, squash or WIP commit: {subject}")
+        if BAD_SUBJECT.match(subject):
+            problems.append(f"commit {sha} is a fixup, squash, amend or WIP commit: {subject}")
         if len(subject) > MAX_SUBJECT:
             problems.append(f"commit {sha} has a subject over {MAX_SUBJECT} characters")
     return problems
@@ -103,7 +104,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         failures.append(f"the AI-LOG entry {entry} is missing")
 
     for failure in failures:
-        print(f"::error title=PR guards::{failure}")
+        printable = failure.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+        print(f"::error title=PR guards::{printable}")
     if not failures:
         print(f"PR guards passed: {lines} changed lines, generated files not counted")
     return 1 if failures else 0
