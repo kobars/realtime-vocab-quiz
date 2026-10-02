@@ -158,9 +158,11 @@ async def swarm(opts: Options, proc: int = 0) -> tuple[Recorder, dict[str, float
     async def steady_cpu(slots: asyncio.Future[list[None]]) -> float:
         """This process's CPU share from the end of the ramp to the deadline, or to the end of
         its slots if a quiz ends first: idle time after them would hide a busy swarm."""
-        await asyncio.wait([slots], timeout=max(0.0, start + opts.ramp - time.monotonic()))
-        if slots.done():  # no steady window
-            return 0.0
+        ramp_left = start + opts.ramp - time.monotonic()
+        if ramp_left > 0:  # else sample now: the slots first run at this coroutine's first await
+            await asyncio.wait([slots], timeout=ramp_left)
+            if slots.done():  # no steady window
+                return 0.0
         cpu0, t0 = time.process_time(), time.monotonic()
         await asyncio.wait([slots], timeout=max(0.0, deadline - t0))
         return 100 * (time.process_time() - cpu0) / max(time.monotonic() - t0, 1e-9)

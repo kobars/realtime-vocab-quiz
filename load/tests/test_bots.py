@@ -238,17 +238,27 @@ async def test_a_swarm_plays_whole_quizzes_against_the_app(app_url: str) -> None
 async def test_a_quiz_end_before_the_deadline_ends_the_cpu_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    events, process_time, busy_s = list[str](), time.process_time, 0.1
+
+    def cpu_sample() -> float:
+        events.append("cpu sample")
+        return process_time()
+
     async def busy_until_the_quiz_ends(p: Player, *_: object) -> None:
-        until = time.monotonic() + 0.3
-        while time.monotonic() < until:
+        events.append("play")
+        until = process_time() + busy_s  # CPU time: a busy machine stretches only its wall time
+        while process_time() < until:
             pass
         p.ended = True
 
+    monkeypatch.setattr(time, "process_time", cpu_sample)
     monkeypatch.setattr(bots, "play", busy_until_the_quiz_ends)
     t0 = time.monotonic()
     rec, proc = await swarm(parse(["--bots", "1", "--duration", "3", "--ramp", "0"]))
-    assert time.monotonic() - t0 < 1  # no idle wait for the deadline
-    assert proc["cpu_pct"] > 50  # idle time until the deadline would dilute it to about 10%
+    elapsed = time.monotonic() - t0
+    assert elapsed < 2  # no idle wait for the deadline
+    assert events[:2] == ["cpu sample", "play"]  # with no ramp, the window opens before play
+    assert proc["cpu_pct"] >= round(100 * busy_s / elapsed, 1)  # it holds the whole busy run
     assert rec.counts["slots_ended_early"] == 1
 
 

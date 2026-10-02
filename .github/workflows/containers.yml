@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# compose reads the whole of compose.yaml in every command, so the full stack's required secrets
+# must be set; no stack runs here.
+env:
+  ADMIN_TOKEN: unused
+  REDIS_PASSWORD: unused
+
 concurrency:
   # A new push to a PR replaces its older run; runs on main always finish.
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
