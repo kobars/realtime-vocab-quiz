@@ -11,7 +11,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
-from quiz.contracts.messages import FULL_LIST_MAX, TOP_N, Entry
+from quiz.contracts.messages import FULL_LIST_MAX, TOP_N, Entry, You
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.events import AnswerScored
 from quiz.domain.session import Question
@@ -93,6 +93,9 @@ class Place:
 
     rank: int
     score: int
+
+    def you(self) -> You:
+        return You(rank=self.rank, score=self.score)
 
 
 @dataclass(frozen=True, slots=True)

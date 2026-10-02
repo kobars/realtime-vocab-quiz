@@ -1,7 +1,8 @@
 -- AI-ASSISTED: helpers the loader puts in front of every quiz script (docs/spec/redis.md §1-§2).
--- The loader defines K (the KEYS index of each QuizKeys field), DATA_KEYS, QUIZ_TTL_MS and
--- REFRESH_MARGIN_MS above this file, from keys.py, so the KEYS order and the TTL exist once. The standings limits are
--- settings: each script that needs them takes them through ARGV.
+-- The loader defines K (the KEYS index of each QuizKeys field) and DATA_KEYS from keys.py,
+-- QUIZ_TTL_MS from the store port and REFRESH_MARGIN_MS from scripts.py above this file, so the
+-- KEYS order and the TTL exist once. The standings limits are settings: each script that needs
+-- them takes them through ARGV.
 
 -- The one server clock, in integer ms.
 local function now_ms()

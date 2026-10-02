@@ -16,7 +16,6 @@ from contextlib import contextmanager
 from functools import partial
 
 from quiz.app.service import OUTAGE_LOG_INTERVAL_MS, QuizService, rank_update
-from quiz.contracts import messages as m
 from quiz.contracts.codec import encode
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.fanout.broadcast import Relay, Sockets, with_you, without_you
@@ -183,7 +182,7 @@ class Ticker:
         ranks, shared = await self._service.standings(quiz_id, users)
         head = without_you(shared)
         for user_id, row in ranks.rows.items():
-            you = None if row is None else m.You(rank=row.rank, score=row.score)
+            you = None if row is None else row.you()
             self._sockets.send_to(quiz_id, user_id, with_you(head, you))
             if you is not None and (update := rank_update(shared, you)) is not None:
                 self._sockets.send_to(quiz_id, user_id, encode(update))

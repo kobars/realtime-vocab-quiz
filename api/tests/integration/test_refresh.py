@@ -46,8 +46,8 @@ async def test_an_answer_and_a_next_re_expire_no_key_while_the_meta_ttl_is_fresh
     before = await pexpires(redis_client)
     await redis_store.serve_next(quiz_id, "a", 1, "c-a2")
     await redis_store.apply_answer(quiz_id, "a", 1, 1, str(uuid.uuid4()), "c-a2")
-    assert await pexpires(redis_client) - before < 26  # 13 per script before
-    assert await pexpires(redis_client) == before  # every key they write has its TTL already
+    # 13 per script before; now none, as every key they write has its TTL already
+    assert await pexpires(redis_client) == before
 
 
 async def test_a_created_key_gets_the_meta_ttl_and_none_outlives_the_quiz(

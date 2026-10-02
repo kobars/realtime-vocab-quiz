@@ -77,7 +77,7 @@ def _message(shared: Shared, you: Place | None) -> m.Snapshot:
         playerCount=shared.player_count,
         onlineCount=shared.online_count,
         entries=[row.entry() for row in shared.rows],
-        you=None if you is None else m.You(rank=you.rank, score=you.score),
+        you=None if you is None else you.you(),
     )
 
 

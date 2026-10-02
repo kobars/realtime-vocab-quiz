@@ -126,7 +126,7 @@ class Relay:
         for user_id in users:
             own = data
             if (row := rows.get(user_id)) is not None:
-                own = with_you(head, m.You(rank=row.rank, score=row.score))
+                own = with_you(head, row.you())
             self._sockets.send_to(self._quiz_id, user_id, own)
 
     def _send(self, user_id: str, rank: int, score: int, at_seq: int) -> None:
