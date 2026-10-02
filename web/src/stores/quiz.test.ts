@@ -1,7 +1,7 @@
 // AI-ASSISTED: tests for the quiz store: recorded server frames go through a real QuizClient on a fake socket, and the state is checked after each one.
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { QuizClient, type QuizSocket } from '@/protocol/client'
+import { QuizClient, type QuizSocket, REPLY_TIMEOUT_MS } from '@/protocol/client'
 import type { AnswerResult, ErrorCode, Joined, Leaderboard, ProtocolError, Question, ServerMessage, Snapshot } from '@/protocol/types.generated'
 import { configureQuizStore, useQuizStore } from './quiz'
 
@@ -453,4 +453,27 @@ it('the countdown starts when next was sent, so a slow question reply shortens i
   clock = 1_400
   socket.receive(question(0, 20_000))
   expect([store.question?.deadlineAt, store.msLeft()]).toEqual([21_000, 19_600])
+})
+
+it('a next sent again after a silent drop restarts the countdown offset, so the question keeps its full time', async () => {
+  const { store, socket } = await playing()
+  store.next()
+  clock = 6_000
+  await wait(REPLY_TIMEOUT_MS)
+  expect(socket.sent.filter((m) => m.type === 'next')).toHaveLength(2)
+  clock = 6_200
+  socket.receive(question(0, 20_000))
+  expect([store.question?.deadlineAt, store.msLeft()]).toEqual([26_000, 19_800])
+})
+
+it('a second reply to a resent next is timed from the resend, not from the first send', async () => {
+  const { store, socket } = await playing()
+  store.next()
+  clock = 6_000
+  await wait(REPLY_TIMEOUT_MS)
+  clock = 6_300
+  socket.receive(question(0, 19_500))
+  clock = 6_400
+  socket.receive(question(0, 19_000))
+  expect(store.question?.deadlineAt).toBe(25_000)
 })

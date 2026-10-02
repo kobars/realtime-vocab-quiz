@@ -220,7 +220,7 @@ Every animation uses the motion tokens (§7.2) and follows one rule: **motion an
 
 ### 5.3 The countdown ring
 
-- An SVG circle whose stroke shrinks from full to empty over the question's time, driven by `requestAnimationFrame` and `performance.now()` from the moment the client sent the `next` it answers (protocol §6). The center shows the whole seconds left (`ceil`).
+- An SVG circle whose stroke shrinks from full to empty over the question's time, driven by `requestAnimationFrame` and `performance.now()` from the moment the client last sent the `next` for it (protocol §6). The center shows the whole seconds left (`ceil`).
 - 72 px, 88 px from 640 px: an 8 px `--muted` track under an 8 px `--primary` stroke with round ends, and the seconds at 24 px, weight 800.
 - In the last 5 s the stroke turns `--warning` and the track `--warning-soft`. No pulse and no scale.
 

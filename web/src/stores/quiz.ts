@@ -48,8 +48,9 @@ const BLOCKED_BY_CLOSE: Partial<Record<number, Blocked>> = { 4001: 'replaced', 1
 /** The `joined` reply; `cursor` and `cursorOpen` follow later questions and results, `endsAt` is on the `now` clock. */
 export type QuizInfo = Joined & { endsAt: number }
 /**
- * `deadlineAt` = the time the store asked for this question on the `now` clock + `remainingMs`, so a slow reply shortens
- * the countdown by the round trip instead of showing time the server will not honour (protocol §6).
+ * `deadlineAt` = the time the client last sent the `next` for this question on the `now` clock (its arrival, if it sent
+ * none) + `remainingMs`, so a slow reply shortens the countdown by the round trip instead of showing time the server will
+ * not honour, and a resend after a dropped `next` restarts that offset (protocol §6).
  */
 export type CurrentQuestion = Question & { deadlineAt: number }
 /** A `leaderboard_page`: `rows` from rank `offset + 1`, read from the standings at `atSeq`; `final` once they are the final standings. */
@@ -92,8 +93,6 @@ export const useQuizStore = defineStore('quiz', () => {
   const client = shallowRef<QuizClientPort | null>(null)
   /** The arguments of the last join, for `retry`: a blocked screen may have no `quiz` yet. */
   let lastJoin: { quizId: string; displayName: string } | null = null
-  /** The last `next` the store sent, and when, for the countdown of its `question` reply. */
-  let asked: { questionIndex: number; at: number } | null = null
 
   const nextIndex = computed(() => {
     if (s.phase === 'question' && s.question) return s.question.questionIndex + 1
@@ -111,7 +110,6 @@ export const useQuizStore = defineStore('quiz', () => {
 
   function join(quizId: string, displayName: string): void {
     lastJoin = { quizId, displayName }
-    asked = null
     client.value?.stop()
     Object.assign(s, initial(), { connection: 'connecting', quizId })
     const created = deps.createClient((event) => {
@@ -134,13 +132,8 @@ export const useQuizStore = defineStore('quiz', () => {
   }
 
   /** Start, Continue, Skip, Next question or See my result: each asks for the index the current screen implies. */
-  const next = (): void => (s.quiz === null || s.ended ? undefined : ask(nextIndex.value))
+  const next = (): void => (s.quiz === null || s.ended ? undefined : client.value?.next(nextIndex.value))
   const loadPage = (offset: number): void => client.value?.getLeaderboard(offset, PAGE_SIZE)
-
-  function ask(questionIndex: number): void {
-    asked = { questionIndex, at: deps.now() }
-    client.value?.next(questionIndex)
-  }
 
   function handle(event: ClientEvent): void {
     if (event.type !== 'status') return receive(event)
@@ -160,8 +153,8 @@ export const useQuizStore = defineStore('quiz', () => {
       case 'question': {
         // A reply built before the end that arrives after quiz_ended never undoes it (protocol §3).
         if (s.ended) return
-        const askedAt = asked?.questionIndex === message.questionIndex ? asked.at : deps.now()
-        s.question = { ...message, deadlineAt: askedAt + message.remainingMs }
+        const { askedMsAgo = 0, ...question } = message
+        s.question = { ...question, deadlineAt: deps.now() - askedMsAgo + message.remainingMs }
         if (s.pending?.questionIndex !== message.questionIndex) s.pending = null
         setCursor(message.questionIndex, true)
         s.phase = 'question'
@@ -223,7 +216,7 @@ export const useQuizStore = defineStore('quiz', () => {
     if (message.finished) s.phase = 'finished'
     else if (message.cursorOpen) {
       // Ask for the open question again, unless an answer to it is on its way (`next` re-serves closed questions too).
-      if (s.pending?.questionIndex !== message.cursor) ask(message.cursor)
+      if (s.pending?.questionIndex !== message.cursor) client.value?.next(message.cursor)
       if (s.phase !== 'question') s.phase = 'intro'
     } else s.phase = 'intro'
   }

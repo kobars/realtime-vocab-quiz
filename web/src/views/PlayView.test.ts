@@ -123,9 +123,9 @@ it('while the socket is reconnecting a pill says so and the choices are locked; 
   expect(port.answer).not.toHaveBeenCalled()
   await receive(status('open'))
   expect(w.get('[data-test="connection"]').text()).toBe('Connecting…')
-  clock = 8_000
   await receive(joined({ cursor: 0, cursorOpen: true, score: 140 }))
   expect(w.get('[data-test="connection"]').text()).toBe('Updating…')
+  clock = 8_000
   await receive(snapshot(140), question(0, 12_000))
   await frames(50)
   expect(w.get('[data-test="connection"]').text()).toBe('')
