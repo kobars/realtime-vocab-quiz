@@ -1,8 +1,10 @@
 # AI-ASSISTED: the composition root on Redis: the start hook loads every Lua script; a join burst
-# above the connection pool's size waits for a connection instead of failing.
+# above the connection pool's size waits for a connection instead of failing; quiz subscriptions
+# never take the command pool's connections.
 import asyncio
 import hashlib
 import uuid
+from contextlib import AsyncExitStack
 
 from redis.asyncio import Redis
 
@@ -38,3 +40,24 @@ async def test_a_join_burst_above_the_pool_size_waits_for_a_connection(redis_url
         )
         outcomes = await asyncio.gather(*joins)
     assert {type(outcome.replies[0]) for outcome in outcomes} == {m.Joined}
+
+
+async def test_open_subscriptions_leave_the_command_pool_free(redis_url: str) -> None:
+    settings = Settings(store="redis", redis_url=redis_url, redis_max_connections=3)
+    app = create_app(settings)
+    services, bound_s = services_of(app), settings.redis_pool_timeout_ms / 1000 / 4
+    quizzes = [f"S-{uuid.uuid4().hex[:8].upper()}" for _ in range(settings.redis_max_connections)]
+    async with app.router.lifespan_context(app), AsyncExitStack() as subscriptions:
+        for quiz_id in quizzes:
+            create = services.store.create_quiz
+            await create(quiz_id, (Question("q0", 1),), window_ms=60_000, time_limit_ms=20_000)
+            await subscriptions.enter_async_context(services.store.subscribe(quiz_id))
+        async with asyncio.timeout(bound_s):
+            assert await services.store.read_seq(quizzes[0]) == 0
+        async with asyncio.timeout(bound_s):
+            _, token = await services.tickets.create_session("Ana")
+            ticket = await services.tickets.issue_ticket(token)
+            assert ticket is not None
+            assert await services.tickets.redeem(ticket) is not None
+        async with asyncio.timeout(bound_s):
+            assert await services.ready()

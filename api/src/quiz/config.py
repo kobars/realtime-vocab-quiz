@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     store: Literal["memory", "redis"] = "memory"
     redis_url: str = "redis://127.0.0.1:6381/0"
     # A burst above the pool's size waits this long for a free connection, then UNAVAILABLE.
-    # Each quiz this process serves holds one connection for its subscription.
+    # Commands and quiz subscriptions have a pool each, both this size: each quiz this process
+    # serves holds one subscription connection.
     redis_max_connections: PositiveInt = 100
     redis_pool_timeout_ms: PositiveInt = 2_000
     node_id: Annotated[str, Field(min_length=1, max_length=64)] = Field(

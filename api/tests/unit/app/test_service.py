@@ -14,7 +14,7 @@ from quiz.contracts import messages as m
 from quiz.domain import errors as domain
 from quiz.domain.session import Question
 from quiz.ports.questions import BankQuestion
-from quiz.ports.store import End, Limits, Page, Ranks, Snapshot
+from quiz.ports.store import End, Limits, Page, Place, Ranks, Row, Snapshot
 
 QUIZ, N = "VOCAB-1", 3
 E, SID = m.ErrorCode, "-0000-4000-8000-000000000000"
@@ -360,6 +360,21 @@ async def test_first_writes_after_the_deadline_announce_the_end(
     assert (snapshot.status, error.code, store.ends) == ("ended", E.QUIZ_ENDED, 3)
 
 
+async def test_an_unannounced_host_mark_is_unavailable_and_reads_open(
+    service: QuizService, store: SpyStore
+) -> None:
+    conn = await joined(service)
+    await send(service, conn, m.Next(questionIndex=0))
+    assert await store.end_quiz(QUIZ, "host") == End("marked")  # not announced yet
+    assert await refused(service, conn, answer(0)) == (E.UNAVAILABLE, None)
+    late = Connection("c-b", "b")
+    join = m.Join(quizId=QUIZ, displayName="B")
+    assert (await refused(service, late, join), late.read_only) == ((E.UNAVAILABLE, None), False)
+    assert (await service.snapshot(QUIZ, "a")).status == "open"
+    assert await store.end_quiz(QUIZ, "host") == End("ended", 1)
+    assert await refused(service, conn, answer(0)) == (E.QUIZ_ENDED, None)
+
+
 async def test_clock_step_back_counts_once_and_never_on_a_replay(
     service: QuizService, store: SpyStore, metric: Callable[..., float]
 ) -> None:
@@ -386,3 +401,92 @@ async def test_answers_count_once_per_first_scoring_by_result_never_on_a_replay(
         [result] = await send(service, conn, answer(i, choice, sid=i))
         assert await send(service, conn, answer(i, choice, sid=i)) == [result]
     assert [n - b for n, b in zip(counts(), before, strict=True)] == [1, 1, 1]
+
+
+class Lagging:
+    """``ranks_of`` reads seq 1 for its first ``stale`` calls, then seq 2; ``snapshot`` reads 2."""
+
+    def __init__(self, stale: int) -> None:
+        self.stale, self.rank_reads, self.full_reads = stale, 0, list[str | None]()
+
+    @staticmethod
+    def row(user_id: str, seq: int) -> Place:
+        return Place(int(user_id[1:]) + 1, 10 * seq)
+
+    async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> Ranks:
+        del quiz_id
+        self.rank_reads += 1
+        seq = 1 if self.rank_reads <= self.stale else 2
+        return Ranks(seq, "open", 100, {user: self.row(user, seq) for user in user_ids})
+
+    async def snapshot(self, quiz_id: str, user_id: str | None) -> Snapshot:
+        del quiz_id
+        self.full_reads.append(user_id)
+        await asyncio.sleep(0)
+        return Snapshot(2, "open", 100, 0, (), None if user_id is None else self.row(user_id, 2))
+
+
+async def test_snapshots_whose_rank_is_older_than_the_refill_read_their_rank_again() -> None:
+    store = Lagging(stale=100)
+    service = QuizService(store, Bank(), lambda: 0)  # type: ignore[arg-type]
+    replies = await asyncio.gather(*(service.snapshot(QUIZ, f"u{i}") for i in range(100)))
+    you = [(reply.atSeq, reply.you) for reply in replies]
+    assert you == [(2, m.You(rank=i + 1, score=20)) for i in range(100)]
+    assert [user for user in store.full_reads if user is not None] == []
+    assert len(store.full_reads) <= 2
+
+
+class Pages:
+    """``standings_page`` counts its reads and holds each one until ``release`` is set."""
+
+    def __init__(self) -> None:
+        self.reads, self.release = 0, asyncio.Event()
+
+    async def standings_page(self, quiz_id: str, offset: int, limit: int) -> Page:
+        del quiz_id, offset, limit
+        self.reads += 1
+        await self.release.wait()
+        return Page(self.reads, 1, final=False, rows=(Row(1, "a", "A", 0),))
+
+
+async def test_identical_leaderboard_pages_share_one_read_per_tick() -> None:
+    store, now = Pages(), [0]
+    service = QuizService(store, Bank(), lambda: now[0])  # type: ignore[arg-type]
+    conn, page = Connection("c-a", "a", quiz_id=QUIZ), m.GetLeaderboard(offset=0, limit=100)
+    pending = asyncio.gather(*(send(service, conn, page) for _ in range(100)))
+    await asyncio.sleep(0)  # every request waits on the one read in flight
+    store.release.set()
+    replies = await pending
+    assert store.reads == 1
+    assert all(reply == replies[0] for reply in replies)
+    now[0] += Limits().tick_ms - 1
+    assert (await send(service, conn, page), store.reads) == (replies[0], 1)
+    now[0] += 1
+    [fresh] = await send(service, conn, page)
+    assert (fresh.atSeq, store.reads) == (2, 2)
+
+
+async def test_a_refused_write_at_the_end_drops_the_cached_pages(
+    service: QuizService, store: SpyStore
+) -> None:
+    conn = await joined(service)
+    page = m.GetLeaderboard(offset=0, limit=10)
+    [before] = await send(service, conn, page)
+    assert (before.final, store.pages) == (False, 1)
+    assert await store.end_by_host(QUIZ) == 1
+    assert await refused(service, conn, m.Next(questionIndex=0)) == (E.QUIZ_ENDED, None)
+    [after] = await send(service, conn, page)
+    assert (after.final, after.atSeq, store.pages) == (True, 1, 2)
+
+
+async def test_a_page_read_in_flight_when_the_cache_drops_is_not_kept() -> None:
+    store, now = Pages(), [0]
+    service = QuizService(store, Bank(), lambda: now[0])  # type: ignore[arg-type]
+    conn, page = Connection("c-a", "a", quiz_id=QUIZ), m.GetLeaderboard(offset=0, limit=100)
+    pending = asyncio.create_task(send(service, conn, page))
+    await asyncio.sleep(0)  # the read is in flight
+    service.drop_cache(QUIZ)  # a store restart, or the end, while it runs
+    store.release.set()
+    [old] = await pending
+    [fresh] = await send(service, conn, page)
+    assert (old.atSeq, fresh.atSeq, store.reads) == (1, 2, 2)

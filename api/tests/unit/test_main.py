@@ -34,7 +34,7 @@ def test_redis_store_is_built_without_connecting() -> None:
     assert isinstance(services.store, RedisStore)
     assert isinstance(services.tickets, RedisTicketStore)
     assert len(services.startup) == 2  # load the scripts, then start the presence renewal
-    assert len(services.shutdown) == 3  # close the client; stop the fan-out and the renewal first
+    assert len(services.shutdown) == 4  # close both clients; stop the fan-out and renewal first
 
 
 async def test_the_presence_renewal_runs_while_the_app_runs() -> None:
