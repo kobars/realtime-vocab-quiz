@@ -1,9 +1,11 @@
 # AI-ASSISTED: the composition root on Redis: the start hook loads every Lua script; a join burst
-# above the connection pool's size waits for a connection instead of failing.
+# above the connection pool's size waits for a connection instead of failing; readiness needs a
+# write that Redis accepts.
 import asyncio
 import hashlib
 import uuid
 
+import httpx
 from redis.asyncio import Redis
 
 from quiz.adapters.redis.scripts import SCRIPTS, source
@@ -38,3 +40,20 @@ async def test_a_join_burst_above_the_pool_size_waits_for_a_connection(redis_url
         )
         outcomes = await asyncio.gather(*joins)
     assert {type(outcome.replies[0]) for outcome in outcomes} == {m.Joined}
+
+
+async def test_readyz_answers_503_while_redis_refuses_writes(redis_url: str) -> None:
+    app = create_app(Settings(store="redis", redis_url=redis_url))
+    transport = httpx.ASGITransport(app=app)
+    async with (
+        Redis.from_url(redis_url) as admin,
+        httpx.AsyncClient(transport=transport, base_url="http://node") as client,
+    ):
+        assert (await client.get("/readyz")).status_code == 200
+        await admin.config_set("min-replicas-to-write", 1)  # every write now fails: NOREPLICAS
+        try:
+            down = await client.get("/readyz")
+        finally:
+            await admin.config_set("min-replicas-to-write", 0)
+        assert (down.status_code, down.json()) == (503, {"status": "unavailable"})
+        assert (await client.get("/readyz")).status_code == 200

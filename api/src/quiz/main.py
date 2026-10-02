@@ -36,6 +36,7 @@ from quiz.ports.tickets import TicketStore
 Hook = Callable[[], Awaitable[None]]
 Probe = Callable[[], Awaitable[bool]]
 READY_TIMEOUT_S = 1.0
+READY_PROBE_KEY, READY_PROBE_TTL_MS = "quiz:ready:probe", 5_000
 # The errors that mean the store is unreachable: HTTP 503.
 OUTAGES = (ConnectionError, TimeoutError, redis_errors.ConnectionError, redis_errors.TimeoutError)
 
@@ -54,13 +55,17 @@ async def always_ready() -> bool:
 
 
 def redis_probe(client: Redis) -> Probe:
-    async def ping() -> bool:
+    """Ready when Redis accepts a write: it answers PING also while it refuses writes (a
+    read-only replica, a failed AOF write, maxmemory with noeviction)."""
+
+    async def write() -> bool:
+        probe = client.set(READY_PROBE_KEY, "1", px=READY_PROBE_TTL_MS)
         try:
-            return bool(await asyncio.wait_for(client.ping(), READY_TIMEOUT_S))
+            return bool(await asyncio.wait_for(probe, READY_TIMEOUT_S))
         except redis_errors.RedisError, OSError, TimeoutError:
             return False
 
-    return ping
+    return write
 
 
 @dataclass(slots=True)

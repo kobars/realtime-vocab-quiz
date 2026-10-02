@@ -128,7 +128,7 @@ def _public(deps: HttpDeps) -> APIRouter:
 
     @api.get("/readyz", tags=["operations"], responses={503: {"model": h.Status}})
     async def readyz(response: Response) -> h.Status:
-        """Readiness: the store answers; 503 when Redis is unreachable."""
+        """Readiness: the store takes writes; 503 when Redis is unreachable or refuses writes."""
         if await deps.ready():
             return h.Status(status="ready")
         response.status_code = 503

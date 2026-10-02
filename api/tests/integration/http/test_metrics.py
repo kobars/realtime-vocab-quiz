@@ -1,4 +1,5 @@
-# AI-ASSISTED: a /metrics scrape finds each named metric with its type, and each answer result.
+# AI-ASSISTED: a /metrics scrape finds each named metric with its type, each answer result and the
+# store outage series of the error replies.
 import httpx
 
 from quiz.config import Settings
@@ -7,9 +8,11 @@ from quiz.main import create_app
 METRICS = {
     "ws_connections": "gauge",
     "answers_total": "counter",
+    "ws_errors_total": "counter",
     "leaderboard_frames_total": "counter",
     "tick_duration_seconds": "histogram",
     "redis_clock_step_total": "counter",
+    "log_lines_dropped_total": "counter",
 }
 
 
@@ -26,3 +29,4 @@ async def test_metrics_scrape_finds_each_name() -> None:
         assert any(line.startswith(name) for line in lines), name
     series = {line.rpartition(" ")[0] for line in lines}
     assert {f'answers_total{{result="{r}"}}' for r in ("correct", "wrong", "late")} <= series
+    assert 'ws_errors_total{code="UNAVAILABLE",request="answer"}' in series

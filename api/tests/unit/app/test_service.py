@@ -386,3 +386,26 @@ async def test_answers_count_once_per_first_scoring_by_result_never_on_a_replay(
         [result] = await send(service, conn, answer(i, choice, sid=i))
         assert await send(service, conn, answer(i, choice, sid=i)) == [result]
     assert [n - b for n, b in zip(counts(), before, strict=True)] == [1, 1, 1]
+
+
+async def test_store_outages_are_counted_per_reply_and_logged_at_most_once_a_second(
+    service: QuizService,
+    store: SpyStore,
+    caplog: pytest.LogCaptureFixture,
+    metric: Callable[..., float],
+) -> None:
+    async def timeout(*_: object) -> None:
+        raise TimeoutError
+
+    conn = await joined(service)
+    await send(service, conn, m.Next(questionIndex=0))
+    store.apply_answer = timeout  # type: ignore[method-assign, assignment]
+    before = metric("ws_errors_total", request="answer", code="UNAVAILABLE")
+    with caplog.at_level(logging.WARNING, logger="quiz.app.service"):
+        for sid in (1, 2):  # within one second
+            assert await refused(service, conn, answer(0, sid=sid)) == (E.UNAVAILABLE, None)
+        store.now[0] += 1_000
+        await refused(service, conn, answer(0, sid=3))
+    assert metric("ws_errors_total", request="answer", code="UNAVAILABLE") == before + 3
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == ["store unreachable on answer"] * 2
