@@ -36,16 +36,44 @@ def _stages(dockerfile: Path) -> list[list[str]]:
     return stages
 
 
+# The ``docker run`` options that take a value as the next argument.
+_RUN_OPTIONS_WITH_VALUE = {"-e", "--env", "-p", "--publish", "-v", "--volume", "-w", "--workdir"}
+_RUN_OPTIONS_WITH_VALUE |= {"--name", "--tmpfs", "-u", "--user", "--network", "--entrypoint"}
+
+
+def _docker_run_images(text: str) -> list[str]:
+    """Return the image of each ``docker run`` in a shell script or a workflow: its first argument
+    that is neither an option nor an option's value. An image held in a shell variable, such as
+    the ``"$image"`` that ``make build`` makes, is left out."""
+    lines = text.replace("\\\n", " ").splitlines()
+    commands = [line for line in lines if not line.lstrip().startswith("#")]
+    images: list[str] = []
+    for match in (m for line in commands for m in re.finditer(r"docker run\s(.*)", line)):
+        args = iter(match.group(1).split())
+        for arg in args:
+            if arg in _RUN_OPTIONS_WITH_VALUE:
+                next(args, None)
+            elif not arg.startswith("-"):
+                if not arg.strip('"').startswith("$"):
+                    images.append(arg)
+                break
+    return images
+
+
 def _pulled_images(path: Path) -> list[str]:
-    """Return each image that a Dockerfile or a YAML file pulls: every ``FROM`` image, every
-    ``COPY --from`` image that is not a build stage, and every ``image:`` value except the
-    images that ``make build`` makes here (``elsaquiz-*``)."""
+    """Return each image that a file pulls. A Dockerfile pulls every ``FROM`` image and every
+    ``COPY --from`` image that is not a build stage; any other file pulls every ``image:`` value
+    except the images that ``make build`` makes here (``elsaquiz-*``), and every ``docker run``
+    image."""
     if path.name != "Dockerfile":
-        lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
+        text = path.read_text(encoding="utf-8")
+        lines = [line.strip() for line in text.splitlines()]
         values = [
             line.removeprefix("image:").strip() for line in lines if line.startswith("image:")
         ]
-        return [value for value in values if not value.startswith("elsaquiz-")]
+        return [value for value in values if not value.startswith("elsaquiz-")] + (
+            _docker_run_images(text)
+        )
     images: list[str] = []
     stage_names: set[str] = set()
     for stage in _stages(path):
@@ -68,14 +96,42 @@ def _api_cmd() -> list[str]:
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 
 
-@pytest.mark.parametrize(
-    "path", ["api/Dockerfile", "web/Dockerfile", "compose.yaml", ".github/workflows/ci.yml"]
-)
-def test_every_pulled_image_is_pinned_by_digest(path: str) -> None:
+def _image_files() -> list[Path]:
+    """Every file that can pull an image: the Dockerfiles, the compose files, the workflows and
+    the shell scripts."""
+    globs = ("*/Dockerfile", "compose*.yaml", ".github/workflows/*.yml", "scripts/*.sh")
+    return sorted(path for pattern in globs for path in ROOT.glob(pattern))
+
+
+def test_every_pulled_image_is_pinned_by_digest() -> None:
     """A tag can move; a digest is the exact image that the scans and the tests ran."""
-    images = _pulled_images(ROOT / path)
-    assert images
-    assert [image for image in images if not DIGEST.search(image)] == []
+    images = {str(path.relative_to(ROOT)): _pulled_images(path) for path in _image_files()}
+    unpinned = {path: [i for i in found if not DIGEST.search(i)] for path, found in images.items()}
+    assert {path: found for path, found in unpinned.items() if found} == {}
+    # Each kind of file still yields its images, so a parser that finds nothing cannot pass.
+    for path in ("api/Dockerfile", "compose.yaml", ".github/workflows/containers.yml"):
+        assert images[path], path
+    assert images["scripts/check_links.sh"], "scripts/check_links.sh"
+
+
+def test_pulled_images_read_docker_run_and_skip_comments_and_variables(tmp_path: Path) -> None:
+    script = tmp_path / "check.sh"
+    script.write_text(
+        "# usage: check <image> [docker run options...]\n"
+        'docker run --rm -i -e TOKEN -v "$PWD:/in:ro" -w /in owner/tool:1.2 \\\n'
+        "  --flag value\n"
+        'uid="$(docker run --rm "$image" id -u)"\n'
+        "xargs docker run --tmpfs /tmp alpine:3.22 true\n",
+        encoding="utf-8",
+    )
+    workflow = tmp_path / "workflow.yml"
+    workflow.write_text(
+        "services:\n  redis:\n    image: redis:8-alpine\n"
+        "steps:\n  - run: git ls-files | xargs docker run --rm hadolint/hadolint:v2 hadolint\n",
+        encoding="utf-8",
+    )
+    assert _pulled_images(script) == ["owner/tool:1.2", "alpine:3.22"]
+    assert _pulled_images(workflow) == ["redis:8-alpine", "hadolint/hadolint:v2"]
 
 
 def test_pulled_images_skip_build_stages_and_keep_an_image_without_a_digest(

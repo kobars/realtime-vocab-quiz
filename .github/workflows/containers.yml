@@ -34,7 +34,7 @@ jobs:
           persist-credentials: false
       - name: hadolint
         # Reads .hadolint.yaml from the repository root.
-        run: git ls-files -z '*Dockerfile' | xargs -0 docker run --rm -v "$PWD:/repo:ro" -w /repo hadolint/hadolint:v2.15.1 hadolint
+        run: git ls-files -z '*Dockerfile' | xargs -0 docker run --rm -v "$PWD:/repo:ro" -w /repo hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d hadolint
       - name: shellcheck
         run: git ls-files -z '*.sh' | xargs -0 --no-run-if-empty shellcheck
       - name: compose config

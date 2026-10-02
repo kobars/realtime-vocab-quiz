@@ -332,7 +332,7 @@ The Dockerfiles, `compose.yaml`, the CI Redis service and the integration-test f
 
 ### Decision
 
-- Every image is written as `name:tag@sha256:<digest>`, where the digest is the multi-platform index, so the same line builds on amd64 CI runners and arm64 laptops: each `FROM`, the `COPY --from` uv image, both Redis services of `compose.yaml`, the CI Redis service and the test fixture's Redis. The API and web images that `make build` makes keep their local tag. Redis is pinned to a minor version (`8.10-alpine`).
+- Every image is written as `name:tag@sha256:<digest>`, where the digest is the multi-platform index, so the same line builds on amd64 CI runners and arm64 laptops: each `FROM`, the `COPY --from` uv image, both Redis services of `compose.yaml`, the CI Redis service, the test fixture's Redis and the tool images that `docker run` pulls (hadolint in `.github/workflows/containers.yml`, lychee in `scripts/check_links.sh`). The API and web images that `make build` makes keep their local tag. Redis is pinned to a minor version (`8.10-alpine`).
 - Dependabot (`docker` for both Dockerfiles, `docker-compose` for `compose.yaml`) proposes new digests weekly, after its 7-day cooldown.
 - The runtime stages keep the OS package upgrade.
 
@@ -345,6 +345,6 @@ The Dockerfiles, `compose.yaml`, the CI Redis service and the integration-test f
 ### Consequences
 
 - The base layers are fixed per commit. The upgraded OS packages depend on the build day, so two builds of one commit can differ there; the containers workflow scans the image it built in the same job, so the scanned image is the one that run built.
-- A Dependabot `docker-compose` update changes `compose.yaml` only; `.github/workflows/ci.yml` and `api/tests/conftest.py` take the same line in that pull request, which `scripts/tests/test_images.py` enforces.
+- A Dependabot `docker-compose` update changes `compose.yaml` only; `.github/workflows/ci.yml` and `api/tests/conftest.py` take the same line in that pull request, which `scripts/tests/test_images.py` enforces. Dependabot does not read `docker run` commands, so the hadolint and lychee digests are updated by hand; the same test fails on any of them without a digest.
 
 <!-- AI-ASSISTED-END -->

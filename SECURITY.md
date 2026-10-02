@@ -46,7 +46,8 @@ and audits of the locked Python (`pip-audit`) and production web (`pnpm audit`) 
 On a pull request the audits run only when `api/uv.lock` or `web/pnpm-lock.yaml`
 changes; pushes to `main` and the weekly runs audit every time. Both workflows also run
 weekly. Every action in the workflows is pinned to a commit SHA and every image to a
-digest; Dependabot updates them weekly. OpenSSF Scorecard (`.github/workflows/scorecard.yml`)
+digest; Dependabot updates them weekly, except the hadolint and lychee images that
+`docker run` pulls, which are updated by hand. OpenSSF Scorecard (`.github/workflows/scorecard.yml`)
 checks the repository's supply-chain practices on each push to `main` and weekly, and
 uploads its results to code scanning. `make audit` runs the audits and the secret scan locally; it
 needs the network, a full clone (not shallow) and gitleaks 8.25 or later on the `PATH` (CI
