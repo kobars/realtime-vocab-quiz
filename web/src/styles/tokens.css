@@ -1,5 +1,7 @@
 /* AI-ASSISTED: design tokens of direction "Clay" (docs/spec/ui.md §7.2); the only file that names a color, size, radius, shadow or duration. */
 :root {
+  /* Native parts (scrollbars, form controls) follow the theme. */
+  color-scheme: light;
   --background: #F9F6FF;
   --card: #FFFFFF;
   --foreground: #181233;
@@ -62,6 +64,7 @@
 /* The dark theme follows the OS; there is no toggle. */
 @media (prefers-color-scheme: dark) {
   :root {
+    color-scheme: dark;
     --background: #050024;
     --card: #171236;
     --foreground: #F9F6FF;

@@ -82,6 +82,10 @@ describe('clay look', () => {
     for (const c of transforms) expect(c).toMatch(/^motion-safe:/)
   })
 
+  it.each(moving)('%s eases its move: Tailwind translate-* sets the translate property, so the transition lists it', (_, value) => {
+    expect(classes(value).filter((c) => c.startsWith('transition-'))).toEqual([expect.stringMatching(/^transition-\[[^\]]*\btranslate\b/)])
+  })
+
   it.each([
     ['default', ['bg-primary', 'bg-gradient-primary', 'text-primary-foreground', 'shadow-press', 'border-clay']],
     ['mint', ['bg-mint', 'text-night', 'shadow-press']],

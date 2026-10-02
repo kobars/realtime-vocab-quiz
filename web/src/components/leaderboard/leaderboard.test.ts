@@ -249,6 +249,10 @@ it('a snapshot or a rebase frame swaps the rows in one step; an ordinary frame m
 it('my row gets a 1 s tint when it moves up, and none when it moves down', async () => {
   const w = track(mount(LeaderboardRows, { ...options, props: { entries: [row(1, 140), me(2, 0)], myUserId: 'u1' } }))
   const mine = () => w.find('[aria-current="true"]').classes()
+  // The tint is my row's only fill, so it never depends on the CSS order of two fills.
+  expect(mine()).toContain('bg-highlight')
+  expect(mine()).not.toContain('bg-card')
+  expect(w.find('li:not([aria-current])').classes()).toContain('bg-card')
   await w.setProps({ entries: [me(1, 150), row(2, 140)] })
   expect(mine()).toContain('lb-rise')
   await vi.advanceTimersByTimeAsync(1_000)

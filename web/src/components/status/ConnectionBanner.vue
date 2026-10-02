@@ -1,7 +1,8 @@
-<!-- AI-ASSISTED: the calm connection pill: connecting, reconnecting, updating, server busy (warning pill), or closed (destructive pill); nothing while live or blocked (UI spec §3.7, §6.3). -->
+<!-- AI-ASSISTED: the calm connection pill: connecting, reconnecting or updating (quiet pill), server busy (warning pill), or closed (destructive pill), wrapping on a narrow screen; nothing while live or blocked (UI spec §3.7, §6.3). -->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { badgeVariants } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 
@@ -23,6 +24,8 @@ const text = computed(() => {
       return ''
   }
 })
+// Only a busy server and a lost connection stand out; the states the client recovers from on its own stay quiet.
+const variant = computed(() => (store.busy !== null ? 'warning' : store.connection === 'closed' ? 'destructive' : 'secondary'))
 </script>
 
 <template>
@@ -30,7 +33,7 @@ const text = computed(() => {
   <p
     role="status"
     data-test="connection"
-    :class="text ? badgeVariants({ variant: store.connection === 'closed' ? 'destructive' : 'warning' }) : 'sr-only'"
+    :class="text ? cn(badgeVariants({ variant }), 'whitespace-normal') : 'sr-only'"
   >
     {{ text }}
   </p>

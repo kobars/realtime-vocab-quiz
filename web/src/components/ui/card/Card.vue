@@ -17,7 +17,7 @@ const props = withDefaults(defineProps<{
     :class="
       cn(
         'bg-card text-card-foreground flex flex-col gap-6 rounded-card border-clay border-border p-6 shadow-clay sm:p-8',
-        interactive && 'transition-[box-shadow,transform] duration-slow ease-spring hover:shadow-clay-lift motion-safe:hover:-translate-y-1',
+        interactive && 'transition-[box-shadow,translate] duration-slow ease-spring hover:shadow-clay-lift motion-safe:hover:-translate-y-1',
         props.class,
       )
     "

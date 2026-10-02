@@ -37,6 +37,12 @@ describe('design tokens', () => {
     expect(dark.map(([name]) => name).sort()).toEqual(Object.keys(darkTokens).sort())
   })
 
+  it('tells the browser each theme, so scrollbars and native controls follow it', () => {
+    const block = (from: number) => tokens.slice(from, tokens.indexOf('}', from))
+    expect(block(tokens.indexOf(':root {'))).toContain('color-scheme: light;')
+    expect(block(tokens.indexOf('@media (prefers-color-scheme: dark)'))).toContain('color-scheme: dark;')
+  })
+
   it.each(MOTION)('reduced motion sets %s to 0ms', (name) => {
     expect(reducedMotion).toContain(`${name}: 0ms;`)
   })

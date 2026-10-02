@@ -49,8 +49,8 @@ const pin = (el: Element): void => void ((el as HTMLElement).style.top = `${(el 
       :key="row.userId"
       :data-user="row.userId"
       :aria-current="row.userId === myUserId ? 'true' : undefined"
-      class="flex min-h-12 items-center gap-3 rounded-lg bg-card px-3 py-1.5"
-      :class="[row.userId === myUserId ? MY_ROW : 'border-2 border-border', { 'lb-rise': rising && row.userId === myUserId }]"
+      class="flex min-h-12 items-center gap-3 rounded-lg px-3 py-1.5"
+      :class="[row.userId === myUserId ? MY_ROW : 'border-2 border-border bg-card', { 'lb-rise': rising && row.userId === myUserId }]"
     >
       <span :class="[RANK_CHIP, placeFill(row.rank)]">#{{ row.rank }}</span>
       <span

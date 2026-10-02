@@ -40,15 +40,25 @@ describe('Tailwind entry', () => {
   it.each([
     ['rounded-card', 'border-radius: var(--radius-card);'],
     ['border-clay', 'border-width: var(--border-clay);'],
-    ['shadow-clay', 'box-shadow: var(--shadow-clay);'],
-    ['shadow-clay-lift', 'box-shadow: var(--shadow-clay-lift);'],
-    ['shadow-press', 'box-shadow: var(--shadow-press);'],
-    ['shadow-press-hover', 'box-shadow: var(--shadow-press-hover);'],
-    ['shadow-press-active', 'box-shadow: var(--shadow-press-active);'],
     ['bg-gradient-primary', 'background-image: var(--gradient-primary);'],
     ['ease-spring', 'transition-timing-function: var(--ease-spring);'],
   ])('the %s utility reads its token', (name, body) => {
     expect(main).toContain(`@utility ${name} { ${body} }`)
+  })
+
+  it.each(['clay', 'clay-lift', 'press', 'press-hover', 'press-active', 'inset'])(
+    'shadow-%s fills the shadow slot and keeps the ring slots, so a focus ring survives hover and press',
+    (name) => {
+      const rule = main.match(new RegExp(`@utility shadow-${name} \\{([^}]*)\\}`))?.[1] ?? ''
+      expect(rule).toContain(`--tw-shadow: var(--shadow-${name});`)
+      expect(rule).toMatch(/box-shadow: [^;]*var\(--tw-ring-offset-shadow[^;]*var\(--tw-ring-shadow[^;]*var\(--tw-shadow\);/)
+    },
+  )
+
+  it('sets the podium delay after the animation shorthand, which would reset it', () => {
+    const rise = main.match(/@utility animate-rise \{([^}]*)\}/)?.[1] ?? ''
+    expect(rise.indexOf('animation-delay: calc(var(--stagger) * var(--rise-step, 0));')).toBeGreaterThan(rise.indexOf('animation: rise'))
+    expect(main).toContain('@utility rise-delay-* { --rise-step: --value(integer); }')
   })
 
   it('keeps no grey shadow utility', () => {

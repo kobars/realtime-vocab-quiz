@@ -182,6 +182,21 @@ it('UNAVAILABLE: the pill says Server busy, retrying until the reply to the retr
   expect(w.get('[data-test="connection"]').text()).toBe('')
 })
 
+it('the pill stays quiet while the client recovers, warns for a busy server, turns destructive when disconnected, and wraps on a narrow screen', async () => {
+  const w = await playing()
+  const pill = () => w.get('[data-test="connection"]').classes()
+  await receive(status('reconnecting', 1006))
+  expect(pill()).toEqual(expect.arrayContaining(['bg-muted', 'text-muted-foreground', 'whitespace-normal']))
+  expect(pill()).not.toContain('whitespace-nowrap')
+  await receive(status('open'), joined({ cursor: 0, cursorOpen: true }), snapshot(0), question(0))
+  press('3')
+  await receive(error('UNAVAILABLE', 'answer'))
+  expect(pill()).toEqual(expect.arrayContaining(['bg-warning-soft', 'text-warning']))
+  await receive(status('closed', 1001))
+  expect(w.get('[data-test="connection"]').text()).toBe('Disconnected. Reload the page to try again.')
+  expect(pill()).toEqual(expect.arrayContaining(['bg-destructive-soft', 'text-destructive', 'whitespace-normal']))
+})
+
 it('a play screen mounted after SESSION_REPLACED shows the card with Use this tab, not an empty page', async () => {
   useQuizStore().join('VOCAB-42', 'Ana')
   await receive(joined(), snapshot(0), question(), error('SESSION_REPLACED'))
@@ -309,7 +324,10 @@ it('the choices lift and press only behind motion-safe and never while locked; t
   press('2')
   await nextTick()
   expect(choice(w, 1).classes()).toEqual(expect.arrayContaining(['border-primary', 'bg-highlight']))
-  expect(choice(w, 0).classes()).toContain('border-input')
+  // The card fill sits only on the other choices, so the tint never depends on the CSS order of two fills.
+  expect(choice(w, 1).classes()).not.toContain('bg-card')
+  expect(choice(w, 0).classes()).toEqual(expect.arrayContaining(['border-input', 'bg-card']))
+  expect(choice(w, 0).classes().filter((c) => c.startsWith('transition-'))).toEqual([expect.stringMatching(/^transition-\[[^\]]*\btranslate\b/)])
   expect(choice(w, 1).get('svg').classes()).toContain('motion-safe:animate-spin')
 })
 

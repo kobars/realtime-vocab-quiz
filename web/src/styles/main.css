@@ -72,12 +72,13 @@
 @utility rounded-card { border-radius: var(--radius-card); }
 @utility border-clay { border-width: var(--border-clay); }
 @utility border-b-clay { border-bottom-width: var(--border-clay); }
-@utility shadow-clay { box-shadow: var(--shadow-clay); }
-@utility shadow-clay-lift { box-shadow: var(--shadow-clay-lift); }
-@utility shadow-press { box-shadow: var(--shadow-press); }
-@utility shadow-press-hover { box-shadow: var(--shadow-press-hover); }
-@utility shadow-press-active { box-shadow: var(--shadow-press-active); }
-@utility shadow-inset { box-shadow: var(--shadow-inset); }
+/* The clay shadows fill Tailwind's shadow slot next to its ring slots, so a focus ring (ring-*) still draws on a hovered or pressed control. */
+@utility shadow-clay { --tw-shadow: var(--shadow-clay); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
+@utility shadow-clay-lift { --tw-shadow: var(--shadow-clay-lift); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
+@utility shadow-press { --tw-shadow: var(--shadow-press); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
+@utility shadow-press-hover { --tw-shadow: var(--shadow-press-hover); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
+@utility shadow-press-active { --tw-shadow: var(--shadow-press-active); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
+@utility shadow-inset { --tw-shadow: var(--shadow-inset); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
 @utility bg-gradient-primary { background-image: var(--gradient-primary); }
 @utility duration-fast { transition-duration: var(--motion-fast); }
 @utility duration-base { transition-duration: var(--motion-base); }
@@ -91,9 +92,9 @@
 @keyframes rise { from { opacity: 0; transform: translateY(1rem); } }
 @utility animate-pop { animation: pop var(--motion-pop) var(--ease-spring); }
 @utility animate-fade-in { animation: fade-in var(--motion-slow) var(--ease-standard); }
-@utility animate-rise { animation: rise var(--motion-pop) var(--ease-spring) backwards; }
-/* rise-delay-N starts a podium step N stagger steps late. */
-@utility rise-delay-* { animation-delay: calc(var(--stagger) * --value(integer)); }
+/* rise-delay-N starts a podium step N stagger steps late; the delay sits after the shorthand, which would reset it. */
+@utility animate-rise { animation: rise var(--motion-pop) var(--ease-spring) backwards; animation-delay: calc(var(--stagger) * var(--rise-step, 0)); }
+@utility rise-delay-* { --rise-step: --value(integer); }
 
 /* Text clipped to the text gradient; a solid primary where background-clip: text is missing, and the system text color in forced colors. */
 @utility text-gradient {
