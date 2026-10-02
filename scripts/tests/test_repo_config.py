@@ -12,6 +12,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -550,15 +551,63 @@ def _link_ignores() -> list[re.Pattern[str]]:
     return [re.compile(line) for line in lines if line.strip() and not line.startswith("#")]
 
 
+def _markdown_files(root: Path) -> list[str]:
+    """Return the tracked Markdown files of the repository at ``root``, relative to it. Where
+    there is no work tree (the test image's build context drops ``.git``), they are the Markdown
+    files its ``.gitignore`` files keep, listed by git's own walk from an empty repository kept
+    outside ``root``."""
+    with tempfile.TemporaryDirectory() as scratch:
+        if (root / ".git").exists():
+            args = ["ls-files"]
+        else:
+            subprocess.run(["git", "init", "-q", scratch], check=True)  # noqa: S607
+            args = [
+                f"--git-dir={scratch}/.git",
+                f"--work-tree={root}",
+                "-c",
+                f"core.excludesFile={os.devnull}",
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+            ]
+        return subprocess.run(
+            ["git", *args, "*.md"],  # noqa: S607
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
+
+
+def test_the_markdown_files_are_the_tracked_ones_in_a_git_work_tree(tmp_path: Path) -> None:
+    for name in ("README.md", "notes.md"):
+        (tmp_path / name).write_text("# x\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)  # noqa: S607
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)  # noqa: S607
+    assert _markdown_files(tmp_path) == ["README.md"]
+
+
+def test_the_markdown_files_are_found_without_a_git_work_tree(tmp_path: Path) -> None:
+    # The test image's build context drops .git: the files the .gitignore keeps stand in.
+    (tmp_path / ".gitignore").write_text(
+        "node_modules/\nreports/\ndiff-cover.md\n", encoding="utf-8"
+    )
+    for name in (
+        "README.md",
+        "docs/guide.md",
+        "docs/notes.txt",
+        "web/node_modules/pkg/README.md",
+        "reports/run.md",
+        "diff-cover.md",
+    ):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("# x\n", encoding="utf-8")
+    assert sorted(_markdown_files(tmp_path)) == ["README.md", "docs/guide.md"]
+
+
 def _loopback_links() -> set[str]:
     """Return every http(s) link to localhost or 127.0.0.1 in the tracked Markdown files."""
-    files = subprocess.run(
-        ["git", "ls-files", "*.md"],  # noqa: S607
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.splitlines()
+    files = _markdown_files(ROOT)
     loopback = re.compile(r"https?://(?:localhost|127\.0\.0\.1)[^\s<>)\]`'\"]*")
     return {
         url
