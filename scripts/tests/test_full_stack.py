@@ -236,7 +236,7 @@ def test_caddy_keeps_the_admin_token_and_the_socket_ticket_out_of_its_logs() -> 
     """A failed upstream request is logged with its headers and URI; Caddy redacts only
     Authorization and cookies by itself."""
     caddyfile = (ROOT / "infra" / "caddy" / "Caddyfile").read_text(encoding="utf-8")
-    (global_options,) = re.findall(r"\A(?:#.*\n)*\{\n(.*?)\n\}\n", caddyfile, re.DOTALL)
+    global_options = caddyfile[caddyfile.index("\n{\n") : caddyfile.index("\n}\n")]
     assert re.search(r"^\t\tformat filter \{", global_options, re.MULTILINE)
     assert "request>headers>X-Admin-Token delete" in global_options
     assert re.search(r"request>uri query \{\s*replace ticket REDACTED\s*\}", global_options)
