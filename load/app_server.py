@@ -1,4 +1,4 @@
-# AI-ASSISTED: an in-process app on a free port for the load tools' tests.
+# AI-ASSISTED: an in-process app on a free port for the load tools' tests (a pytest plugin).
 import threading
 import time
 from collections.abc import Iterator

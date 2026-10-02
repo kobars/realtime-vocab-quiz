@@ -15,6 +15,8 @@ from bots import create_quizzes, parse
 from quiz.obs import metrics
 from smoke_full import SmokeError, check_kept, holder, open_sockets, play_one, recover, sign_in
 
+pytest_plugins = ["app_server"]  # the app_url fixture
+
 
 def test_open_sockets_reads_the_nodes_ws_connections_gauge() -> None:
     before = open_sockets(metrics.exposition()[0].decode())

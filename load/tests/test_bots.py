@@ -17,6 +17,8 @@ from player import DEAD_LINK, NORMAL, OVERLOAD, Backoff, BoardWait, Player, Reco
 from quiz.contracts.codec import encode_broadcast
 from quiz.contracts.messages import Entry, Leaderboard
 
+pytest_plugins = ["app_server"]  # the app_url fixture
+
 OPTS = parse(["--timeout-ms", "200"])
 TOKENS = httpx.MockTransport(
     lambda _: httpx.Response(201, json={"sessionToken": "s", "ticket": "t"})
