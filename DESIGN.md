@@ -54,8 +54,9 @@ Lua script that reads the time from Redis `TIME`, so any node can score any answ
 and a (player, question) scores at most once. Score changes only mark the quiz dirty; a 200 ms
 coalescing tick publishes one full leaderboard frame per quiz over Redis pub/sub, numbered by a
 per-quiz `seq`, and a client that sees a gap asks for a snapshot. Identity and the question bank
-are mocks behind ports. Any visitor can host a quiz through the self-service hosting API and end
-it with the host token it gets; a token-gated mock admin API serves the make targets (§14).
+are mocks behind ports. Any visitor can host a quiz from the host page (`/host`), which calls the
+self-service hosting API, and end it with the host token it gets; a token-gated mock admin API
+serves the make targets (§14).
 
 **Headline numbers.** The load runs and §9 fill in the measured column.
 
@@ -115,13 +116,14 @@ translations.
 
 **Context.** The quiz service is the one component built for real. The identity provider and the
 content service are mocks behind ports, so a real one can replace each without touching the
-core; both are dashed. A quiz host starts a quiz and ends it early through the self-service
-hosting API with a host token; the make targets use the token-gated mock admin API (dashed).
+core; both are dashed. A quiz host starts a quiz and ends it early from the host page, which
+calls the self-service hosting API with a host token; the make targets use the token-gated mock
+admin API (dashed).
 
 ```mermaid
 flowchart LR
     player(["Player<br/>(browser)"])
-    host(["Quiz host<br/>(hosting API; make new-quiz, make demo-end)"])
+    host(["Quiz host<br/>(host page /host; make new-quiz, make demo-end)"])
     subgraph built["Built for real"]
         quiz["Real-time quiz service<br/>Vue client + API nodes + Redis"]
     end
@@ -227,7 +229,7 @@ composition root alone wires them is a convention, not a check.
 
 | Component | Role | Owns | Talks to |
 |---|---|---|---|
-| Web client (`web/src/`) | The player's UI: join, question, feedback, finished and live leaderboard | The protocol client (backoff, `seq` tracking, resync), the Pinia quiz store and the views | nginx: HTTP for session and ticket, one WebSocket; the design system |
+| Web client (`web/src/`) | The player's UI: join, question, feedback, finished and live leaderboard; the host page (`/host`) | The protocol client (backoff, `seq` tracking, resync), the Pinia quiz store and the views | nginx: HTTP for session and ticket, one WebSocket; the design system |
 | Design system (`web/packages/clay/`) | The client's look, as the workspace package `@quiz/clay` | The design tokens (light and dark), the Tailwind theme and utilities, the self-hosted font, the components (button, card, badge, input, progress, toaster) and their gallery ([README](web/packages/clay/README.md)) | Imported by the web client through its entry points only |
 | nginx (`infra/nginx/`) | The edge: the stack's single entry | The routes (`/` to the web container; `/api`, its prefix dropped, and `/ws` to both API nodes), WebSocket upgrade headers, `X-Forwarded-For`, the request limits and an access log without the query string | Browser, or Caddy on a public host; the web container; both API nodes |
 | Web container (`web/Dockerfile`, `web/nginx.conf`) | Serves the built client | The Vite build's static files, their cache headers, the CSP and the other security headers (`web/security-headers.conf`) | nginx |
@@ -396,9 +398,9 @@ no frame arrived, which finds a lost last frame.
 **Hosting a quiz.** Any visitor can start a quiz without the admin token (`PUBLIC_HOSTING`,
 on by default).
 
-1. The host's client lists the bank quizzes (`GET /api/banks`) and posts `POST /api/quizzes
-   {bankQuizId}`; the web client has no host page yet, so today that client is an HTTP call
-   such as `curl`. `adapters/http/hosting.py` checks the `Origin` (403 from another site), the
+1. The host page (`/host`, [ui.md §3.8](docs/spec/ui.md#38-host-a-quiz)) lists the bank
+   quizzes (`GET /api/banks`) and posts `POST /api/quizzes {bankQuizId}`; any HTTP client may
+   do the same. `adapters/http/hosting.py` checks the `Origin` (403 from another site), the
    client address's creation limit (429 `RATE_LIMITED`), then draws a run ID such as
    `VOCAB-42-7K3Q`.
 2. `hold_hosted.lua` counts the run in `quiz:hosted`, one sorted set for every node, unless
@@ -978,7 +980,7 @@ it.
 | Gateway and fan-out | The `/ws` endpoint, limits, heartbeat, send buffers; the tick, pub/sub relay, `seq` and resync |
 | Client | The Vue 3 app: protocol client with backoff and resync, Pinia store, screens |
 | Scale-out | Two API nodes, nginx, one Redis, a two-node integration test and load runs |
-| Self-service hosting | `GET /banks`, `POST /quizzes {bankQuizId}` (a fresh run ID and a host token, kept as its SHA-256) and the host-token end `POST /quizzes/{quizId}/end`; a creation limit per client address on each node and a cap on the open self-hosted quizzes across nodes; on unless `PUBLIC_HOSTING=0` (§12) |
+| Self-service hosting | The host page `/host` (pick a question set, share the link, end the quiz); `GET /banks`, `POST /quizzes {bankQuizId}` (a fresh run ID and a host token, kept as its SHA-256) and the host-token end `POST /quizzes/{quizId}/end`; a creation limit per client address on each node and a cap on the open self-hosted quizzes across nodes; on unless `PUBLIC_HOSTING=0` (§12) |
 
 **Mocked.** The identity and question-bank mocks sit behind ports (`TicketStore`,
 `QuestionBank`); quiz admin for the make targets is a token-gated mock admin API in the HTTP

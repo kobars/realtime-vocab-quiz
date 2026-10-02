@@ -48,12 +48,12 @@ on Fly.io instead: see [Deploy to Fly.io](docs/operations.md#deploy-to-flyio).
   player's score updates the moment the answer is accepted.
 - **Live leaderboard:** every player sees the same standings, refreshed about five times a
   second while anyone is scoring, whichever node their socket is on.
-- **Host a quiz:** any visitor can start a quiz from a question set through the hosting API
-  (`POST /api/quizzes`), share its `/q/<quizId>` link and end it early with the host token it
-  got; a per-address limit and a cap on open quizzes keep it bounded.
+- **Host a quiz:** any visitor can start a quiz from a question set on the host page (`/host`),
+  share its `/q/<quizId>` link and end it early with the host token the tab keeps; a per-address
+  limit and a cap on open quizzes keep it bounded.
 
-The real-time server and self-service hosting are built for real, and the Vue client is the
-players' working demo interface. Identity, the question bank and the admin API behind the make
+The real-time server and self-service hosting are built for real, and the Vue client is their
+working demo interface, for players and hosts. Identity, the question bank and the admin API behind the make
 targets are mocks ([DESIGN.md §14](DESIGN.md#14-implemented-and-mocked)).
 
 ## How it works
