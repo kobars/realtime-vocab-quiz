@@ -20,7 +20,7 @@ from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
 from quiz.ports.store import FeedStore, Limits, Publish, Ranks, Row, Store
 
-QUESTIONS = (Question("q0", 1), Question("q1", 3))
+QUESTIONS = (Question("q0", 1), Question("q1", 3), Question("q2", 0))
 
 
 class Sink:
@@ -150,10 +150,22 @@ async def test_the_tick_runs_only_while_the_quiz_has_local_sockets(
 async def test_players_outside_the_top_50_get_rank_updates(
     store: FeedStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A correct answer scores 150 at 0 ms and less as it gets slower, on the store's real clock.
+
+    So equal answer counts rank by chance: the top 50 answer one question more than ranks
+    51-60, and those one more than the single scorers. Three answers score over 300 unless
+    each takes over 19.6 s, two score 200-300 and one at most 150. u160 and u170 are served
+    first and answer last: slower than u150, they rank below it in every frame (a tie goes
+    to the earlier answer).
+    """
     users = [f"u{n:03}" for n in range(201)]  # the join order is the rank
     quiz_id = await quiz_with(store, *users)
-    for user in users[:60]:
+    for user in users[:50]:
+        await score(store, quiz_id, user, 0, 1, 2)  # three answers: the top 50
+    for user in users[50:60]:
         await score(store, quiz_id, user, 0, 1)  # two answers: ahead of any single scorer
+    for user in ("u160", "u170"):
+        await store.serve_next(quiz_id, user, 0, f"c-{user}")  # the retry in score keeps it
     reads: list[int] = []
     ranks_of = store.ranks_of
 
