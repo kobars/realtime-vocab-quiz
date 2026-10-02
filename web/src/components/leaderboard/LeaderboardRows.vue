@@ -1,9 +1,10 @@
-<!-- AI-ASSISTED: standings rows in rank order, keyed by userId so a rank change moves the row with a FLIP; full replacements swap in one step, and my row rising gets a 1 s tint (UI spec §3.5, §5.1). -->
+<!-- AI-ASSISTED: standings rows in rank order, keyed by userId so a rank change moves the row with a FLIP; full replacements swap in one step, and my row rising gets a 1 s tint; clay rows with a rank chip on the role fills for the top 3 (UI spec §3.5, §5.1). -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Entry } from '@/protocol/types.generated'
 import { strings } from '@/strings'
 import { MAX_MOVES, TOP_N } from './limits'
+import { MY_ROW, placeFill, RANK_CHIP } from './places'
 
 /** `replacements` counts the full replacements (`snapshot`, `rebase: true`); a change of it swaps the rows in one step. */
 const props = withDefaults(defineProps<{ entries: Entry[]; myUserId?: string | null; limit?: number; animate?: boolean; replacements?: number }>(), {
@@ -40,7 +41,7 @@ const pin = (el: Element): void => void ((el as HTMLElement).style.top = `${(el 
     tag="ol"
     :name="flip ? 'lb' : 'lb-off'"
     :data-flip="flip"
-    class="relative flex flex-col"
+    class="relative flex flex-col gap-2"
     @before-leave="pin"
   >
     <li
@@ -48,12 +49,15 @@ const pin = (el: Element): void => void ((el as HTMLElement).style.top = `${(el 
       :key="row.userId"
       :data-user="row.userId"
       :aria-current="row.userId === myUserId ? 'true' : undefined"
-      class="flex items-center gap-3 rounded-md px-3 py-2"
-      :class="{ 'bg-highlight font-semibold': row.userId === myUserId, 'lb-rise': rising && row.userId === myUserId }"
+      class="flex min-h-12 items-center gap-3 rounded-lg px-3 py-1.5"
+      :class="[row.userId === myUserId ? MY_ROW : 'border-2 border-border bg-card', { 'lb-rise': rising && row.userId === myUserId }]"
     >
-      <span class="w-10 text-muted-foreground tabular-nums">#{{ row.rank }}</span>
-      <span class="min-w-0 flex-1 truncate">{{ row.userId === myUserId ? `${row.displayName} ${strings.leaderboard.you}` : row.displayName }}</span>
-      <span class="tabular-nums">{{ row.score }}</span>
+      <span :class="[RANK_CHIP, placeFill(row.rank)]">#{{ row.rank }}</span>
+      <span
+        class="min-w-0 flex-1 truncate"
+        :title="row.displayName"
+      >{{ row.userId === myUserId ? `${row.displayName} ${strings.leaderboard.you}` : row.displayName }}</span>
+      <span class="font-semibold tabular-nums">{{ row.score }}</span>
     </li>
   </TransitionGroup>
 </template>

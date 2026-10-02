@@ -1,8 +1,9 @@
-<!-- AI-ASSISTED: answer feedback: correct or wrong, the correct choice, the points with the speed bonus counting up, and the next action (UI spec §3.4). -->
+<!-- AI-ASSISTED: answer feedback: correct or wrong, the correct choice, the points with the speed bonus counting up, and the next action, in a clay card that pops in once (a wrong answer only fades in) behind motion-safe (UI spec §3.4, §5.5). -->
 <script setup lang="ts">
-import { Check, X } from '@lucide/vue'
+import { CircleCheck, CircleX } from '@lucide/vue'
 import { computed, nextTick, onMounted, useTemplateRef } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import type { AnswerResult } from '@/protocol/types.generated'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
@@ -24,21 +25,30 @@ function mark(i: number): { label: string; good: boolean } | null {
 </script>
 
 <template>
-  <section class="flex flex-col gap-4">
+  <Card
+    data-test="feedback"
+    :class="result.correct ? 'motion-safe:animate-pop' : 'motion-safe:animate-fade-in'"
+  >
     <h2
-      class="flex items-center gap-2 text-2xl font-semibold"
+      class="flex items-center gap-3 text-2xl"
       :class="result.correct ? 'text-success' : 'text-destructive'"
     >
-      <component
-        :is="result.correct ? Check : X"
-        class="size-6"
+      <span
+        class="flex size-14 items-center justify-center rounded-xl border-clay"
+        :class="result.correct ? 'border-success bg-success-soft' : 'border-destructive bg-destructive-soft'"
         aria-hidden="true"
-      />
+      >
+        <component
+          :is="result.correct ? CircleCheck : CircleX"
+          class="size-8"
+        />
+      </span>
       {{ result.correct ? strings.quiz.correct : strings.quiz.wrong }}
     </h2>
     <p
       data-test="points"
-      class="text-xl font-semibold tabular-nums"
+      class="tabular-nums"
+      :class="result.late ? 'text-xl font-bold' : 'text-title font-extrabold text-success'"
     >
       <template v-if="result.late">
         {{ strings.quiz.late }}
@@ -47,7 +57,7 @@ function mark(i: number): { label: string; good: boolean } | null {
         {{ strings.quiz.points(points) }}
         <span
           v-if="bonus > 0"
-          class="text-base font-normal text-muted-foreground"
+          class="text-base font-medium text-muted-foreground"
         >{{ strings.quiz.bonus(bonus) }}</span>
       </template>
     </p>
@@ -56,7 +66,7 @@ function mark(i: number): { label: string; good: boolean } | null {
         v-for="(choice, i) in choices"
         :key="i"
         :data-choice="i"
-        class="flex min-h-11 items-center gap-3 rounded-lg border px-4 py-3 text-xl"
+        class="flex min-h-14 items-center gap-3 rounded-lg border-clay px-4 py-3 text-xl font-semibold"
         :class="mark(i) === null ? 'border-input bg-card' : mark(i)?.good ? 'border-success bg-success-soft' : 'border-destructive bg-destructive-soft'"
       >
         <span class="flex-1">{{ choice }}</span>
@@ -66,7 +76,7 @@ function mark(i: number): { label: string; good: boolean } | null {
           :class="mark(i)?.good ? 'text-success' : 'text-destructive'"
         >
           <component
-            :is="mark(i)?.good ? Check : X"
+            :is="mark(i)?.good ? CircleCheck : CircleX"
             class="size-4"
             aria-hidden="true"
           />{{ mark(i)?.label }}
@@ -75,10 +85,11 @@ function mark(i: number): { label: string; good: boolean } | null {
     </ul>
     <Button
       ref="button"
+      size="lg"
       class="self-start"
       @click="store.next()"
     >
       {{ last ? strings.quiz.seeResult : strings.quiz.nextQuestion }}
     </Button>
-  </section>
+  </Card>
 </template>

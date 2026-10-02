@@ -1,5 +1,6 @@
-<!-- AI-ASSISTED: the quiz screen after the join: header with progress, score and rank, the connection pill and error messages, then intro, question, feedback or results by the client phase, as Quiz and Leaderboard tabs on phones, with the score count-up, the answer and rank announcements and the quiz time left on the intro (UI spec §2, §3.2–§3.4, §3.6, §3.7, §4.1, §6.1, §6.3). -->
+<!-- AI-ASSISTED: the quiz screen after the join: header with progress, score and rank, the connection pill and error messages, then intro, question, feedback or results by the client phase, as Quiz and Leaderboard pill tabs on phones, header pills, an intro card, with the score count-up, the answer and rank announcements and the quiz time left on the intro (UI spec §2, §3.2–§3.4, §3.6, §3.7, §4.1, §6.1, §6.3). -->
 <script setup lang="ts">
+import { Rocket } from '@lucide/vue'
 import { useIntervalFn, useMediaQuery } from '@vueuse/core'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import LeaderboardPanel from '@/components/leaderboard/LeaderboardPanel.vue'
@@ -8,7 +9,9 @@ import { useCountUp } from '@/components/question/motion'
 import QuestionCard from '@/components/question/QuestionCard.vue'
 import ConnectionBanner from '@/components/status/ConnectionBanner.vue'
 import ErrorMessage from '@/components/status/ErrorMessage.vue'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 import ResultsView from './ResultsView.vue'
@@ -103,20 +106,28 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
 
 <template>
   <div class="flex flex-col gap-4">
-    <header class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-      <h1 class="text-2xl font-semibold">
+    <header class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <h1 class="text-2xl">
         {{ strings.quiz.title(quizId) }}
       </h1>
-      <p
-        v-if="shownIndex !== null && store.quiz"
-        data-test="progress"
-        class="text-muted-foreground"
-      >
-        {{ strings.quiz.progress(shownIndex + 1, store.quiz.questionCount) }}
-      </p>
-      <p class="flex gap-3 font-semibold tabular-nums">
-        <span data-test="score">{{ strings.quiz.score(score) }}</span>
-        <span v-if="store.myRank !== null">{{ strings.quiz.rank(store.myRank, store.playerCount) }}</span>
+      <p class="flex flex-wrap items-center gap-2 tabular-nums">
+        <Badge
+          v-if="shownIndex !== null && store.quiz"
+          data-test="progress"
+          variant="secondary"
+        >
+          {{ strings.quiz.progress(shownIndex + 1, store.quiz.questionCount) }}
+        </Badge>
+        <Badge data-test="score">
+          {{ strings.quiz.score(score) }}
+        </Badge>
+        <Badge
+          v-if="store.myRank !== null"
+          data-test="rank"
+          variant="mint"
+        >
+          {{ strings.quiz.rank(store.myRank, store.playerCount) }}
+        </Badge>
       </p>
       <ConnectionBanner />
     </header>
@@ -141,12 +152,12 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
     <ResultsView v-if="store.blocked === null && (store.phase === 'finished' || store.phase === 'results')" />
     <div
       v-else-if="store.blocked === null"
-      class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,640px)_360px] lg:justify-between"
+      class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,40rem)_22.5rem] lg:justify-between"
     >
       <div
         v-if="!wide"
         role="tablist"
-        class="flex gap-1 rounded-lg bg-muted p-1"
+        class="flex gap-1 rounded-full border-clay bg-muted p-1"
         @keydown="moveTab"
       >
         <Button
@@ -159,7 +170,7 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
           :aria-selected="tab === name"
           :aria-controls="`panel-${name}`"
           :tabindex="tab === name ? 0 : -1"
-          class="flex-1 aria-selected:bg-card aria-selected:shadow-card"
+          class="flex-1 rounded-full aria-selected:border-border aria-selected:bg-card aria-selected:text-primary aria-selected:shadow-press"
           @click="tab = name"
         >
           {{ tabLabels[name] }}
@@ -180,11 +191,20 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
           :choices="store.question.choices"
           :question-count="store.quiz.questionCount"
         />
-        <section
+        <Card
           v-else-if="intro && store.quiz"
-          class="flex flex-col items-start gap-3"
+          as="section"
+          class="items-start gap-4"
         >
-          <p>{{ strings.quiz.intro(store.quiz.questionCount, store.quiz.timeLimitMs / 1_000) }}</p>
+          <span
+            class="flex size-16 items-center justify-center rounded-xl bg-gradient-primary text-primary-foreground"
+            aria-hidden="true"
+          >
+            <Rocket class="size-8" />
+          </span>
+          <p class="text-xl font-bold">
+            {{ strings.quiz.intro(store.quiz.questionCount, store.quiz.timeLimitMs / 1_000) }}
+          </p>
           <p
             data-test="quiz-left"
             class="tabular-nums"
@@ -197,13 +217,14 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
           <Button
             ref="start"
             data-test="start"
+            size="lg"
             :aria-disabled="!online"
             class="aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
             @click="begin"
           >
             {{ store.quiz.cursor < 0 ? strings.quiz.start : strings.quiz.continue }}
           </Button>
-        </section>
+        </Card>
       </div>
       <div
         v-show="wide || tab === 'leaderboard'"

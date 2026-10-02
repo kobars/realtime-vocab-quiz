@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: shadcn-vue progress bar, changed to fill against max instead of 100. -->
+<!-- AI-ASSISTED: shadcn-vue progress bar, filled against max instead of 100, as a clay track with a primary-gradient fill. -->
 <script setup lang="ts">
 import type { ProgressRootProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
@@ -33,14 +33,14 @@ const percent = computed(() => {
     v-bind="delegatedProps"
     :class="
       cn(
-        'bg-primary/20 relative h-2 w-full overflow-hidden rounded-full',
+        'relative h-3 w-full overflow-hidden rounded-full border-2 bg-muted',
         props.class,
       )
     "
   >
     <ProgressIndicator
       data-slot="progress-indicator"
-      class="bg-primary h-full w-full flex-1 transition-all"
+      class="bg-gradient-primary h-full w-full flex-1 rounded-full transition-transform duration-base ease-standard"
       :style="`transform: translateX(-${100 - percent}%);`"
     />
   </ProgressRoot>

@@ -1,4 +1,4 @@
-// AI-ASSISTED: component tests for the finished and results screens and the podium, driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the finished and results screens and the podium (order, medals, the one-shot rise), driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -90,6 +90,32 @@ it('results: the podium (second, first, third), the rest of the top 50 and the s
   expect(w.findAll('ol').at(-1)?.findAll('li')).toHaveLength(47)
   await w.findAll('button').find((b) => b.text() === 'Show all players')?.trigger('click')
   expect(getLeaderboard.mock.calls).toEqual([[0, 100]])
+})
+
+it('the podium medals are decorative; each step keeps its rank as text and dark text on its fill', async () => {
+  await join(false)
+  await receive({ type: 'quiz_ended', seq: 6, playerCount: 3, entries: top(3), you: null })
+  const w = render()
+  for (const rank of ['1', '2', '3']) {
+    const step = w.get(`[data-rank="${rank}"]`)
+    const [medal, , , base] = step.findAll('span')
+    expect(medal?.attributes('aria-hidden')).toBe('true')
+    expect(medal?.text()).toMatch(/\p{Extended_Pictographic}/u)
+    expect(base?.text()).toBe(rank)
+    expect(base?.classes()).toContain(rank === '1' ? 'text-night' : 'text-foreground')
+  }
+})
+
+it('the podium rises once, third place first, only behind motion-safe', async () => {
+  await join(false)
+  await receive({ type: 'quiz_ended', seq: 6, playerCount: 3, entries: top(3), you: null })
+  const w = render()
+  const motion = (rank: string) => w.get(`[data-rank="${rank}"]`).classes().filter((c) => /animate-|rise-delay-/.test(c))
+  expect(['3', '2', '1'].map(motion)).toEqual([
+    ['motion-safe:animate-rise', 'rise-delay-0'],
+    ['motion-safe:animate-rise', 'rise-delay-1'],
+    ['motion-safe:animate-rise', 'rise-delay-2'],
+  ])
 })
 
 it('a podium with fewer than 3 players shows only its steps, and a viewer with you: null sees no own result', async () => {

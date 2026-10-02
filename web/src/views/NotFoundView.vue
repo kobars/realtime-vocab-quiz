@@ -1,21 +1,32 @@
-<!-- AI-ASSISTED: the 404 page for any unknown path. -->
+<!-- AI-ASSISTED: the 404 page for any unknown path, as a clay card with an icon tile and a way home. -->
 <script setup lang="ts">
+import { MapPinOff } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { strings } from '@/strings'
 </script>
 
 <template>
-  <section class="flex flex-col items-start gap-4">
-    <h1 class="text-2xl font-semibold">
+  <Card class="mx-auto max-w-110 items-start">
+    <span
+      class="flex size-16 items-center justify-center rounded-xl bg-sun text-night"
+      aria-hidden="true"
+    >
+      <MapPinOff class="size-8" />
+    </span>
+    <h1 class="text-title">
       {{ strings.notFound.title }}
     </h1>
     <p class="text-muted-foreground">
       {{ strings.notFound.body }}
     </p>
-    <Button as-child>
+    <Button
+      as-child
+      variant="outline"
+    >
       <RouterLink to="/">
         {{ strings.notFound.home }}
       </RouterLink>
     </Button>
-  </section>
+  </Card>
 </template>
