@@ -81,12 +81,18 @@ def _message(shared: Shared, you: Place | None) -> m.Snapshot:
     )
 
 
+def rank_update(snap: m.Snapshot, you: m.You) -> m.RankUpdate | None:
+    """``rank_update`` for a player outside the snapshot's entries (§4), which the limits cut."""
+    if you.rank <= len(snap.entries):
+        return None
+    return m.RankUpdate(atSeq=snap.atSeq, rank=you.rank, score=you.score, playerCount=snap.playerCount)
+
+
 def _standing(snap: m.Snapshot) -> Standing:
-    """The snapshot, then ``rank_update`` when the player is outside its entries (§4)."""
-    you, count = snap.you, snap.playerCount
-    if you is None or you.rank <= len(snap.entries):  # the store's limits cut the entries
+    """The snapshot, then ``rank_update`` when the player is outside its entries."""
+    if snap.you is None or (update := rank_update(snap, snap.you)) is None:
         return (snap,)
-    return (snap, m.RankUpdate(atSeq=snap.atSeq, rank=you.rank, score=you.score, playerCount=count))
+    return (snap, update)
 
 
 async def _share[K, T](
@@ -319,15 +325,14 @@ class QuizService:
     async def standing(self, quiz_id: str, user_id: str) -> Standing:
         return _standing(await self.snapshot(quiz_id, user_id))
 
-    async def standings(
-        self, quiz_id: str, user_ids: Sequence[str]
-    ) -> tuple[Ranks, dict[str, Standing]]:
-        """The ``standing`` of each user, all at the seq of one rank read for all of them."""
+    async def standings(self, quiz_id: str, user_ids: Sequence[str]) -> tuple[Ranks, m.Snapshot]:
+        """One rank read of every user, and the snapshot they share at its seq, with ``you``
+        None: each user's ``standing`` is that snapshot with its own row of the ranks."""
         if (read := await self._at_one_key(quiz_id, user_ids)) is None:
             msg = "the standings moved during every read"
             raise ConnectionError(msg)
         ranks, shared = read
-        return ranks, {user: _standing(_message(shared, row)) for user, row in ranks.rows.items()}
+        return ranks, _message(shared, None)
 
     async def _at_one_key(
         self, quiz_id: str, user_ids: Sequence[str]

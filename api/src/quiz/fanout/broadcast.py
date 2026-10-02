@@ -17,12 +17,22 @@ from quiz.contracts.codec import encode
 from quiz.ports.store import Limits, Place, Ranks, Store
 
 _HEAD, _TAIL = '{"frame":', ',"ranks":'  # user ids hold no quotes: the last _TAIL ends the frame
-_NO_YOU = b"null}"  # an encoded QuizEnded ends in "you":null}, as you is its last field
+_NO_YOU = b"null}"  # you is the last field of QuizEnded and Snapshot: encoded, they end in this
 RANKS_BATCH = 1_000  # players per rank read: Redis runs other quizzes between batches
 
 
 def _batches(users: list[str]) -> list[list[str]]:
     return [users[start : start + RANKS_BATCH] for start in range(0, len(users), RANKS_BATCH)]
+
+
+def without_you(message: m.QuizEnded | m.Snapshot) -> bytes:
+    """A message whose ``you`` is None, encoded and cut before that value: ``with_you`` ends it."""
+    return encode(message).removesuffix(_NO_YOU)
+
+
+def with_you(head: bytes, you: m.You | None) -> bytes:
+    """One player's bytes of a message shared up to its ``you``."""
+    return head + (_NO_YOU if you is None else you.model_dump_json().encode() + b"}")
 
 
 class Sockets(Protocol):  # this node's sockets, by quiz
@@ -112,11 +122,11 @@ class Relay:
             for batch in _batches(users):
                 rows.update((await self._store.ranks_of(self._quiz_id, batch)).rows)
         # The shared part is validated and encoded once; each player's bytes end in its own you.
-        head = encode(m.QuizEnded.model_validate(frame)).removesuffix(_NO_YOU) if rows else b""
+        head = without_you(m.QuizEnded.model_validate(frame)) if rows else b""
         for user_id in users:
             own = data
             if (row := rows.get(user_id)) is not None:
-                own = head + m.You(rank=row.rank, score=row.score).model_dump_json().encode() + b"}"
+                own = with_you(head, m.You(rank=row.rank, score=row.score))
             self._sockets.send_to(self._quiz_id, user_id, own)
 
     def _send(self, user_id: str, rank: int, score: int, at_seq: int) -> None:
