@@ -1,145 +1,256 @@
+<!-- AI-ASSISTED: project overview: what it does, how to try it, run the tests, how it works, configuration and layout. -->
 # Real-time vocabulary quiz
 
-A real-time quiz service: players join a quiz session by its ID, answer timed
-vocabulary questions, and watch a shared leaderboard update live as scores
-change. The server is Python (FastAPI over WebSockets, Redis for scores and
-fan-out); the client is a Vue 3 single-page app.
+Players join a quiz by its ID, answer timed vocabulary questions, and see a shared
+leaderboard that updates live as anyone scores. The real-time server is Python (FastAPI over
+WebSockets, with Redis for scores and fan-out across nodes); a Vue 3 single-page app is its
+demo client.
 
-## Stack
+**Video walkthrough:** placeholder, the link is added here once the video is published.
 
-| Part | Tools |
+**How AI was used.** Claude Code wrote the design, the code and the tests. Pull requests are
+reviewed by two AI reviewers, Claude Code `/code-review` and Codex, whose findings are checked
+against the code before anything is fixed, and every change runs the checks of
+[CONTRIBUTING.md](CONTRIBUTING.md). Each pull request has an entry in
+[docs/ai-log/](docs/ai-log/README.md) that says what the AI did, what was wrong in its output,
+which test now checks the fix and which review ran.
+[DESIGN.md §15](DESIGN.md#15-ai-collaboration-in-design) tells the story of the design phase.
+
+## Try it with Docker
+
+This runs the full stack: two API nodes on one Redis behind nginx. You need Docker with
+Compose v2, `make`, `curl` and `openssl`.
+
+1. Clone the repository and write the two secrets the stack needs into `.env` (the mock
+   admin token and the stack Redis password; [`.env.example`](.env.example) lists the other
+   settings):
+
+   ```bash
+   git clone https://github.com/kobars/realtime-vocab-quiz.git
+   cd realtime-vocab-quiz
+   printf 'ADMIN_TOKEN=%s\nREDIS_PASSWORD=%s\n' "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" > .env
+   ```
+
+2. Build the images and start the stack. The second command returns once every service is
+   healthy:
+
+   ```bash
+   make build
+   docker compose --profile full up -d --wait
+   ```
+
+3. Check that nginx reaches the API nodes. Both print HTTP 200:
+
+   ```bash
+   curl -s -w ' %{http_code}\n' http://localhost:8080/api/healthz   # {"status":"ok"} 200
+   curl -s -w ' %{http_code}\n' http://localhost:8080/api/readyz    # {"status":"ready"} 200
+   ```
+
+4. Create a quiz. `VOCAB-42` is one of the seeded quizzes (`BIZ-20` and `ACAD-10` are the
+   others); it stays open for 10 minutes, with 20 seconds per question:
+
+   ```bash
+   ADMIN_TOKEN=$(sed -n 's/^ADMIN_TOKEN=//p' .env)
+   curl -X POST http://localhost:8080/api/admin/quizzes \
+     -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"quizId": "VOCAB-42"}'
+   ```
+
+5. Open <http://localhost:8080/q/VOCAB-42>, enter a name and choose **Join**. Open the same
+   link in a second browser window and join with another name: each tab is its own player.
+   Choose **Start** in one of them and answer a question: the leaderboard in the other window
+   moves within a fraction of a second.
+6. To stop: `make down`. It stops the stack and keeps the Redis data.
+
+## Try it for development
+
+This runs one API node with an in-memory store and the client's dev server, with hot reload.
+You need Python 3.14 with [uv](https://docs.astral.sh/uv/) 0.10 or later, and Node 24 with
+pnpm 11.
+
+1. Install the dependencies:
+
+   ```bash
+   uv sync --project api
+   pnpm -C web install
+   ```
+
+2. Start the API on `127.0.0.1:8001`, with the mock admin API turned on so you can create
+   a quiz (pick any token):
+
+   ```bash
+   ADMIN_MOCK=1 ADMIN_TOKEN=dev-token make dev-api
+   ```
+
+3. In a second terminal, start the client on port 5173:
+
+   ```bash
+   pnpm -C web dev
+   ```
+
+4. In a third terminal, create a quiz with the same token:
+
+   ```bash
+   ADMIN_TOKEN=dev-token
+   curl -X POST http://127.0.0.1:8001/admin/quizzes \
+     -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"quizId": "VOCAB-42"}'
+   ```
+
+5. Open <http://localhost:5173/q/VOCAB-42> in two browser windows and play as in the Docker
+   steps above.
+6. To stop, press Ctrl+C in the API and client terminals.
+
+## Run the tests
+
+- `make test`: the server unit, property and contract tests, and the client tests (no
+  Redis needed).
+- `make test-integration`: the tests that need Redis, then the acceptance tests on Redis. The
+  integration tests use `REDIS_URL` when it is set, else a Redis container of their own; the
+  acceptance tests always start their own (Docker).
+- `make acceptance`: the black-box acceptance tests over HTTP and the WebSocket alone;
+  `ACCEPTANCE_STORE=redis` runs them on Redis.
+- The tests below need the running Docker stack, and they create the seeded quizzes themselves:
+  the system tests `BIZ-20`, the browser specs `VOCAB-42` and `ACAD-10`. A quiz ID can be
+  created only once on the same stack data, so a quiz left by the Docker steps above, the bot
+  swarm or an earlier run makes them fail with HTTP 409. Start from fresh stack data first:
+
+  ```bash
+  docker compose --profile full down -v
+  docker compose --profile full up -d --wait
+  ```
+
+  Then run the system tests, the browser specs and `make smoke-full`, in that order.
+  `make smoke-full` reuses the browser specs' `VOCAB-42` while it is open (10 minutes); after
+  that, start from fresh stack data again.
+  - `make test-system`: system tests through nginx (`api/tests/system/`): a score on one node
+    reaches a socket on the other, the origin check, the connection cap, the security headers.
+  - `make test-browser`: browser specs in Chromium with an accessibility scan (`web/e2e/`,
+    Playwright); once before the first run: `pnpm -C web exec playwright install chromium`.
+  - `make smoke-full`: checks `/healthz` and `/readyz` on each node, plays one question through
+    nginx, stops the API node that holds the socket, and checks that the player is back on the
+    other node within 10 s with its score (`load/smoke_full.py`).
+  - The bot swarm (`load/bots.py`) plays quizzes and reports the answer → leaderboard latency,
+    for example 10 bots for 30 seconds:
+    `uv run --project api python load/bots.py --admin-token "$ADMIN_TOKEN" --bots 10 --duration 30`.
+    Without `--admin-token` it plays quizzes that already exist.
+- `make check`: every check a change must pass (lint, types, unit and acceptance tests with
+  coverage, the client build, the link check). Run it before you open a pull request; it needs
+  Docker.
+
+## How it works
+
+- The Vue client gets a mock session, then a single-use ticket, and opens one WebSocket per
+  tab (`/ws`, subprotocol `quiz.v1`).
+- Each API node (FastAPI on uvicorn) checks the origin, the ticket and the connection limits,
+  then turns every `join`, `next` and `answer` into one Lua script in Redis.
+- The scripts read the clock from Redis `TIME`, score the answer once, and keep the
+  standings in a sorted set, so every node sees the same order.
+- A scoring answer marks the quiz dirty. About every 200 ms one node wins a tick token and
+  publishes one `leaderboard` frame on Redis pub/sub; every node relays it to its own sockets.
+- nginx serves the built client and spreads `/api` and `/ws` over the two API nodes.
+
+[DESIGN.md](DESIGN.md) has the architecture, the data flow, the consistency guarantees, the
+capacity estimate and the failure modes.
+
+## What is real and what is mocked
+
+The real-time quiz server is the one component built for real; the Vue client is its working
+demo interface.
+
+| Part | In this build |
 |---|---|
-| Server | Python 3.14, uv, FastAPI, uvicorn, Pydantic v2, redis-py, structlog, prometheus-client |
-| Store | Redis 8 (sorted sets, Lua scripts, pub/sub) |
-| Server tests and quality | pytest, pytest-asyncio, pytest-cov, Hypothesis, httpx, ruff, mypy, import-linter, deptry |
-| Client | Node 24, pnpm 11, Vue 3, Vite, TypeScript, Pinia, Vue Router, Tailwind CSS, shadcn-vue, VueUse, lucide |
-| Client tests and quality | Vitest (v8 coverage), @vue/test-utils, happy-dom, Playwright, axe-core, ESLint, vue-tsc |
-| Infra | Docker Compose, nginx |
+| WebSocket gateway, scoring, standings, fan-out across nodes | Real |
+| Redis store (Lua scripts, sorted sets, pub/sub) | Real; an in-memory store with the same contract runs one node without Redis |
+| Vue client | Real, as the demo interface of the server |
+| Identity | Mock: anonymous sessions and single-use tickets, no login |
+| Question bank | Mock: seeded quizzes read from JSON files |
+| Quiz admin | Mock: `POST /admin/quizzes`, off unless `ADMIN_MOCK=1`, guarded by one shared token |
+| Observability | The `/healthz`, `/readyz` and `/metrics` endpoints of each node and JSON logs; no metrics or dashboard containers ([DESIGN.md §13](DESIGN.md#13-observability)) |
 
-## Run and test
+[DESIGN.md §14](DESIGN.md#14-implemented-and-mocked) says what production would use instead.
 
-```bash
-uv sync --project api        # install the server dependencies
-pnpm -C web install          # install the client dependencies
-make help                    # list every make target
-uv run --project api pre-commit install  # run the hooks on staged files at each commit
-make check                   # every check a change must pass; stops at the first failing step
-make test                    # the server and client unit tests
-make test-integration        # the tests that need Redis (set REDIS_URL to use your own), then the acceptance tests on Redis
-make audit                   # the dependency audits and the secret scan (needs the network and gitleaks 8.25+)
-make review-budget           # the branch's review input in tokens (diff plus changed files, against origin/main)
-make acceptance              # the acceptance tests alone; ACCEPTANCE_STORE=redis runs them on Redis
-make build                   # the API and web images, elsaquiz-api and elsaquiz-web (IMAGE_TAG=dev)
-make dev-api                 # one API node on 127.0.0.1:8001 (memory store) that allows the :5173 origins
-pnpm -C web dev              # client on :5173; /api/* (prefix dropped) and /ws go to 127.0.0.1:8001 or QUIZ_API_URL
-```
+## Ports and endpoints
 
-The API refuses a WebSocket upgrade from an origin it does not allow (HTTP 403).
-`ALLOWED_ORIGINS` (comma-separated) lists them; when it is empty, the API allows
-`http://localhost` and `http://127.0.0.1` on `QUIZ_PORT` (8080, the nginx entry).
-`make dev-api` sets it to the Vite dev server's origins; `DEV_API_PORT` and
-`DEV_ORIGINS` change the port and the list.
+| What | Where |
+|---|---|
+| nginx, the stack's only published port | `127.0.0.1:8080` (`QUIZ_PORT`): `/` the client, `/api/*` (prefix dropped) and `/ws` the API nodes |
+| API nodes `api-1`, `api-2` | port 8000 inside the Compose network only |
+| Stack Redis | port 6379 inside the Compose network only, with a password |
+| Development API (`make dev-api`) | `127.0.0.1:8001` |
+| Client dev server (`pnpm -C web dev`) | `localhost:5173` |
+| Development Redis (`make up`) | `127.0.0.1:6381`, no password |
 
-The integration tests use `REDIS_URL` when it is set, else a Redis container of their
-own; they write only keys under a prefix of their own and delete them. The acceptance
-tests on Redis flush their database before each test, so the make targets unset
-`REDIS_URL` for them and they always start a Redis container of their own (Docker is
-needed). Each acceptance run writes a JUnit report (into `REPORTS`, else `reports/`) and
-`scripts/check_junit_skips.py` fails it when a test skips that should run: none on the
-memory store, only the two exact-time checks on Redis, which need the memory store's
-injected clock.
-
-`make check` runs, in order: the client install from the lock file
-(`pnpm install --frozen-lockfile`); every pre-commit hook on every file (ruff
-lint and format, ESLint, typos, and lychee in Docker on the relative links and
-anchors of the tracked Markdown); mypy (strict); import-linter; deptry (every
-import in `api/src` is a declared dependency and every runtime dependency is
-used; `api/tests`, `scripts/` and `load/` import only declared packages); pytest
-(without the `integration`, `acceptance` and `system` markers) with a unit branch-coverage
-floor (`UNIT_COVERAGE_FLOOR` in the `Makefile`); the acceptance tests on the memory store; the contract drift check; vue-tsc; Vitest with coverage thresholds
-(`web/vitest.config.ts`); and the client build (`pnpm -C web build`). Every pull
-request and every push to `main` runs the same gate in GitHub Actions
-(`.github/workflows/ci.yml`), plus the Redis integration tests and the acceptance tests on Redis. Its `coverage` job
-combines the coverage data of the test jobs and fails below the combined floor
-(`fail_under` in `api/pyproject.toml`) and, on a pull request, when less than 90% of the
-changed lines are covered (diff-cover). Each run keeps the JUnit reports (`reports-*`)
-and the coverage data (`coverage-*`) as artifacts for 7 days. The CI, security and
-container workflows each end in one gate job (`ci-required`, `security-required`,
-`containers-required`) that fails when a job it needs fails or is cancelled. On pull
-requests, CI also runs `scripts/check_pr.py` (the size limit, the frozen acceptance
-tests, the commit trailer and the AI-LOG entry of `AGENTS.md`; the labels `size-exception`
-and `acceptance-change` waive the first two) and the review budget, which fails a PR whose
-review input reaches the `limit` in `api/pyproject.toml`. Neither counts the paths that
-`.gitattributes` marks `linguist-generated` (lock files, generated contracts, shadcn-vue
-components). A weekly job (`.github/workflows/links.yml`)
-also checks the external links.
-Another workflow (`.github/workflows/containers.yml`) checks the container and
-infrastructure files: hadolint (settings in `.hadolint.yaml`), shellcheck,
-`docker compose config`, `scripts/check_nginx.sh` (`nginx -t` on the web image's site
-and on any `nginx.conf` under `infra/`), Trivy on the configuration (fails on any
-finding) and on both images (fails on a CRITICAL or HIGH finding that has a fix), and
-`scripts/smoke_images.sh`, which runs each image as a non-root user on a read-only
-root filesystem until its healthcheck passes, then checks that the web image sends every
-security header of `web/security-headers.conf` (CSP, `nosniff`, `Referrer-Policy`,
-`Permissions-Policy`) on `/` and on a hashed asset (locally:
-`make build && scripts/smoke_images.sh`).
-
-`make help` lists every target.
-
-## Running the full stack
-
-The `full` Compose profile runs two API nodes (`api-1`, `api-2`) on one Redis behind
-nginx (`infra/nginx/nginx.conf`), which sends `/` to the web app, `/api/` (prefix
-dropped) and `/ws` to the nodes, round-robin. Only nginx publishes a port:
-`127.0.0.1:${QUIZ_PORT}`, 8080 by default.
+Each API node serves `/healthz` (liveness: the process answers), `/readyz` (readiness: 503
+when Redis is unreachable) and `/metrics` (Prometheus text format). nginx passes the first two
+on as `/api/healthz` and `/api/readyz` and answers 404 for `/api/metrics`; read the metrics
+from inside a node:
 
 ```bash
-cp .env.example .env                        # then set ADMIN_TOKEN and REDIS_PASSWORD
-make build                                  # the images the stack runs
-docker compose --profile full up -d --wait  # returns once every service is healthy
-make test-system                            # the system tests, through nginx (STACK_URL)
-make test-browser                           # the browser specs (Chromium; once: pnpm -C web exec playwright install chromium)
-make smoke-full                             # the smoke run below
-make down                                   # stops the stack and the development Redis
+docker compose exec api-1 python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8000/metrics').read().decode())"
 ```
 
-`make smoke-full` (`load/smoke_full.py`) checks `/healthz` and `/readyz` on each node,
-joins through nginx on its published port (`docker compose port nginx 8080`, so any
-`QUIZ_PORT` works), answers one question for points, then stops the node that holds its socket
-(the one whose `ws_connections` gauge on `/metrics` grew): within 10 s it must be back on the other node through nginx, resynced, with its score.
-The stopped node then starts again. It starts the quiz `VOCAB-42` for an hour unless it
-is open already; after that hour a run needs another quiz
-(`uv run --project api python load/smoke_full.py --quiz-ids BIZ-20`) or a fresh stack
-Redis (`docker compose --profile full down -v`).
+## Configuration
 
-`make test-system` (`api/tests/system/`) and `make test-browser` (`web/e2e/`, Playwright with an
-axe accessibility scan) drive a running stack at `STACK_URL` (default
-`http://localhost:$QUIZ_PORT`) and read its `ADMIN_TOKEN` from `.env` to start their quizzes. The
-two suites start different quizzes, which keep their players for 24 h in the stack's Redis volume,
-so running a suite again needs a fresh stack: `docker compose --profile full down -v`, then `up`
-again. The browser specs start `VOCAB-42`, which `make smoke-full` reuses while it is open, so
-they run before it. The system tests check what only the composed stack shows: a score on one node
-reaches a socket on the other within 500 ms (an accepted upgrade names its node in `X-Node-Id`), a
-foreign `Origin` gets 403, a spoofed `X-Forwarded-For` does not lift the per-address connection
-cap (skipped when `PER_IP_CONN_CAP` is above 100), `/api/metrics` is 404, a body above nginx's
-limit gets 413, and the security headers are sent. The browser specs join by ID, answer, watch
-another player's score arrive, and open an ended quiz read-only. The stack workflow
-(`.github/workflows/stack.yml`, gate job `stack-required`) runs both on every pull request that
-changes `api/`, `web/`, `infra/`, a compose file, a Dockerfile, the `Makefile` or the `.nvmrc` and
-`.python-version` files, and nightly; it uploads the Playwright report, and the stack's logs when
-a suite fails.
+The API reads environment variables only (it never loads a `.env` file; Compose reads `.env`
+for the stack). [`api/src/quiz/config.py`](api/src/quiz/config.py) lists every setting with
+its default, and [`.env.example`](.env.example) shows the common ones.
 
-The nodes publish no port, so check `/healthz` and `/readyz` on one from inside its
-container:
+| Variable | Default | Meaning |
+|---|---|---|
+| `STORE` | `memory` | `memory` for one process, `redis` for several nodes |
+| `REDIS_URL` | `redis://127.0.0.1:6381/0` | The Redis that `make up` starts (`make down` stops it) |
+| `ALLOWED_ORIGINS` | `http://localhost:8080`, `http://127.0.0.1:8080` | Comma-separated origins allowed to open the WebSocket; others get HTTP 403. `make dev-api` sets the client dev server's origins |
+| `QUIZ_PORT` | `8080` | The public port; the default allowed origins use it |
+| `ADMIN_MOCK`, `ADMIN_TOKEN` | off, none | Turn on the mock admin API; it needs a non-blank token |
+| `REDIS_PASSWORD` | none | The stack Redis password (Docker stack only) |
+| `PER_IP_CONN_CAP` | `50` | WebSocket connections per client address |
+
+`make dev-api` takes `DEV_API_PORT` (8001) and `DEV_ORIGINS`; the client dev server takes
+`QUIZ_API_URL` to proxy to another API node.
+
+To run the development API on Redis instead of memory:
 
 ```bash
-docker compose exec api-1 python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8000/readyz').read().decode())"
+make up
+STORE=redis ADMIN_MOCK=1 ADMIN_TOKEN=dev-token make dev-api
+make down
 ```
 
-## Documents
+## Troubleshooting
 
-- [DESIGN.md](DESIGN.md) — the system design
-- [docs/DECISIONS.md](docs/DECISIONS.md) — architecture decision records
-- [docs/ai-log/](docs/ai-log/) — how AI was used in each change, and how it was checked
-- [AGENTS.md](AGENTS.md) — rules for contributors and coding agents
-- [SECURITY.md](SECURITY.md) — how to report a vulnerability, and the security scans
+- **Port already in use** (`bind: address already in use`): another program holds 8080, 8001,
+  5173 or 6381. Stop it, or set `QUIZ_PORT` in `.env` (the stack). To move the development
+  API, start it with `DEV_API_PORT` and point the client dev server at it, for example
+  `DEV_API_PORT=8002 ADMIN_MOCK=1 ADMIN_TOKEN=dev-token make dev-api` and
+  `QUIZ_API_URL=http://127.0.0.1:8002 pnpm -C web dev`.
+- **Docker is not running** (`Cannot connect to the Docker daemon`): start Docker Desktop or
+  the Docker service; `make build`, the stack, `make test-integration` and `make check` need it.
+- **`set ADMIN_TOKEN in .env`**: Compose refuses to start the stack until `.env` holds both
+  secrets (step 1 of the Docker path).
+- **The quiz has ended**: a quiz closes when its window ends, and its ID stays taken (HTTP 409)
+  while its data lives (24 hours). Create another seeded quiz (`BIZ-20` or `ACAD-10`; the test suites
+  then need fresh stack data, see **Run the tests**), pass a
+  longer window (`"windowMs": 3600000`, the 60-minute maximum), or start with empty data:
+  restart `make dev-api` (memory store), or run `docker compose --profile full down -v` (stack).
+
+## Project layout
+
+```text
+api/        the server: FastAPI app, Lua scripts, tests (unit, property, contract, integration, acceptance)
+web/        the Vue 3 client and its tests
+contracts/  the JSON Schema of the wire protocol, generated from the server's models
+infra/      the nginx configuration of the full stack
+load/       the bot swarm for load runs
+scripts/    repository checks and generators
+docs/       specs, decisions and the AI log
+```
+
+## Documentation
+
+- [DESIGN.md](DESIGN.md): the system design
+- [docs/DECISIONS.md](docs/DECISIONS.md): architecture decision records
+- [docs/spec/](docs/spec/): the domain, protocol, Redis and UI specs
+- [docs/ai-log/](docs/ai-log/README.md): how AI was used in each change, and how it was checked
+- [CONTRIBUTING.md](CONTRIBUTING.md): the make targets, the checks and the pull request workflow
+- [SECURITY.md](SECURITY.md): how to report a vulnerability

@@ -154,15 +154,16 @@ The first join of a user registers the player with total 0 and `reachedRelMs` = 
 
 ## 8. The consistency contract (C1–C6)
 
-DESIGN §7 summarizes this table. "Proved by" names the tests to write.
+DESIGN §7 summarizes this table. "Proved by" names tests that exist and prove the guarantee;
+C5 is a latency target, so a load run measures it instead of a test.
 
 | ID | Guarantee | Enforced by | Proved by |
 |---|---|---|---|
 | C1 | Each (player, question) is scored at most once, even with retries and concurrent requests on several nodes | Both idempotency layers and the "closed" flag, checked and written in one scoring script (§5.2) | `api/tests/contract/test_store_contract.py::test_replay_returns_same_result`, `::test_submission_reused_for_other_question` (on the memory and Redis stores); `api/tests/integration/test_scoring_concurrency.py::test_concurrent_copies_of_one_answer_score_once`, `::test_concurrent_answer_and_skip_close_once`; `api/tests/property/test_session_machine.py::TestSessionMachine` (invariants `score_is_the_sum_of_points` and `passed_questions_are_closed_once`) |
 | C2 | `seq` per quiz grows by exactly 1 per broadcast, with no gaps | Only a script that also publishes runs `INCR seq`; the scoring script never does | `api/tests/integration/test_invariants.py::test_seq_has_no_gaps_under_concurrent_answers`; `api/tests/property/test_session_machine.py::TestSessionMachine` (invariant `broadcast_seq_is_contiguous`) |
 | C3 | Per revision of a player's total: the total in `answer_result` equals that player's total in the next `leaderboard` frame (or their `rank_update` when the frame carries only the top 50), unless the player scored again first | One script writes the answer, the total and the sorted-set score together | `api/tests/property/test_session_machine.py::TestSessionMachine` (each `answer_result` total is checked against the next standings frame) |
-| C4 | All clients show the same standings after a quiet period | The tick runs while `dirty` is set; a client that sees a `seq` gap resyncs | `api/tests/integration/test_two_nodes.py::test_clients_converge_after_quiet_period` |
-| C5 | p99 below 500 ms from "answer accepted" to "leaderboard delivered" | The 200 ms coalescing tick; send-buffer limits | the load scenarios in `load/`, which record the bots' answer → leaderboard latency |
+| C4 | All clients show the same standings after a quiet period | The tick runs while `dirty` is set; a client that sees a `seq` gap resyncs | `api/tests/integration/test_two_nodes.py::test_clients_converge_after_quiet_period` (two app instances on one Redis); `api/tests/integration/fanout/test_fanout.py::test_100_answers_in_1_s_make_at_most_6_frames_ending_on_the_standings` (the last frame after a burst equals the stored standings); `web/src/protocol/seq.test.ts` (a gap, a lower `seq` or a `pong.seq` ahead leads to one resync) |
+| C5 | p99 below 500 ms from "answer accepted" to "leaderboard delivered" | The 200 ms coalescing tick; send-buffer limits | Measured, not tested: the bot swarm `load/bots.py` records the answer → leaderboard latency of a run against the stack; the measured runs go in DESIGN §9 |
 | C6 | The server decides time on one clock; lateness and the deadline need no timer | Redis `TIME` read inside the join, serve and scoring scripts (§2) | `api/tests/unit/test_scoring.py::test_worked_examples`, `::test_late_by_one_ms_scores_zero`, `::test_clock_step_back_scores_full_bonus`; `api/tests/property/test_session_machine.py::TestSessionMachine` (its teardown replays the command log with the same clock and gets the same outcomes); `api/tests/contract/test_store_contract.py::test_refusals_after_the_deadline` (on the memory and Redis stores); `api/tests/integration/test_points_parity.py::test_lua_points_match_python_for_every_elapsed` |
 
 Standings order and unique ranks: `api/tests/unit/test_standings.py::test_order_total_then_reached_then_user` and `::test_ranks_are_unique_1_to_n`.
