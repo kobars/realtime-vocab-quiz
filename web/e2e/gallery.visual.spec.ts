@@ -15,10 +15,14 @@ test.beforeEach(async ({ page }) => {
   await page.evaluate(() => document.fonts.ready)
 })
 
-test('the gallery looks as in its baseline', async ({ page }, testInfo) => {
+test.describe('baseline', () => {
   // The page shows both themes side by side, and one column below 1024 px would pass Chromium's screenshot height.
-  test.skip(!testInfo.project.name.startsWith('1280-'), 'the gallery has a baseline at 1280 px only')
-  await expect(page).toHaveScreenshot('gallery.png', { fullPage: true })
+  // A modifier skips before beforeEach, so the narrow projects do not load the page for nothing.
+  test.skip(({ viewport }) => viewport?.width !== 1280, 'the gallery has a baseline at 1280 px only')
+
+  test('the gallery looks as in its baseline', async ({ page }) => {
+    await expect(page).toHaveScreenshot('gallery.png', { fullPage: true })
+  })
 })
 
 test('the gallery passes axe and fits the width', async ({ page }) => {
