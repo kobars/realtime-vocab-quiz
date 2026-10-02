@@ -1,5 +1,7 @@
-# AI-ASSISTED: the Lua script loader: SCRIPT LOAD at startup, EVALSHA, one reload on NOSCRIPT.
-"""Every quiz script is the key constants, ``lib/quiz.lua``, its libraries, then its body."""
+# AI-ASSISTED: the Lua script loader: SCRIPT LOAD at startup, EVALSHA, a script reload on NOSCRIPT.
+"""Every quiz script is the key constants, ``lib/quiz.lua``, its libraries, then its body.
+
+The sources are composed once, at import, so recovering from ``NOSCRIPT`` reads no file."""
 
 from collections.abc import Iterable, Sequence
 from importlib.resources import files
@@ -46,25 +48,28 @@ def source(name: str) -> str:
     return compose((_LUA / f"{name}.lua").read_text(), SCORING_LIBS.get(name, ()))
 
 
+SOURCES = {name: source(name) for name in SCRIPTS}
+
+
 class Scripts:
     def __init__(self, client: Redis) -> None:
         self._client = client
         self._shas: dict[str, str] = {}
 
     async def load(self) -> None:
-        """SCRIPT LOAD every script; run at startup and again after a NOSCRIPT."""
-        for name in SCRIPTS:
-            self._shas[name] = await self._client.script_load(source(name))
+        """SCRIPT LOAD every script; run at startup."""
+        for name, text in SOURCES.items():
+            self._shas[name] = await self._client.script_load(text)
 
     async def call(
         self, name: str, keys: Sequence[str], *args: str | int, on: Redis | None = None
     ) -> Reply:
         """EVALSHA the script (on the client ``on`` if given); on NOSCRIPT (Redis restarted)
-        reload all scripts and retry once."""
+        load that script alone again and retry once."""
         client = on or self._client
         try:
             reply: Reply = await client.evalsha(self._shas[name], len(keys), *keys, *args)
         except NoScriptError:
-            await self.load()
+            self._shas[name] = await self._client.script_load(SOURCES[name])
             reply = await client.evalsha(self._shas[name], len(keys), *keys, *args)
         return reply

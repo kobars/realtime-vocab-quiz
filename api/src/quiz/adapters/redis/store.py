@@ -63,8 +63,16 @@ async def _messages(pubsub: PubSub) -> AsyncGenerator[str]:
 
 
 class RedisStore:
-    def __init__(self, client: Redis, *, prefix: str = "", limits: Limits | None = None) -> None:
-        self._client = client
+    def __init__(
+        self,
+        client: Redis,
+        *,
+        prefix: str = "",
+        limits: Limits | None = None,
+        subscriber: Redis | None = None,
+    ) -> None:
+        """``subscriber`` holds one connection per open ``subscribe()``; by default ``client``."""
+        self._client, self._subscriber = client, subscriber or client
         self.limits = limits or Limits()  # for the tick, end and standings scripts, through ARGV
         self._scripts = Scripts(client)
         self._prefix = prefix
@@ -197,7 +205,7 @@ class RedisStore:
     @asynccontextmanager
     async def subscribe(self, quiz_id: str) -> AsyncIterator[AsyncIterator[str]]:
         """The quiz's ``events`` channel, entered once Redis confirmed the subscription."""
-        pubsub = self._client.pubsub()
+        pubsub = self._subscriber.pubsub()
         try:
             async with aclosing(_messages(pubsub)) as messages:
                 with _reachable():

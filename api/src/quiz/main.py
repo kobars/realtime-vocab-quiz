@@ -104,11 +104,13 @@ def _wire(settings: Settings, clock: Clock | None) -> Services:
             settings, quiz_clock, memory, MemoryTicketStore(wall_clock_ms), bank, service
         )
     # Redis reads its own TIME for quiz time; the monotonic clock only paces the resync limit.
-    client = connect_redis(settings)
-    redis, tickets = RedisStore(client, limits=limits), RedisTicketStore(client)
+    # Each subscription holds a connection, so subscriptions get a pool of their own.
+    client, subscriber = connect_redis(settings), connect_redis(settings)
+    redis = RedisStore(client, limits=limits, subscriber=subscriber)
+    tickets = RedisTicketStore(client)
     service = QuizService(redis, bank, monotonic_ms, tick_ms=limits.tick_ms)
     start: list[Hook] = [redis.start]
-    stop: list[Hook] = [client.aclose]
+    stop: list[Hook] = [client.aclose, subscriber.aclose]
     probe = redis_probe(client)
     return Services(settings, wall_clock_ms, redis, tickets, bank, service, start, stop, probe)
 
@@ -170,7 +172,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
 
 @cache
 def module_app() -> FastAPI:
-    """The one app of ``uvicorn quiz.main:app``, with one store and one Redis pool."""
+    """The one app of ``uvicorn quiz.main:app``, with one store and its Redis pools."""
     return create_app()
 
 

@@ -1,12 +1,15 @@
-# AI-ASSISTED: the script loader (EVALSHA, one reload on NOSCRIPT), the key schema and the prelude.
+# AI-ASSISTED: the script loader (EVALSHA, a reload of the missing script on NOSCRIPT), the key
+# schema and the prelude.
+import asyncio
 import json
 
 import pytest
 from redis.asyncio import Redis
 from redis.exceptions import NoScriptError
 
+from quiz.adapters.redis import scripts as scripts_module
 from quiz.adapters.redis.keys import NO_QUIZ_TTL, QuizKeys, quiz_keys
-from quiz.adapters.redis.scripts import Scripts, compose
+from quiz.adapters.redis.scripts import Scripts, compose, source
 from quiz.ports.store import QUIZ_TTL_MS
 
 ARGS = ('["q0"]', "[0]", 20_000, 60_000)
@@ -71,15 +74,42 @@ async def test_noscript_twice_is_raised(
 ) -> None:
     scripts = Scripts(redis_client)
     await scripts.load()
-    loads = 0
+    loads, load = 0, redis_client.script_load
 
-    async def flush_after_load() -> None:
+    async def flush_after_load(script: str) -> str:
         nonlocal loads
         loads += 1
+        sha = await load(script)
         await redis_client.script_flush()  # the reload does not stick
+        return sha
 
-    monkeypatch.setattr(scripts, "load", flush_after_load)
+    monkeypatch.setattr(redis_client, "script_load", flush_after_load)
     await redis_client.script_flush()
     with pytest.raises(NoScriptError):
         await scripts.call("create_quiz", quiz_keys("T-B", redis_prefix), *ARGS)
     assert loads == 1
+
+
+async def test_noscript_reloads_only_the_missing_script_without_reading_files(
+    redis_client: Redis, redis_prefix: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scripts, keys = Scripts(redis_client), quiz_keys("T-C", redis_prefix)
+    await scripts.load()
+    assert (await scripts.call("create_quiz", keys, *ARGS))[0] == "ok"
+    await redis_client.script_flush()
+    loaded, load, expected = [], redis_client.script_load, source("read_standings")
+
+    async def counted(script: str) -> str:
+        loaded.append(script)
+        return await load(script)
+
+    def no_files(*_: object) -> str:
+        pytest.fail("composed a script during the recovery")
+
+    monkeypatch.setattr(redis_client, "script_load", counted)
+    monkeypatch.setattr(scripts_module, "compose", no_files)
+    read = ("read_standings", keys, 0, -1, 50, 200)
+    replies = await asyncio.gather(*(scripts.call(*read) for _ in range(100)))
+    assert all(reply[0] == "ok" for reply in replies)
+    assert 1 <= len(loaded) <= 100
+    assert set(loaded) == {expected}
