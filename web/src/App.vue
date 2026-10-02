@@ -10,11 +10,11 @@ const main = useTemplateRef<HTMLElement>('main')
 
 <template>
   <div class="flex min-h-dvh flex-col">
-    <!-- Above the window until it has the focus. It moves the focus itself: the router would read a hash as a route change. -->
+    <!-- Above the window and transparent (also in a scrolled page) until it has the focus. It moves the focus itself: the router would read a hash as a route change. -->
     <a
       href="#main"
       data-test="skip-link"
-      class="fixed top-2 left-4 z-20 inline-flex min-h-11 -translate-y-[calc(100%+1rem)] items-center rounded-lg border-clay bg-card px-4 font-bold text-primary shadow-press focus-visible:translate-y-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+      class="fixed top-2 left-4 z-20 inline-flex min-h-11 -translate-y-[calc(100%+1rem)] items-center opacity-0 rounded-lg border-clay bg-card px-4 font-bold text-primary shadow-press focus-visible:translate-y-0 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
       @click.prevent="main?.focus()"
     >{{ strings.skipLink }}</a>
     <header class="sticky top-0 z-10 border-b-clay bg-background supports-[backdrop-filter]:bg-background/95 supports-[backdrop-filter]:backdrop-blur-sm">
