@@ -617,7 +617,18 @@ every quiz runs there.
 managed Redis with automatic failover. Replication is asynchronous, so a failover can lose the
 last acknowledged writes like an AOF crash does, and `seq` can go back without the numbers alone
 showing it. Frames would then carry a `seq` epoch, renewed once per failover, and a client that
-sees a new epoch resyncs.
+sees a new epoch resyncs, whatever the number:
+
+- **The epoch** is a random value stored with the counter, together with the replication ID it
+  was made under (`master_replid` in `INFO replication`).
+- **Renewed once:** a node that sees a new replication ID passes the ID it knew and the new one
+  to one script, which renews the epoch only while the stored ID is still the one the node knew
+  (compare and set). One failover renews it once however many nodes see it, and a late observer
+  changes nothing.
+- **The host end** would also wait for the replica (`WAITAOF 1 1 <timeout>`, with
+  `appendonly yes` on the replica), so an announced end survives a failover when the promoted
+  replica is the one that confirmed it. With one replica that always holds; Redis gives no
+  stronger guarantee.
 
 **Redis as one process: growth.** Past one Redis, a Redis Cluster spreads quizzes over shards.
 The hash tag in every key (`quiz:{<quizId>}:*`) keeps one quiz in one slot, so each script
@@ -820,8 +831,8 @@ measures them in load runs.
   200 ms of the 500 ms budget for delivery.
 - The client-observed answer → leaderboard p99 above 500 ms, once clients report timings: C5 is
   missed.
-- The p99 of `tick_duration_seconds` above 50 ms: the tick nears its 200 ms budget, which points
-  at Redis.
+- The p99 of `tick_duration_seconds` above 50 ms: a slow tick delays every frame of its quiz, and
+  it points at Redis.
 - `sum(rate(leaderboard_frames_total))` over all nodes at 0 while
   `sum(rate(answers_total{result="correct"}))` grows: scores change but no frame goes out. Only a
   correct answer on time scores and sets `dirty`, so wrong and late answers alone publish
