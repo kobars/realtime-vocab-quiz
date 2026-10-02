@@ -86,7 +86,7 @@ async def test_every_error_has_one_body_shape(http: httpx.AsyncClient) -> None:
         assert "INVALID_MESSAGE" not in resp.json()["message"], body
     bad_json = await http.post("/sessions", content=b"{bad")
     assert (bad_json.status_code, bad_json.json()["error"]) == (422, "INVALID_MESSAGE")
-    for path in ("/nope", "/quizzes"):
+    for path in ("/nope", "/quizzes/VOCAB-42/players"):  # GET /quizzes is POST-only: 405
         resp = await http.get(path)
         assert (resp.status_code, resp.json()) == (404, NO_ROUTE), path
     wrong_method = await http.get("/sessions")
