@@ -11,10 +11,11 @@ from typing import Any, cast
 import pytest
 
 from quiz.adapters.memory import MemoryStore
+from quiz.adapters.mock_questions import MockQuestionBank
 from quiz.adapters.redis import RedisStore
 from quiz.adapters.ws.registry import Registry
 from quiz.adapters.ws.sender import Sender
-from quiz.app.service import Connection
+from quiz.app.service import Connection, QuizService
 from quiz.domain.session import Question
 from quiz.fanout.broadcast import Relay
 from quiz.fanout.tick import Ticker
@@ -50,6 +51,10 @@ def store(request: pytest.FixtureRequest) -> FeedStore:
     return redis_store
 
 
+def ticker_of(store: FeedStore, sink: Sink) -> Ticker:
+    return Ticker(store, sink, QuizService(store, MockQuestionBank({}), lambda: 0), "n1")
+
+
 def loops() -> int:
     return sum(
         getattr(t.get_coro(), "__qualname__", "") == "Ticker._run" for t in asyncio.all_tasks()
@@ -79,7 +84,7 @@ async def test_100_answers_in_1_s_make_at_most_6_frames_ending_on_the_standings(
     for user in users:
         await store.serve_next(quiz_id, user, 0, f"c-{user}")
     sink = Sink()
-    (ticker := Ticker(store, sink, "n1")).open(quiz_id)
+    (ticker := ticker_of(store, sink)).open(quiz_id)
     await asyncio.sleep(0.4)  # the joins' frame
     sink.frames.clear()
     start = time.monotonic()
@@ -110,7 +115,7 @@ async def test_each_tick_is_timed_and_each_published_frame_counted(
 
     monkeypatch.setattr(store, "publish_if_dirty", counted)
     frames, timed = metric("leaderboard_frames_total"), metric("tick_duration_seconds_count")
-    (ticker := Ticker(store, Sink(), "n1")).open(quiz_id)
+    (ticker := ticker_of(store, Sink())).open(quiz_id)
     await asyncio.sleep(0.3)
     await score(store, quiz_id, "a", 0)
     await asyncio.sleep(0.3)
@@ -125,7 +130,7 @@ async def test_the_tick_runs_only_while_the_quiz_has_local_sockets(
 ) -> None:
     quiz_id = await quiz_with(store, "a")
     sink, registry = Sink(), Registry(store, 0)  # no grace: a dropped player leaves at once
-    registry.watcher = Ticker(store, sink, "n1")
+    registry.watcher = ticker_of(store, sink)
     sender = cast("Sender", object())  # the registry only stores it here
     first, second = Connection("c1", "a", quiz_id), Connection("c2", "b", quiz_id)
     await asyncio.sleep(0.3)
@@ -175,7 +180,7 @@ async def test_players_outside_the_top_50_get_rank_updates(
 
     monkeypatch.setattr(store, "ranks_of", counted)
     sink = Sink("u000", "u120", "u150")
-    (ticker := Ticker(store, sink, "n1")).open(quiz_id)
+    (ticker := ticker_of(store, sink)).open(quiz_id)
     await asyncio.sleep(0.3)
     started = time.monotonic()
     for user in ("u150", "u160", "u170"):  # each shifts u120 down by one, a tick apart
@@ -199,7 +204,7 @@ async def test_quiz_ended_carries_each_players_own_rank_and_ends_the_loop(store:
     quiz_id = await quiz_with(store, "a", "b")
     await score(store, quiz_id, "b", 0)
     sink = Sink("a", "b", "c")
-    Ticker(store, sink, "n1").open(quiz_id)
+    ticker_of(store, sink).open(quiz_id)
     await asyncio.sleep(0.3)
     await store.end_by_host(quiz_id)
     await asyncio.sleep(0.3)
@@ -214,7 +219,7 @@ async def test_a_host_mark_is_announced_at_the_deadline(redis_store: RedisStore)
     quiz_id = await quiz_with(redis_store, "a", window_ms=600)
     await redis_store.end_quiz(quiz_id, "mark")  # a host end whose announcement was lost
     sink = Sink("a")
-    (ticker := Ticker(redis_store, sink, "n1")).open(quiz_id)
+    (ticker := ticker_of(redis_store, sink)).open(quiz_id)
     await asyncio.sleep(1.0)
     await ticker.stop()
     assert [update["type"] for _, update in sink.updates["a"]] == ["quiz_ended"]

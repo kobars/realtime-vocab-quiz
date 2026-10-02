@@ -147,7 +147,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         services.settings, services.tickets, services.service, services.store
     )
     app.add_api_websocket_route("/ws", gateway.endpoint)
-    ticker = Ticker(services.store, gateway.registry, services.settings.node_id)
+    ticker = Ticker(services.store, gateway.registry, services.service, services.settings.node_id)
     gateway.registry.watcher = ticker
     services.shutdown.append(ticker.stop)  # stop hooks run in reverse: before the store closes
     renewer = PresenceRenewer(services.store, gateway.registry, services.settings.grace_ms)

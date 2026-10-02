@@ -88,8 +88,18 @@ dropped) and `/ws` to the nodes, round-robin. Only nginx publishes a port:
 cp .env.example .env                        # then set ADMIN_TOKEN and REDIS_PASSWORD
 make build                                  # the images the stack runs
 docker compose --profile full up -d --wait  # returns once every service is healthy
+make smoke-full                             # the smoke run below
 make down                                   # stops the stack and the development Redis
 ```
+
+`make smoke-full` (`load/smoke_full.py`) checks `/healthz` and `/readyz` on each node,
+joins through nginx on its published port (`docker compose port nginx 8080`, so any
+`QUIZ_PORT` works), answers one question for points, then stops the node that holds its socket
+(the one whose `ws_connections` gauge on `/metrics` grew): within 10 s it must be back on the other node through nginx, resynced, with its score.
+The stopped node then starts again. It starts the quiz `VOCAB-42` for an hour unless it
+is open already; after that hour a run needs another quiz
+(`uv run --project api python load/smoke_full.py --quiz-ids BIZ-20`) or a fresh stack
+Redis (`docker compose --profile full down -v`).
 
 The nodes publish no port, so check `/healthz` and `/readyz` on one from inside its
 container:

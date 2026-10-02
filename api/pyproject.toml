@@ -61,7 +61,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = [
-    "quiz", "check_pr", "pr_changes", "review_budget", "bots", "latency", "player",
+    "quiz", "check_pr", "pr_changes", "review_budget", "bots", "latency", "player", "smoke_full",
 ]
 
 [tool.ruff.lint.per-file-ignores]
