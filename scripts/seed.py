@@ -1,4 +1,5 @@
-# AI-ASSISTED: starts a fresh 60-minute run of a bank quiz, or ends a quiz, through the admin API.
+# AI-ASSISTED: starts a fresh 60-minute run of a bank quiz, or ends a quiz, through the admin API;
+# the run IDs are the ones self-service hosting draws.
 """Start a new quiz from the question bank and print its ID and player URL, or end a quiz.
 
 The new quiz plays the bank quiz (``bankQuizId``) under its own ID: the bank quiz's ID and a random
@@ -11,30 +12,15 @@ and ``make demo-end`` use), so it needs no package beyond the service's own.
 import argparse
 import json
 import os
-import secrets
 import sys
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from typing import Any
 
+from quiz.adapters.http.hosting import ATTEMPTS, run_code, run_id
 from quiz.adapters.http.models import LIMIT_MS
 from quiz.adapters.http.routes import QUIZ_ID
-
-# Upper-case letters and digits that cannot be read as one another (no 0/O, no 1/I).
-CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-CODE_LENGTH = 4
-ATTEMPTS = 5  # a code already taken (HTTP 409) is drawn again
-QUIZ_ID_MAX = 16  # the longest ID that QUIZ_ID matches
-
-
-def run_code() -> str:
-    return "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
-
-
-def run_id(bank_id: str, code: str) -> str:
-    """The bank quiz's ID and the run code, the ID cut short to keep the whole a valid quiz ID."""
-    return f"{bank_id[: QUIZ_ID_MAX - len(code) - 1].rstrip('-')}-{code}"
 
 
 def _post(api_url: str, token: str, path: str, body: dict[str, Any]) -> None:

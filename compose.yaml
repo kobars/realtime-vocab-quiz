@@ -37,6 +37,13 @@ x-api-env: &api-env
   QUIZ_PORT: ${QUIZ_PORT:-8080}
   PER_IP_CONN_CAP: # from .env when set: every client of the 127.0.0.1 port shares one address
   REDIS_MAX_CONNECTIONS: ${REDIS_MAX_CONNECTIONS:-100} # each served quiz holds one subscription
+  # From .env when set: self-service hosting (on when unset) and its limits (docs/operations.md).
+  PUBLIC_HOSTING:
+  HOSTING_WINDOW_MS:
+  HOSTING_MAX_OPEN:
+  HOSTING_PER_IP:
+  HOSTING_PER_IP_WINDOW_S:
+  HOSTING_BANKS:
   # From .env when set: how long a node waits for a free pooled connection, a Redis reply, and
   # a connect.
   REDIS_POOL_TIMEOUT_MS:

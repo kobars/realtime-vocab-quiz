@@ -1,4 +1,5 @@
 # AI-ASSISTED: the store and feed ports of docs/spec/redis.md §3 and §5; both stores implement them.
+# Also the host token hash of a self-hosted quiz and the count of open self-hosted quizzes.
 """The quiz store: every write that changes quiz state, behind one interface.
 
 The store reads its own clock and computes points itself: no method takes a time or
@@ -154,7 +155,7 @@ def announced(end: End) -> int:
 
 
 class Store(Protocol):
-    async def create_quiz(
+    async def create_quiz(  # noqa: PLR0913 - the keyword-only settings of a new quiz
         self,
         quiz_id: str,
         questions: tuple[Question, ...],
@@ -162,12 +163,27 @@ class Store(Protocol):
         window_ms: int,
         time_limit_ms: int,
         bank_quiz_id: str | None = None,
+        host_token_hash: str | None = None,
     ) -> Created:
-        """``bank_quiz_id``: the question bank's quiz that it plays; by default ``quiz_id``."""
+        """``bank_quiz_id``: the question bank's quiz that it plays; by default ``quiz_id``.
+        ``host_token_hash``: kept with a self-hosted quiz, for its host's end."""
         ...
 
     async def bank_quiz_id(self, quiz_id: str) -> str:
         """The bank quiz that ``quiz_id`` plays; an unknown quiz plays the one of its own ID."""
+        ...
+
+    async def host_token_hash(self, quiz_id: str) -> str | None:
+        """The hash given at creation; None for an unknown quiz or one created without it."""
+        ...
+
+    async def hold_hosted(self, quiz_id: str, window_ms: int, cap: int) -> bool:
+        """Count ``quiz_id`` among the open self-hosted quizzes for ``window_ms`` from now,
+        unless ``cap`` of them are open already: then count nothing and return False."""
+        ...
+
+    async def release_hosted(self, quiz_id: str) -> None:
+        """Stop counting ``quiz_id`` among the open self-hosted quizzes (it has ended)."""
         ...
 
     async def join(self, quiz_id: str, user_id: str, display_name: str, conn_id: str) -> Joined: ...
@@ -212,6 +228,7 @@ class Store(Protocol):
 
     async def end_by_host(self, quiz_id: str) -> int:
         """The host's "end now": mark, wait for the mark to be durable, announce; the end seq.
+        An announced quiz stops counting among the open self-hosted quizzes, whoever ended it.
 
         Raises ``DomainError(UNAVAILABLE)`` when the mark is not durable or the end is not
         announced; nothing is announced then, and a retry is safe (redis.md §3.1 step 3)."""

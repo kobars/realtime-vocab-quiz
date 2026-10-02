@@ -1,5 +1,5 @@
 # AI-ASSISTED: the HTTP request and response bodies, each with an example for the OpenAPI page;
-# request bodies take JSON types strictly.
+# request bodies take JSON types strictly; the self-service hosting bodies too.
 # Field names are the camelCase wire names, hence the file-wide N815 exemption.
 # ruff: noqa: N815
 from typing import Annotated, Literal
@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from quiz.contracts.messages import QuizId
 
 LIMIT_MS = 3_600_000  # one hour: the longest question time and quiz window
+QUESTION_MS = 20_000  # the question time of a self-hosted quiz, and the admin API's default
 
 
 def _example(*, strict: bool = False, **fields: JsonValue) -> ConfigDict:
@@ -54,7 +55,7 @@ class CreateQuiz(BaseModel):
     )
     quizId: QuizId
     bankQuizId: QuizId | None = None  # the bank quiz it plays; by default quizId
-    timeLimitMs: Annotated[int, Field(ge=1, le=LIMIT_MS)] = 20_000
+    timeLimitMs: Annotated[int, Field(ge=1, le=LIMIT_MS)] = QUESTION_MS
     windowMs: Annotated[int, Field(ge=1, le=LIMIT_MS)] = 600_000
 
 
@@ -63,6 +64,33 @@ class Ended(BaseModel):
     quizId: str
     status: Literal["ended"]
     endSeq: int
+
+
+class Bank(BaseModel):
+    model_config = _example(id="VOCAB-42", title="Everyday English", questionCount=10)
+    id: str
+    title: str
+    questionCount: int
+
+
+class HostIn(BaseModel):
+    model_config = _request(bankQuizId="VOCAB-42")
+    bankQuizId: QuizId
+
+
+class Hosted(BaseModel):
+    model_config = _example(
+        quizId="VOCAB-42-7K3Q",
+        sharePath="/q/VOCAB-42-7K3Q",
+        hostToken="Qm9…43 characters",
+        windowMs=1_800_000,
+        endsAtMs=1_800_001_800_000,
+    )
+    quizId: str
+    sharePath: str
+    hostToken: str  # shown once; the store keeps its SHA-256 only
+    windowMs: int
+    endsAtMs: int
 
 
 class Status(BaseModel):

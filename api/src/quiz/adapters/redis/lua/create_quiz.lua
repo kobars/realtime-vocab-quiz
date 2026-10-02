@@ -1,6 +1,7 @@
 -- AI-ASSISTED: create_quiz of docs/spec/redis.md §3: validate the shape, then write meta, key and seq.
 -- ARGV: questionIds (JSON array), answer key (JSON array of integers), timeLimitMs, windowMs,
--- bankQuizId (the question bank's quiz that it plays).
+-- bankQuizId (the question bank's quiz that it plays), hostHash (the host token's SHA-256 of a
+-- self-hosted quiz, else empty).
 local MAX_MS, MAX_QUESTIONS = 3600000, 100
 
 local function int_in(value, low, high)
@@ -33,6 +34,9 @@ local now = now_ms()
 redis.call('HSET', KEYS[K.meta], 'questionCount', #ids, 'timeLimitMs', limit,
   'windowMs', window, 'startMs', now, 'deadlineMs', now + window, 'questionIds', ARGV[1],
   'bankQuizId', bank)
+if ARGV[6] and ARGV[6] ~= '' then
+  redis.call('HSET', KEYS[K.meta], 'hostHash', ARGV[6])
+end
 for i = 1, #ids do
   redis.call('HSET', KEYS[K.key], i - 1, string.format('%d', choices[i]))
 end

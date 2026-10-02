@@ -1,4 +1,5 @@
-# AI-ASSISTED: the service settings, read from environment variables, with the spec's defaults.
+# AI-ASSISTED: the service settings, read from environment variables, with the spec's defaults;
+# the self-service hosting switch and its limits.
 """Every tunable of the service. Each field reads the environment variable of its name in upper
 case (``per_ip_conn_cap`` from ``PER_IP_CONN_CAP``); lists are comma-separated."""
 
@@ -12,7 +13,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from quiz.adapters.redis.store import WAITAOF_TIMEOUT_MS
 from quiz.contracts.codec import MAX_FRAME_BYTES
-from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
+from quiz.contracts.messages import FULL_LIST_MAX, TOP_N, QuizId
+from quiz.domain.session import MAX_WINDOW_MS
 
 KIB = 1024
 # The local host only: a proxy elsewhere (nginx on the compose network) is named by its address or
@@ -71,7 +73,15 @@ class Settings(BaseSettings):
     admin_mock: bool = False  # MOCK: the quiz admin endpoints exist only when set
     admin_token: SecretStr | None = None
 
-    @field_validator("allowed_origins", "trusted_proxies", mode="before")
+    # Anyone may host a quiz (POST /quizzes) and end it with its host token; off: no such routes.
+    public_hosting: bool = True
+    hosting_window_ms: Annotated[int, Field(ge=60_000, le=MAX_WINDOW_MS)] = 1_800_000
+    hosting_max_open: PositiveInt = 50  # open self-hosted quizzes, all nodes; above it HTTP 503
+    hosting_per_ip: PositiveInt = 5  # creations per client address in each window below: HTTP 429
+    hosting_per_ip_window_s: PositiveInt = 600
+    hosting_banks: Annotated[tuple[QuizId, ...], NoDecode] = ("VOCAB-42", "BIZ-20", "ACAD-10")
+
+    @field_validator("allowed_origins", "trusted_proxies", "hosting_banks", mode="before")
     @classmethod
     def _split(cls, value: object) -> object:
         if isinstance(value, str):

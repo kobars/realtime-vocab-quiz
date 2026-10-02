@@ -1,4 +1,5 @@
-# AI-ASSISTED: the HTTP edge: mock sessions and tickets, quiz info, mock admin, probes, metrics.
+# AI-ASSISTED: the HTTP edge: mock sessions and tickets, quiz info, mock admin, probes, metrics;
+# the error mapping that the self-service hosting routes (hosting.py) share.
 """HTTP routes of docs/spec/protocol.md §8 plus the operator endpoints.
 
 MOCK: ``POST /sessions`` and ``POST /tickets`` stand in for an identity provider, and the
@@ -36,9 +37,24 @@ from quiz.ports.store import Store
 from quiz.ports.tickets import TicketStore
 
 QUIZ_ID, REQUEST_ID = re.compile(r"[A-Z0-9-]{3,16}"), re.compile(r"[A-Za-z0-9_.-]{1,64}")
-STATUS = {ErrorCode.QUIZ_NOT_FOUND: 404, ErrorCode.INVALID_STATE: 409, ErrorCode.UNAVAILABLE: 503}
+STATUS = {
+    ErrorCode.QUIZ_NOT_FOUND: 404,
+    ErrorCode.INVALID_STATE: 409,
+    ErrorCode.QUIZ_ENDED: 409,
+    ErrorCode.UNAVAILABLE: 503,
+}
 NOT_FOUND = "no such quiz"  # one body for every unknown ID: no hint whether it ever existed
 log = structlog.get_logger("quiz.http")
+
+
+class Refusal(Exception):  # noqa: N818 - a refused request, answered as is, not a fault
+    """A refusal whose error code is not its HTTP status's name: ``429 RATE_LIMITED``."""
+
+    def __init__(
+        self, status: int, error: str, message: str, headers: Mapping[str, str] | None = None
+    ) -> None:
+        super().__init__(message)
+        self.status, self.error, self.message, self.headers = status, error, message, headers
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +70,7 @@ class HttpDeps:
     outages: tuple[type[Exception], ...] = (ConnectionError, TimeoutError)  # -> 503
 
 
-def _quiz(request: Request, quiz_id: str) -> None:
+def tag_quiz(request: Request, quiz_id: str) -> None:
     """Tag this request's log lines with the quiz it names."""
     request.state.quiz_id = quiz_id  # for the request line, logged outside the handler's context
     structlog.contextvars.bind_contextvars(quiz_id=quiz_id)
@@ -120,7 +136,7 @@ def _public(deps: HttpDeps) -> APIRouter:
     @api.get("/quizzes/{quiz_id}", tags=["quizzes"], responses={404: {"model": h.Problem}})
     async def quiz_info(request: Request, quiz_id: str) -> h.QuizInfo:
         """Public information about a quiz; ``ended`` from its deadline, whoever is connected."""
-        _quiz(request, quiz_id)
+        tag_quiz(request, quiz_id)
         return await _info(deps, quiz_id)
 
     @api.get("/healthz", tags=["operations"])
@@ -177,7 +193,7 @@ def _admin(deps: HttpDeps) -> APIRouter:
     async def create_quiz(request: Request, body: h.CreateQuiz) -> h.QuizInfo:
         """MOCK: start the bank quiz ``bankQuizId`` (by default ``quizId``) under ``quizId``; 409
         when ``quizId`` exists."""
-        _quiz(request, body.quizId)
+        tag_quiz(request, body.quizId)
         # An existing quiz keeps its bank quiz, so a repeat without bankQuizId still gets the 409.
         bank_quiz_id = body.bankQuizId or await deps.store.bank_quiz_id(body.quizId)
         if (bank := await deps.bank.questions(bank_quiz_id)) is None:
@@ -200,7 +216,7 @@ def _admin(deps: HttpDeps) -> APIRouter:
         """MOCK: the host's "end now": mark, wait for the fsync, announce (redis.md §3.1).
 
         503 ``UNAVAILABLE`` when the end was not made durable and announced; retry it."""
-        _quiz(request, quiz_id)
+        tag_quiz(request, quiz_id)
         if not QUIZ_ID.fullmatch(quiz_id):
             raise DomainError(ErrorCode.QUIZ_NOT_FOUND, NOT_FOUND)
         end_seq = await deps.store.end_by_host(quiz_id)
@@ -246,6 +262,8 @@ def install(app: FastAPI, deps: HttpDeps) -> None:
     async def mapped(request: Request, error: Exception) -> Response:
         if request.scope["type"] != "http":  # the WebSocket gateway handles its own errors
             raise error
+        if isinstance(error, Refusal):
+            return _problem(error.status, error.error, error.message, error.headers)
         if isinstance(error, StarletteHTTPException):
             status = HTTPStatus(error.status_code)
             return _problem(status, status.name, str(error.detail), error.headers)
@@ -261,7 +279,7 @@ def install(app: FastAPI, deps: HttpDeps) -> None:
     if deps.admin_token is not None:
         app.include_router(_admin(deps))
         app.middleware("http")(_admin_guard(deps.admin_token))  # inside the request log
-    kinds = (StarletteHTTPException, RequestValidationError, DomainError, *deps.outages)
+    kinds = (StarletteHTTPException, RequestValidationError, DomainError, Refusal, *deps.outages)
     for kind in kinds:
         app.add_exception_handler(kind, mapped)
     app.middleware("http")(_log_request)
