@@ -9,6 +9,7 @@ import type { AnswerResult, Joined, Question, ServerMessage, Snapshot } from '@/
 import { createAppRouter } from '@/router'
 import { configureQuizStore, type QuizClientPort, useQuizStore } from '@/stores/quiz'
 import PlayView from './PlayView.vue'
+import { stackedFocusClasses } from '@/components/ui/focus.testing'
 
 let emit: (event: ClientEvent) => void
 let clock = 0
@@ -112,7 +113,7 @@ it('a digit with Ctrl, Meta or Alt held sends no answer, so browser and system s
 it('a choice shows one focus indicator: the focus outline hugs its own outline, with no ring on top', async () => {
   const w = await playing()
   expect(choice(w, 0).classes()).toContain('focus-hug')
-  expect(choice(w, 0).classes().filter((c) => /(^|:)(ring|outline)-/.test(c))).toEqual([])
+  expect(stackedFocusClasses(choice(w, 0).classes())).toEqual([])
 })
 
 it('intro: Start has the focus and asks for question 0; after a rejoin on a closed question it reads Continue', async () => {

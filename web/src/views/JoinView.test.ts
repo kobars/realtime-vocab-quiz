@@ -8,6 +8,7 @@ import type { ClientEvent } from '@/protocol/client'
 import { createAppRouter } from '@/router'
 import { configureQuizStore, type QuizClientPort } from '@/stores/quiz'
 import { strings } from '@/strings'
+import { stackedFocusClasses } from '@/components/ui/focus.testing'
 
 let emit: (event: ClientEvent) => void
 let start: ReturnType<typeof vi.fn>
@@ -91,7 +92,7 @@ it('the header link is a 44 px touch target', async () => {
 
 it('the header link and the skip link use the page focus outline with no ring on top, the skip link hugging its own outline', async () => {
   const { wrapper } = await screen()
-  const stacked = (selector: string) => wrapper.get(selector).classes().filter((c) => /(^|:)(ring|outline)-/.test(c))
+  const stacked = (selector: string) => stackedFocusClasses(wrapper.get(selector).classes())
   expect([stacked('header a'), stacked('[data-test="skip-link"]')]).toEqual([[], []])
   expect(wrapper.get('[data-test="skip-link"]').classes()).toContain('focus-hug')
 })

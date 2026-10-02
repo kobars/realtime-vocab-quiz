@@ -8,6 +8,7 @@ import { buttonVariants } from './button'
 import { Card } from './card'
 import { Input } from './input'
 import { Progress } from './progress'
+import { stackedFocusClasses } from './focus.testing'
 
 const classes = (value: string) => value.split(/\s+/)
 const inputClass = () => mount(Input).get('input').classes().join(' ')
@@ -29,7 +30,7 @@ const styled: [string, string][] = [
 // The page's :focus-visible outline is the one indicator (main.test.ts checks it); a second one stacks a ring on it.
 describe('focus indicator', () => {
   it.each(styled)('%s adds no ring and does not hide the outline', (_, value) => {
-    expect(value).not.toMatch(/(^|\s)(\S+:)?(ring|outline)-/)
+    expect(stackedFocusClasses(classes(value))).toEqual([])
   })
 
   it.each(outlined)('%s draws its own outline, so the focus outline hugs it as one band', (_, value) => {
