@@ -12,7 +12,7 @@ leaderboard move live as anyone scores, across two server nodes.
 [/host](https://kobar-vocab-quiz-web.fly.dev/host), and open the player link it shares in two
 browser windows.
 
-**Video walkthrough:** placeholder, the link is added here once the video is published.
+**Video walkthrough:** <https://www.youtube.com/watch?v=7gOKTPEs5Ak>
 
 ![Two players in one quiz: each window shows its question and the same live leaderboard](docs/images/demo.png)
 
