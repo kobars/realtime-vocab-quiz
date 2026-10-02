@@ -150,7 +150,7 @@ async def test_tokens_and_ids_have_the_wire_format(
     assert 1 <= len(identity.user_id) <= 64
 
 
-@pytest.mark.parametrize("name", ["", "   ", "x" * 33, " " * 100 + "x" * 29])
+@pytest.mark.parametrize("name", ["", "   ", "\u200b", "x" * 33, " " * 100 + "x" * 29])
 async def test_bad_display_name_is_refused(
     store_and_clock: tuple[TicketStore, list[int]], name: str
 ) -> None:

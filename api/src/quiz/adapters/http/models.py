@@ -1,4 +1,5 @@
-# AI-ASSISTED: the HTTP request and response bodies, each with an example for the OpenAPI page.
+# AI-ASSISTED: the HTTP request and response bodies, each with an example for the OpenAPI page;
+# request bodies take JSON types strictly.
 # Field names are the camelCase wire names, hence the file-wide N815 exemption.
 # ruff: noqa: N815
 from typing import Annotated, Literal
@@ -10,12 +11,17 @@ from quiz.contracts.messages import QuizId
 LIMIT_MS = 3_600_000  # one hour: the longest question time and quiz window
 
 
-def _example(**fields: JsonValue) -> ConfigDict:
-    return ConfigDict(extra="forbid", json_schema_extra={"examples": [fields]})
+def _example(*, strict: bool = False, **fields: JsonValue) -> ConfigDict:
+    return ConfigDict(extra="forbid", strict=strict, json_schema_extra={"examples": [fields]})
+
+
+def _request(**fields: JsonValue) -> ConfigDict:
+    """A request body: no type coercion, so ``true``, ``"90000"`` or ``1.0`` is no integer."""
+    return _example(strict=True, **fields)
 
 
 class SessionIn(BaseModel):
-    model_config = _example(displayName="Ana")
+    model_config = _request(displayName="Ana")
     displayName: Annotated[str, Field(max_length=128)]
 
 
@@ -43,7 +49,7 @@ class QuizInfo(BaseModel):
 
 
 class CreateQuiz(BaseModel):
-    model_config = _example(
+    model_config = _request(
         quizId="VOCAB-42-7K3Q", bankQuizId="VOCAB-42", timeLimitMs=20_000, windowMs=600_000
     )
     quizId: QuizId

@@ -61,9 +61,16 @@ def test_malformed_frames_are_invalid_messages(raw: bytes) -> None:
     assert code_of(raw) == ErrorCode.INVALID_MESSAGE
 
 
-@pytest.mark.parametrize("version", ["2", "true", "1.0", '"1"', "0", "null"])
-def test_a_wrong_version_is_unsupported(version: str) -> None:
+@pytest.mark.parametrize("version", ["2", "0", "-1", "99999999999999999999"])
+def test_another_integer_version_is_unsupported(version: str) -> None:
     assert code_of(f'{{"v":{version},"type":"ping"}}'.encode()) == ErrorCode.UNSUPPORTED_VERSION
+
+
+@pytest.mark.parametrize("version", ["true", "false", "1.0", '"1"', "null", "[1]"])
+def test_a_version_that_is_no_integer_is_invalid(version: str) -> None:
+    result = parse_client_message(f'{{"v":{version},"type":"ping"}}'.encode())
+    assert isinstance(result, ProtocolError)
+    assert (result.code, result.requestType) == (ErrorCode.INVALID_MESSAGE, "ping")
 
 
 @pytest.mark.parametrize("kind", ["subscribe", "leaderboard", "PING", ""])

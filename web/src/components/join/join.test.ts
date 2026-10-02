@@ -1,5 +1,6 @@
-// AI-ASSISTED: tests for the join form rules, the remembered name and the quiz preview request.
+// AI-ASSISTED: tests for the join form rules (with the display name cases shared with the server), the remembered name and the quiz preview request.
 import { describe, expect, it, vi } from 'vitest'
+import cases from '../../../../docs/spec/display-names.json?raw'
 import { strings } from '@/strings'
 import { fetchQuizPreview } from './preview'
 import { displayNameError, normalizeQuizId, quizIdError, readName, saveName } from './validation'
@@ -27,6 +28,36 @@ describe('display name', () => {
     expect(displayNameError(`  ${'x'.repeat(32)}  `)).toBeNull()
     expect(displayNameError('🦊'.repeat(32))).toBeNull()
   })
+
+  it.each([
+    ['a zero-width space', '\u200B'],
+    ['direction marks', '\u200E\u200F'],
+    ['format characters', '\u2060\uFEFF\u00AD'],
+    ['combining marks alone', '\u0301\u0301'],
+    ['Hangul fillers', '\u3164\u115F'],
+    ['the blank Braille pattern', '\u2800'],
+  ])('rejects a name of only %s, like the server', (_, name) => expect(displayNameError(name)).toBe(strings.join.nameInvisible))
+
+  it.each([
+    ['a tab', 'Ana\tBo'],
+    ['an escape sequence', 'A\u001B[31mna'],
+    ['only control characters', '\u0007\u001B'],
+  ])('rejects %s, like the server', (_, name) => expect(displayNameError(name)).toBe(strings.join.nameControl))
+
+  // The server's tests run the same table (api/tests/unit/test_names.py).
+  const shared = JSON.parse(cases) as { refused: { name: string; case: string }[]; accepted: { name: string; case: string }[] }
+  it.each(shared.refused.map((c) => [c.case, c.name]))('refuses the shared case: %s', (_, name) =>
+    expect(displayNameError(name)).not.toBeNull())
+  it.each(shared.accepted.map((c) => [c.case, c.name]))('accepts the shared case: %s', (_, name) =>
+    expect(displayNameError(name)).toBeNull())
+
+  it.each([
+    ['visible text with a zero-width space', 'A\u200Bna'],
+    ['a direction mark before the text', '\u200FAna'],
+    ['an emoji', '🦊'],
+    ['an emoji sequence with a zero-width joiner', '👩\u200D💻'],
+    ['right-to-left script', 'مريم'],
+  ])('accepts %s', (_, name) => expect(displayNameError(name)).toBeNull())
 
   it('counts characters after NFC normalization, like the server', () => {
     const decomposed = 'é'.repeat(20)

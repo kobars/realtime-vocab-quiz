@@ -1,5 +1,5 @@
 # AI-ASSISTED: the HTTP edge: an end that was not announced, an unhandled error, Redis refusing
-# writes, the identity limit, public quiz info without a ranking.
+# writes, the identity limit, public quiz info without a ranking, strict JSON types in bodies.
 import io
 import json
 from collections.abc import AsyncIterator
@@ -163,3 +163,25 @@ async def test_a_quiz_without_a_bank_quiz_is_not_found(
     resp = await http.post("/admin/quizzes", json=body, headers=TOKEN)
     assert (resp.status_code, resp.json()["error"]) == (404, "QUIZ_NOT_FOUND")
     assert (await http.get(f"/quizzes/{body['quizId']}")).status_code == 404
+
+
+@pytest.mark.parametrize("field", ["windowMs", "timeLimitMs"])
+@pytest.mark.parametrize("value", [True, "90000", 1.0], ids=["bool", "string", "float"])
+async def test_a_quiz_body_takes_no_coerced_integer(
+    http: httpx.AsyncClient, field: str, value: object
+) -> None:
+    resp = await http.post(
+        "/admin/quizzes", json={"quizId": "VOCAB-42", field: value}, headers=TOKEN
+    )
+    assert (resp.status_code, resp.json()["error"]) == (422, "INVALID_MESSAGE")
+    assert resp.json()["message"].startswith(f"{field}: ")
+    assert (await http.get("/quizzes/VOCAB-42")).status_code == 404  # nothing was created
+
+
+@pytest.mark.parametrize("value", [123, True, None, ["Ana"]])
+async def test_a_session_body_takes_no_coerced_name(http: httpx.AsyncClient, value: object) -> None:
+    # Lax mode refuses these for a str field too (no JSON value tells the modes apart there):
+    # this pins the 422 shape and the field name, not the strict flag.
+    resp = await http.post("/sessions", json={"displayName": value})
+    assert (resp.status_code, resp.json()["error"]) == (422, "INVALID_MESSAGE")
+    assert resp.json()["message"].startswith("displayName: ")
