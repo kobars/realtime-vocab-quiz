@@ -34,6 +34,7 @@ uv run --project api pre-commit install    # run the hooks on staged files at ea
 | `make dev-api` | One API node on `127.0.0.1:8001` (memory store) that allows the client dev server's origins; `DEV_API_PORT` and `DEV_ORIGINS` change them. `pnpm -C web dev` serves the client on :5173 and proxies `/api/*` (prefix dropped) and `/ws` to it, or to `QUIZ_API_URL` |
 | `make up`, `make down` | `make up` starts the development Redis on `127.0.0.1:6381`; `make down` stops it and the full stack, and keeps their data |
 | `make smoke-full` | Smoke-test the running full stack through nginx: health checks on each node, one answer, then stop the node that holds the socket and check the player comes back on the other node (`load/smoke_full.py`) |
+| `make load` | The bot swarm as a container on the stack network against the running full stack, with its options in `LOAD_ARGS` ([load/README.md](load/README.md) explains them and holds the measured runs) |
 | `make test` | The server unit, property and contract tests and the client tests, without Redis |
 | `make test-integration` | The tests that need Redis (a Redis container per run, or `REDIS_URL` when it is set), then the acceptance tests on Redis |
 | `make acceptance` | The acceptance tests alone; `ACCEPTANCE_STORE=redis` runs them on Redis |
