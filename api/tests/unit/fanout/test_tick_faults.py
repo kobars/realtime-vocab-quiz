@@ -1,4 +1,5 @@
-# AI-ASSISTED: store faults and malformed broadcasts never stop the tick loop or the relay early.
+# AI-ASSISTED: store faults and malformed broadcasts never stop the tick loop or the relay early;
+# a writable join restarts a loop that ended.
 import asyncio
 import json
 import logging
@@ -9,7 +10,9 @@ from unittest.mock import Mock, call
 
 import pytest
 
-from quiz.app.service import QuizService
+from quiz.adapters.ws.registry import Registry
+from quiz.adapters.ws.sender import Sender
+from quiz.app.service import Connection, QuizService
 from quiz.contracts import messages as m
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.fanout import tick
@@ -285,3 +288,19 @@ async def test_a_frame_with_no_change_time_is_counted_but_not_timed(
     assert metric("leaderboard_frames_total") - frames == 2
     assert metric("leaderboard_publish_lag_seconds_count") - lags == 1
     assert metric("leaderboard_publish_lag_seconds_sum") - lag_s == pytest.approx(0.15)
+
+
+async def test_a_writable_join_restarts_the_loop_of_a_quiz_whose_loop_ended() -> None:
+    store = ScriptedStore(*[Publish("ended", SEQ + 1)] * 2, messages=[ended(SEQ + 1)])
+    registry = Registry(cast("Store", store), 10_000)
+    ticker = Ticker(cast("FeedStore", store), registry, Mock(spec=QuizService), "n1", lambda: 0)
+    registry.watcher = ticker
+    sender = Mock(spec=Sender, close_code=None)
+    registry.bind(Connection("c1", "u1", quiz_id="Q", present=True), sender)
+    ended_loop = ticker._loops["Q"]  # noqa: SLF001 - the loop under test
+    await asyncio.wait_for(ended_loop, 1)  # quiz_ended relayed; the socket stays bound
+    registry.bind(Connection("c2", "u2", quiz_id="Q", read_only=True), sender)
+    assert ticker._loops["Q"] is ended_loop  # noqa: SLF001 - a read-only join needs no tick
+    registry.bind(Connection("c3", "u3", quiz_id="Q", present=True), sender)  # the id was reused
+    assert ticker._loops["Q"] is not ended_loop  # noqa: SLF001
+    await ticker.stop()
