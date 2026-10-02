@@ -54,6 +54,26 @@ its default, and [`.env.example`](../.env.example) shows the common ones.
 `make dev-api` takes `DEV_API_PORT` (8001) and `DEV_ORIGINS`; the client dev server takes
 `QUIZ_API_URL` to proxy to another API node.
 
+### Redis timeouts
+
+Each API node bounds how long it waits for Redis, so a Redis that stops answering (a paused or
+frozen process, a network that drops packets, a long fork) turns into errors a player can see
+and retry, not a frozen screen:
+
+| Setting | Default | Bounds |
+|---|---|---|
+| `REDIS_POOL_TIMEOUT_MS` | 2000 | the wait for a free connection when every pooled one is busy |
+| `REDIS_CONNECT_TIMEOUT_MS` | 2000 | opening a connection to Redis |
+| `REDIS_SOCKET_TIMEOUT_MS` | 5000 | the reply to one command or script |
+
+A request whose wait runs out fails like a Redis outage: the socket gets `UNAVAILABLE` and the
+HTTP API answers 503, and the client retries with backoff (`next` and `answer` are safe to
+repeat, because a command that timed out may still have run). The command timeout must stay
+above 2000 ms, the host end's `WAITAOF` wait, which the node refuses to start below, and below
+nginx's 60 s proxy timeout, or nginx gives up first. A quiz subscription waits for its next
+message without this timeout, so a quiet quiz keeps its feed. Set them in `.env`; compose passes
+them to both nodes.
+
 ## Deploy to a VM
 
 One Linux VM with Docker runs the whole stack behind HTTPS. It pulls the images that CI
@@ -243,7 +263,7 @@ A second target runs the same stack on [Fly.io](https://fly.io) Machines in one 
 reads or stores a token; it stops with "run fly auth login" when flyctl is logged out), and `uv`
 for `make fly-demo`. [infra/fly/](../infra/fly/) holds one config per app, and
 [scripts/deploy/fly.sh](../scripts/deploy/fly.sh) drives flyctl
-([ADR-014](DECISIONS.md#adr-014--flyio-as-a-second-target-three-apps-flycast-to-the-api-redis-on-a-volume)):
+([ADR-014](adr/014-flyio-second-target.md)):
 
 | App | Machines | Reached at |
 |---|---|---|
@@ -309,23 +329,3 @@ flyctl ssh sftp get --app myquiz-redis /data/redis/quiz-dump.rdb quiz-dump.rdb
 **Tear down.** `make fly-destroy` lists the three apps and deletes them, with their Machines, the
 volume and its quiz data and the addresses, once you type the prefix back. `.env.fly` stays, so a
 new `make fly-launch` reuses its secrets; delete it when you are done.
-
-## Redis timeouts
-
-Each API node bounds how long it waits for Redis, so a Redis that stops answering (a paused or
-frozen process, a network that drops packets, a long fork) turns into errors a player can see
-and retry, not a frozen screen:
-
-| Setting | Default | Bounds |
-|---|---|---|
-| `REDIS_POOL_TIMEOUT_MS` | 2000 | the wait for a free connection when every pooled one is busy |
-| `REDIS_CONNECT_TIMEOUT_MS` | 2000 | opening a connection to Redis |
-| `REDIS_SOCKET_TIMEOUT_MS` | 5000 | the reply to one command or script |
-
-A request whose wait runs out fails like a Redis outage: the socket gets `UNAVAILABLE` and the
-HTTP API answers 503, and the client retries with backoff (`next` and `answer` are safe to
-repeat, because a command that timed out may still have run). The command timeout must stay
-above 2000 ms, the host end's `WAITAOF` wait, which the node refuses to start below, and below
-nginx's 60 s proxy timeout, or nginx gives up first. A quiz subscription waits for its next
-message without this timeout, so a quiet quiz keeps its feed. Set them in `.env`; compose passes
-them to both nodes.

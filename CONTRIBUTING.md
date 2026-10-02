@@ -283,7 +283,7 @@ contracts/  the JSON Schema of the wire protocol, generated from the server's mo
 infra/      the nginx and Caddy configuration of the full stack
 load/       the bot swarm, the smoke test and the measured load runs
 scripts/    the demo and seed scripts, repository checks and generators
-docs/       specs, decisions, operations and the AI log
+docs/       specs (spec/), decisions (DECISIONS.md, one file per ADR in adr/), the capacity estimate, operations and the AI log
 ```
 
 ## Troubleshooting
