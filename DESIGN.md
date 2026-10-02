@@ -510,32 +510,36 @@ The sizing behind these runs (assumptions, frame sizes, buffer bounds, Redis loa
 
 ### Measured results
 
-Copied from [load/README.md](load/README.md), which says how to repeat each run. Machine: an
-Apple M4 Pro laptop (12 cores, 24 GB) running Docker Desktop with a Linux VM of 12 CPUs and
-7.7 GiB, shared by nginx, the API nodes (built from commit `145284ba`, which adds the Redis
-command timeouts), Redis and the bot swarm (`make load`). Every run: a 30 s
-ramp, then 180 s of answering, one answer per player about every 5 s (A11 in [docs/capacity.md](docs/capacity.md)), 70 % correct.
-Latencies are the bots' "answer accepted → leaderboard delivered" samples (C5); the answer
-latency is the client-observed round trip from `answer` to `answer_result`. Msg/s counts the
-frames the bots received; CPU % is the mean over the answering window, in percent of one core
-(two values: one per node); RSS is the node's peak memory in MiB as `docker stats` reports it.
-No run had a missing, timed-out or reconnecting sample, so the completion (samples over samples,
-missing and timed out) is 1 in every run; `slo_met` is the swarm's verdict on C5, with the share
-of updates delivered below 500 ms. The two-node hot quiz counted 1 `seq` gap and the
-many-quizzes run 4, each closed by a resync. The bots time a frame when they apply it, as the web
-client shows it.
+Four runs of the bot swarm (`make load`) on an Apple M4 Pro laptop, where nginx, the API nodes,
+Redis and the swarm share one Docker VM of 12 CPUs; each run ramps for 30 s, then answers for
+180 s, one answer per player about every 5 s. The latency is the bots' "answer accepted →
+leaderboard delivered" (C5), and the CPU is the mean over the answering window, in percent of one
+core per node.
 
-| Scenario | Connections | Msg/s | p50 ms | p95 ms | p99 ms | CPU % | RSS MB | Answer p99 ms | Missing samples | Completion | Below 500 ms (`slo_met`) | Bots' CPU % (procs) | Result files in `load/results/` |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| One hot quiz, 1 node | 1,000 | 5,942 | 116.5 | 195.9 | 205.4 | 31.2 | 121 | 41.7 | 0 | 1 | 100.00% (true) | 11.0 (4) | `20261002T070755572662Z-hot-1node-1000.json`, `20261002T070747368871Z-hot-1node-1000-nodes.json` |
-| One hot quiz, 1 node | 2,500 | 13,989 | 128.0 | 218.5 | 363.9 | 62.7 | 197 | 243.4 | 0 | 1 | 99.99% (true) | 16.7 (6) | `20261002T071712779035Z-hot-1node-2500.json`, `20261002T071702549732Z-hot-1node-2500-nodes.json` |
-| One hot quiz, 2 nodes | 5,000 | 29,463 | 119.9 | 199.4 | 408.6 | 72.8, 71.0 | 202, 208 | 345.6 | 0 | 1 | 99.94% (true) | 24.9 (10) | `20261002T072125990027Z-hot-2node-5000.json`, `20261002T072118251231Z-hot-2node-5000-nodes.json` |
-| 500 quizzes × 10 players, 2 nodes | 5,000 | 8,802 | 89.7 | 192.6 | 384.4 | 77.1, 75.0 | 242, 244 | 438.3 | 0 | 1 | 99.32% (true) | 9.9 (10) | `20261002T072542653053Z-many-2node-500x10.json`, `20261002T072534161765Z-many-2node-500x10-nodes.json` |
+| Scenario | Connections | p99 ms | Below 500 ms | CPU % per node |
+|---|---|---|---|---|
+| One hot quiz, 1 node | 1,000 | 205.4 | 100.00% | 31.2 |
+| One hot quiz, 1 node | 2,500 | 363.9 | 99.99% | 62.7 |
+| One hot quiz, 2 nodes | 5,000 | 408.6 | 99.94% | 72.8, 71.0 |
+| 500 quizzes × 10 players, 2 nodes | 5,000 | 384.4 | 99.32% | 77.1, 75.0 |
+
+[load/README.md](load/README.md#measured-runs) has the full table (p50 and p95, answer latency,
+memory, swarm load), the result files and how to repeat each run.
 
 **C5 is met**: the p99 stays below 500 ms in every run, 409 ms in the worst, and every run
 delivers at least 99 % of updates below 500 ms (99.32 % in the many-quizzes run, the least
 margin). The p50 of about 120 ms in one hot quiz is the tick: a new total waits on average half
 of the 200 ms tick. The tail grows with the node's CPU, so the margin at 2,500 sockets per node in one hot quiz is small.
+
+**What the estimate says** ([docs/capacity.md](docs/capacity.md)):
+
+- The cap is 10,000 sockets per process.
+- CPU sets the practical limit: 2,500 sockets measured, and about 3,500 estimated, per node in one
+  hot quiz.
+- Losing a node keeps the target only up to about 2,500 to 3,500 sockets in one hot quiz, not the
+  5,000 that two nodes held.
+- With the default Redis pool, a node serves at most 100 quizzes at once.
+- A healthy socket costs about 60 KiB of memory.
 
 ## 10. Scalability and trade-offs
 
