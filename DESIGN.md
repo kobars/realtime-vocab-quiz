@@ -138,14 +138,16 @@ flowchart LR
 
 **Containers.** nginx is the edge of the stack: it proxies `/` to the `web` container, which
 serves the built client from an nginx of its own, and `/api` and `/ws` to both API nodes. On a
-public host (`compose.prod.yaml`) Caddy terminates HTTPS in front of it, and nginx publishes no
-port of its own. The two mocks are not containers of their own: each API node loads them
+public VM (`compose.prod.yaml`) Caddy terminates HTTPS in front of it, and nginx publishes no
+port of its own; on Fly.io, Fly's proxy terminates HTTPS instead and one web Machine runs both
+the edge and the client (Deployment below). The two mocks are not containers of their own: each API node loads them
 in-process as adapters (dashed), and the identity mock keeps its sessions and tickets in Redis.
 
 ```mermaid
 flowchart LR
     browser["Browser<br/>Vue 3 SPA<br/>one WebSocket per tab"]
-    caddy["Caddy :80, :443<br/>HTTPS, public host only"]
+    caddy["Caddy :80, :443<br/>HTTPS, public VM only"]
+    fly["Fly proxy<br/>HTTPS, Fly.io only"]
     nginx["nginx :8080, the edge<br/>/ to web; /api and /ws to the API nodes"]
     web["web :8080<br/>nginx serving the built client"]
     subgraph api1["api-1 (FastAPI on uvicorn)"]
@@ -159,8 +161,10 @@ flowchart LR
         bank2["mock question bank adapter<br/>JSON files in the image"]
     end
     redis[("Redis 8<br/>primary database, AOF everysec<br/>Lua scripts, sorted sets, pub/sub<br/>session and ticket keys")]
-    browser -- "public host: HTTPS" --> caddy
+    browser -- "public VM: HTTPS" --> caddy
     caddy --> nginx
+    browser -- "Fly.io: HTTPS" --> fly
+    fly --> nginx
     browser -- "local: GET /, POST /api/sessions, /api/tickets<br/>GET /ws (quiz.v1)" --> nginx
     nginx -- "/" --> web
     nginx -- "/api, /ws" --> core1
@@ -227,7 +231,7 @@ composition root alone wires them is a convention, not a check.
 | Design system (`web/packages/clay/`) | The client's look, as the workspace package `@quiz/clay` | The design tokens (light and dark), the Tailwind theme and utilities, the self-hosted font, the components (button, card, badge, input, progress, toaster) and their gallery ([README](web/packages/clay/README.md)) | Imported by the web client through its entry points only |
 | nginx (`infra/nginx/`) | The edge: the stack's single entry | The routes (`/` to the web container; `/api`, its prefix dropped, and `/ws` to both API nodes), WebSocket upgrade headers, `X-Forwarded-For`, the request limits and an access log without the query string | Browser, or Caddy on a public host; the web container; both API nodes |
 | Web container (`web/Dockerfile`, `web/nginx.conf`) | Serves the built client | The Vite build's static files, their cache headers, the CSP and the other security headers (`web/security-headers.conf`) | nginx |
-| Caddy (`infra/caddy/`, `compose.prod.yaml`) | HTTPS on a public host only | The certificate for `DOMAIN` (Let's Encrypt, renewed), the redirect to HTTPS, HSTS, a fresh `X-Forwarded-For` and a log without the admin token, the host token or the ticket | Browser; nginx |
+| Caddy (`infra/caddy/`, `compose.prod.yaml`) | HTTPS on a public VM only (on Fly.io, Fly's proxy terminates it and the web app runs the edge config `infra/fly/nginx.conf.template`) | The certificate for `DOMAIN` (Let's Encrypt, renewed), the redirect to HTTPS, HSTS, a fresh `X-Forwarded-For` and a log without the admin token, the host token or the ticket | Browser; nginx |
 | API node (`quiz/main.py`) | One FastAPI process; two run side by side | `create_app()`: settings, the chosen adapters, start and stop hooks | nginx; Redis |
 | Domain (`quiz/domain/`) | The quiz rules with no I/O | Scoring, standings order and ranks, the player's session states, domain errors | Nothing |
 | Contracts (`quiz/contracts/`) | The wire protocol, defined once | Pydantic models of every message and the codec; the source of the generated JSON Schema and TypeScript types | Used by the use cases, the gateway and the client (generated types) |
@@ -441,7 +445,7 @@ column points to the full reasoning in [docs/DECISIONS.md](docs/DECISIONS.md).
 | Client | Vue 3, Vite and TypeScript; Pinia; Vue Router; Tailwind CSS 4 with shadcn-vue on reka-ui | React with Next.js; Svelte | A small single-page app with no server rendering; single-file components, a Pinia store and the protocol client test with Vitest in happy-dom; the generated message types keep client and server in step | The protocol client (backoff, `seq`, resync) is our code; shadcn-vue components are copied into the Clay design-system package (`web/packages/clay/`), so we maintain them | 009, 012 |
 | Edge | nginx: `/` to the web container (the static client), the `/api` and `/ws` routes to both API nodes | Traefik or HAProxy; uvicorn exposed directly | One origin for the page, the API and the socket, so the origin check stays strict; WebSocket upgrade headers and `X-Forwarded-For` for the per-IP cap; a plain, well-known config | Hand-written config whose read timeouts must exceed the 25 s heartbeat; one nginx is a single point of failure in this stack | 003 |
 | Metrics and logs | The Prometheus client (`prometheus-client`) serves `/metrics` on each API node; structlog writes JSON logs. No Prometheus server or Grafana container | OpenTelemetry SDK with a collector; a Prometheus and Grafana stack in Compose | One library and the text format any scraper reads; the stack stays small and the counters and histograms are there for any existing Prometheus to scrape (§13) | No stored history or dashboards in this build: you read `/metrics` directly, and the load runs report their own latency numbers | — |
-| Public edge and deploy | On a public host, Caddy in front of nginx (`compose.prod.yaml`); the API and web images built, scanned and attested by CI and published to GHCR; `scripts/deploy/install.sh` installs the stack on a VM, `scripts/deploy/droplet.sh` (`make do-deploy`) creates that VM with doctl, and `scripts/deploy/ops.sh` updates it with a rollback, backs it up and restores it | Terminating TLS in nginx with certbot; building on the host; Terraform for the VM | Caddy gets and renews the certificate on its own with a short config; the host pulls tested images by `IMAGE_TAG` instead of building them; one Droplet needs no state file | A second proxy hop and container on the public host; the images depend on GHCR; doctl creates one VM, with no plan or drift view | 011, 012 |
+| Public edge and deploy | On a public host, Caddy in front of nginx (`compose.prod.yaml`); the API and web images built, scanned and attested by CI and published to GHCR; `scripts/deploy/install.sh` installs the stack on a VM, `scripts/deploy/droplet.sh` (`make do-deploy`) creates that VM with doctl, and `scripts/deploy/ops.sh` updates it with a rollback, backs it up and restores it; on Fly.io, `scripts/deploy/fly.sh` (`make fly-launch`, `make fly-deploy`) runs the same images as three apps behind Fly's HTTPS proxy | Terminating TLS in nginx with certbot; building on the host; Terraform for the VM | Caddy gets and renews the certificate on its own with a short config; the host pulls tested images by `IMAGE_TAG` instead of building them; one Droplet needs no state file | A second proxy hop and container on the public host; the images depend on GHCR; doctl creates one VM, with no plan or drift view; on Fly.io, Redis on a volume is ours to run | 011, 012, 014 |
 | Packaging and running | Docker Compose: Redis, two API nodes, nginx and the built client | Kubernetes (kind or minikube); processes started by hand | One command brings the whole stack up the same way on any machine with Docker; the tests start their own Redis container on a free port | One host: no autoscaling, rolling deploy or node spread; production would need an orchestrator | — |
 | Build and test tooling | uv and pnpm with committed lock files; pytest, pytest-asyncio and Hypothesis; Vitest | pip or Poetry; npm; unittest | Fast, reproducible installs from the lock files in CI and locally; property tests for the rules that must hold for every input | Two toolchains (Python and Node) to install; the lock files are regenerated, never merged by hand | — |
 
