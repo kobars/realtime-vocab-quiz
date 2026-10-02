@@ -70,6 +70,8 @@ onBeforeUnmount(() => {
 // While a question is open the join re-asks for it (UI spec §4.2): no intro, so Continue never sends `cursor`.
 const intro = computed(() => store.quiz !== null && !store.quiz.cursorOpen && (store.phase === 'intro' || store.phase === 'join'))
 watch(intro, (shown) => shown && void nextTick(() => start.value?.$el.focus()), { immediate: true })
+// The join asked for the open question again, and no question is on screen until it arrives.
+const loading = computed(() => store.blocked === null && store.quiz?.cursorOpen === true && (store.phase === 'intro' || store.phase === 'join'))
 
 // The quiz time left on the intro, read again each second; display only.
 const now = ref(store.now())
@@ -143,6 +145,14 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
     >
       {{ rankSpoken }}
     </p>
+    <!-- The live region stays in the page, so the loading text is announced when it appears. -->
+    <p
+      class="sr-only"
+      role="status"
+      data-test="loading-status"
+    >
+      {{ loading ? strings.quiz.loading : '' }}
+    </p>
     <!-- A blocking card replaces the quiz column and the leaderboard, on every phase (UI spec §3.7). -->
     <ResultsView v-if="store.blocked === null && (store.phase === 'finished' || store.phase === 'results')" />
     <div
@@ -214,22 +224,21 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
             data-test="start"
             size="lg"
             :aria-disabled="!store.online"
-            :aria-busy="store.requested !== null"
+            :aria-busy="store.requested"
             class="aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
             @click="store.next()"
           >
             <LoaderCircle
-              v-if="store.requested !== null"
+              v-if="store.requested"
               class="motion-safe:animate-spin"
               aria-hidden="true"
             />
             {{ store.quiz.cursor < 0 ? strings.quiz.start : strings.quiz.continue }}
           </Button>
         </Card>
-        <!-- The join asked for the open question again; the card holds its place until the question arrives. -->
+        <!-- The card holds the question's place; the status region above announces it. -->
         <Card
-          v-else-if="store.quiz?.cursorOpen"
-          role="status"
+          v-else-if="loading"
           data-test="loading"
           class="flex-row items-center gap-3"
         >

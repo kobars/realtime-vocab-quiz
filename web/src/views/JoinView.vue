@@ -17,8 +17,11 @@ const route = useRoute()
 const router = useRouter()
 const store = useQuizStore()
 
-/** A join already under way when the screen opens: the router joins again after a reload of the quiz screen. */
-const resuming = store.waiting && store.quiz === null && !store.ended
+/**
+ * The router joined again after a reload of the quiz screen, before this lazily loaded screen opened: the join may
+ * already have ended, so the outcome watcher below runs at once.
+ */
+const resuming = store.takeResume()
 const quizId = ref(resuming ? (store.quizId ?? '') : '')
 const name = ref(readName())
 const idError = ref<string | null>(null)
@@ -137,13 +140,15 @@ const outcome = computed(() => {
 
 // The fields are read-only and links are ignored while joining, so `quizId` is still the ID that was sent.
 watch(outcome, (result, before) => {
-  // "Try again" or "Use this tab" on the blocking card joins again from this screen.
+  // "Try again" or "Use this tab" on the blocking card joins the last quiz again from this screen, even after an edit.
   if (before === 'blocked' && result === null) {
     joining.value = true
     joinBlocked.value = false
+    quizId.value = store.quizId ?? quizId.value
+    idError.value = null
   }
   if (!joining.value) return
-  if (result === 'ready') void router.push({ name: 'quiz', params: { quizId: quizId.value } })
+  if (result === 'ready') void router.push({ name: 'quiz', params: { quizId: store.quizId ?? quizId.value } })
   else if (result === 'not-found') {
     joining.value = false
     idError.value = strings.join.notFound
@@ -153,7 +158,7 @@ watch(outcome, (result, before) => {
     joining.value = false
     joinBlocked.value = true
   }
-})
+}, { immediate: true })
 
 // `/?quiz=VOCAB-42` (also the target of `/q/VOCAB-42`) fills the quiz ID and moves on to the name.
 watch(

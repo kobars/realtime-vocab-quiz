@@ -23,7 +23,7 @@ Switching the look later still means replacing the token values in one file (§7
 | Route | Screen |
 |---|---|
 | `/` | Landing and join (§3.1) |
-| `/quiz/:quizId` | Everything after the join: intro, question, feedback, finished and results, chosen by the client state (§4). Without a join to this quiz (a direct load, a refresh, another ID) it redirects to `/?quiz=:quizId`. A refresh of the quiz this tab last joined (kept in `sessionStorage` from its `joined` until "This quiz is open in another tab" or "This quiz is no longer available") also starts that join again with the same name: the join screen shows "Joining…" and `joined` returns to `/quiz/:quizId` |
+| `/quiz/:quizId` | Everything after the join: intro, question, feedback, finished and results, chosen by the client state (§4). Without a join to this quiz (a direct load, a refresh, another ID) it redirects to `/?quiz=:quizId`. A refresh of the quiz this tab last joined also starts that join again with the same name: the join screen shows "Joining…" and `joined` returns to `/quiz/:quizId`. The join is saved in `sessionStorage` only as the page unloads (not after "This quiz is open in another tab" or "This quiz is no longer available") and read once by the next page, so a duplicated tab, which copies `sessionStorage` while this page stays open, does not join and take the session |
 | `/q/:quizId` | Short share link; redirects to `/?quiz=:quizId`, the join screen with the quiz ID filled in |
 | any other path | "Page not found" with a link back to `/` |
 
@@ -68,7 +68,7 @@ Shown on `answer_result`.
 
 - The chosen choice is marked correct (success color, check icon, "Correct") or wrong (danger color, cross icon, "Wrong"), and the correct choice is always marked with the check icon and "Correct answer". Color is never the only signal: each state has an icon and a word.
 - `late: true` reads "Too late: 0 points"; otherwise "+133 points" counts up (§5.2), and the total score in the header counts up with it.
-- One primary button, "Next question" (or "See my result" after the last question), which has the focus; Enter or Space presses it. It sends `next {questionIndex: i + 1}` (or `N`), and is busy like "Start" until the reply. While the connection is `connecting`, `joining` or `reconnecting` it has `aria-disabled="true"`, sends nothing, and the note "Waiting for the connection…" shows under it.
+- One primary button, "Next question" (or "See my result" after the last question), which has the focus; Enter or Space presses it. It sends `next {questionIndex: i + 1}` (or `N`), and is busy like "Start" until the reply. While the socket is not usable (any connection state but `resyncing` and `live`) it has `aria-disabled="true"` and sends nothing; while the connection is `connecting`, `joining` or `reconnecting` the note "Waiting for the connection…" shows under it.
 - There is no auto-advance: the quiz is self-paced and the clock of the next question starts only when the player asks for it.
 
 ### 3.5 Live leaderboard
@@ -147,7 +147,7 @@ stateDiagram-v2
 
 A close that reconnects is 1006 (also a failed open), 1009, 1011, 1012 or 1013. The connected states are `joining`, `resyncing` and `live`: the socket is open in each, so every edge for a close, an error or silence starts from all three.
 
-`connecting`, `joining`, `resyncing` and `reconnecting` show the calm pill; `blocked` shows the card; `live` shows nothing. `resyncing` is a healthy socket: protocol §3 buffers only broadcasts until the `snapshot`, so requests (Start, Continue, an answer, Next, Skip, "Show all players") are sent at once, and the choices stay enabled. Requests made while the connection is `connecting`, `joining` or `reconnecting` are not queued, except one pending `answer`, which is resent with the same `submissionId` once the connection is `live` again (the server replays the same result): Start, Continue, Next question, "See my result" and Skip have `aria-disabled="true"` then and send nothing. `QUIZ_NOT_FOUND` from `joining` goes to `idle` only on the first join; on a rejoin after `joined` it goes to `blocked` like the edges from `resyncing` and `live`.
+`connecting`, `joining`, `resyncing` and `reconnecting` show the calm pill; `blocked` shows the card; `live` shows nothing. `resyncing` is a healthy socket: protocol §3 buffers only broadcasts until the `snapshot`, so requests (Start, Continue, an answer, Next, Skip, "Show all players") are sent at once, and the choices stay enabled. Requests made while the connection is `connecting`, `joining` or `reconnecting` are not queued, except one pending `answer`, which is resent with the same `submissionId` once the connection is `live` again (the server replays the same result): Start, Continue, Next question, "See my result" and Skip have `aria-disabled="true"` and send nothing in every state but `resyncing` and `live`. `QUIZ_NOT_FOUND` from `joining` goes to `idle` only on the first join; on a rejoin after `joined` it goes to `blocked` like the edges from `resyncing` and `live`.
 
 ### 4.2 Phase
 
@@ -171,7 +171,7 @@ stateDiagram-v2
     finished --> results: quiz_ended
 ```
 
-After a reconnect, the new `joined` keeps the current screen when it agrees with it: feedback stays on feedback when `cursor` is the answered question and it is closed, and finished stays finished. When `cursorOpen` is true the client sends `next {questionIndex: cursor}` and the re-served `question` resets the ring; until it arrives, a screen with no question yet shows a "Loading the question…" card (`role="status"`). Only a disagreement (for example `finished: true` while the client shows a question) moves the phase, by the arrows above.
+After a reconnect, the new `joined` keeps the current screen when it agrees with it: feedback stays on feedback when `cursor` is the answered question and it is closed, and finished stays finished. When `cursorOpen` is true the client sends `next {questionIndex: cursor}` and the re-served `question` resets the ring; until it arrives, a screen with no question yet shows a "Loading the question…" card, announced by a `role="status"` region that stays in the page. Only a disagreement (for example `finished: true` while the client shows a question) moves the phase, by the arrows above.
 
 ### 4.3 Every message, error and close code
 

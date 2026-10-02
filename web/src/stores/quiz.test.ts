@@ -218,52 +218,76 @@ it('another failed first join stops the client and returns to idle, so the playe
   expect([sockets.length, store.connection, store.lastError]).toEqual([1, 'idle', { code: 'INVALID_MESSAGE', message: '', requestType: 'join' }])
 })
 
+/** A reload of the page: it unloads (`pagehide`), then a new store starts with the tab's `sessionStorage`. */
+function reload() {
+  window.dispatchEvent(new Event('pagehide'))
+  setActivePinia(createPinia())
+  return useQuizStore()
+}
+
+/** Resumes `quizId` and lets the client open its socket; returns the number of sockets opened. */
+async function resumed(store: ReturnType<typeof useQuizStore>, quizId: string) {
+  const before = sockets.length
+  store.resume(quizId)
+  for (let i = 0; i < 3; i++) await wait(0)
+  return sockets.length - before
+}
+
 it('QUIZ_NOT_FOUND after the join blocks the screen as gone, stops the client and forgets the quiz for a reload', async () => {
   const { store, socket } = await playing()
-  expect(sessionStorage.getItem('quiz.joined')).toBe(JSON.stringify({ quizId: 'VOCAB-42', displayName: 'Ana' }))
   socket.receive(error('QUIZ_NOT_FOUND', 'next'))
   socket.onclose?.({ code: 1006 })
   await wait(30_000)
   expect([sockets.length, store.blocked, store.connection]).toEqual([1, 'gone', 'closed'])
-  expect(sessionStorage.getItem('quiz.joined')).toBe(null)
+  expect(await resumed(reload(), 'VOCAB-42')).toBe(0)
 })
 
 it('a reload joins the quiz this tab last joined again, with the same name; any other quiz is not joined', async () => {
   await playing()
-  setActivePinia(createPinia())
-  const store = useQuizStore()
-  expect(store.resume('OTHER-1')).toBe(false)
-  expect(sockets).toHaveLength(1)
-  expect(store.resume('VOCAB-42')).toBe(true)
-  for (let i = 0; i < 3; i++) await wait(0)
+  const store = reload()
+  expect(await resumed(store, 'OTHER-1')).toBe(0)
+  expect(await resumed(store, 'VOCAB-42')).toBe(1)
   sockets.at(-1)?.onopen?.()
   expect([store.connection, sockets.at(-1)?.sent.at(-1)]).toEqual(['connecting', { v: 1, type: 'join', quizId: 'VOCAB-42', displayName: 'Ana' }])
+  expect([store.takeResume(), store.takeResume()]).toEqual([true, false])
+})
+
+it('a duplicated tab, which copies sessionStorage while the page stays open, does not join and take the session', async () => {
+  await playing()
+  setActivePinia(createPinia())
+  expect(await resumed(useQuizStore(), 'VOCAB-42')).toBe(0)
+})
+
+it('the saved join is read once: a duplicate of a reloaded tab does not join either', async () => {
+  await playing()
+  reload()
+  setActivePinia(createPinia())
+  expect(await resumed(useQuizStore(), 'VOCAB-42')).toBe(0)
 })
 
 it('close 4001 forgets the quiz, so a reload never takes the session back from the other tab', async () => {
   const { socket } = await playing()
   socket.onclose?.({ code: 4001 })
-  setActivePinia(createPinia())
-  expect(useQuizStore().resume('VOCAB-42')).toBe(false)
+  expect(await resumed(reload(), 'VOCAB-42')).toBe(0)
 })
 
-it('next: sends nothing while the link is down; requested holds the index until the question, a final error or a new socket', async () => {
+it('next: sends nothing while the link is down; requested holds until the question, a final error or a new socket', async () => {
   const { store, socket } = await playing()
   const nexts = () => socket.sent.filter((message) => message.type === 'next')
   store.next()
-  expect(store.requested).toBe(0)
+  expect(store.requested).toBe(true)
   socket.receive(question(0))
-  expect(store.requested).toBe(null)
+  expect(store.requested).toBe(false)
   store.next()
   socket.receive(error('UNAVAILABLE', 'next'))
-  expect(store.requested).toBe(1)
+  expect(store.requested).toBe(true)
   socket.receive(error('INVALID_STATE', 'next'))
-  expect(store.requested).toBe(null)
+  expect(store.requested).toBe(false)
   store.next()
   socket.onclose?.({ code: 1006 })
-  expect([store.connection, store.requested]).toEqual(['reconnecting', null])
+  expect([store.connection, store.requested]).toEqual(['reconnecting', false])
   store.next()
-  expect([nexts().length, store.requested]).toEqual([3, null])
+  expect([nexts().length, store.requested]).toEqual([3, false])
 })
 
 it('a failed rejoin after joined keeps the client', async () => {

@@ -504,14 +504,17 @@ it('feedback: while reconnecting, Next question is locked, sends nothing and say
   expect(w.get('[data-test="feedback"]').text()).not.toContain('Waiting for the connection…')
 })
 
-it('a join on an open question shows a Loading the question status card until the question arrives', async () => {
+it('a join on an open question shows a Loading the question card, announced by a status region that stays in the page', async () => {
   useQuizStore().join('VOCAB-42', 'Ana')
   await receive(joined({ cursor: 3, cursorOpen: true }), snapshot(0))
   const w = await view()
-  expect(w.get('[data-test="loading"]').attributes('role')).toBe('status')
+  const status = () => w.get('[data-test="loading-status"]')
+  expect(status().attributes('role')).toBe('status')
+  expect(status().text()).toBe('Loading the question…')
   expect(w.get('[data-test="loading"]').text()).toBe('Loading the question…')
   await receive(question(3))
   expect(w.find('[data-test="loading"]').exists()).toBe(false)
+  expect(status().text()).toBe('')
   expect(w.get('h2').text()).toBe('bright')
 })
 

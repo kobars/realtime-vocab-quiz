@@ -87,12 +87,12 @@ function mark(i: number): { label: string; good: boolean } | null {
       ref="button"
       size="lg"
       :aria-disabled="!store.online"
-      :aria-busy="store.requested !== null"
+      :aria-busy="store.requested"
       class="self-start aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
       @click="store.next()"
     >
       <LoaderCircle
-        v-if="store.requested !== null"
+        v-if="store.requested"
         class="motion-safe:animate-spin"
         aria-hidden="true"
       />
