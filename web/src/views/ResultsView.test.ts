@@ -204,6 +204,18 @@ it('results: my row outside the top 10 is pinned under ranks 4 to 10, and "Show 
   expect([w.find('[data-test="pinned"]').exists(), document.activeElement?.textContent?.trim()]).toEqual([true, 'Show all players'])
 })
 
+it('results after a join to an ended quiz (no joined): my row in the top 10 is not pinned again, and outside it the pinned row has my name', async () => {
+  useQuizStore().join('VOCAB-42', 'Ana')
+  const final = [...top(3), me(4, 900), ...top(18, 5)]
+  await receive({ type: 'snapshot', atSeq: 9, status: 'ended', playerCount: 22, onlineCount: 0, entries: final, you: { rank: 4, score: 900 } },
+    { type: 'error', code: 'QUIZ_ENDED', message: 'ended', requestType: 'join' })
+  const w = render()
+  expect([w.findAll('li[data-user="u1"]').length, w.find('[data-test="pinned"]').exists()]).toEqual([1, false])
+  const later = [...top(14), me(15, 1_340), ...top(7, 16)]
+  await receive({ type: 'snapshot', atSeq: 10, status: 'ended', playerCount: 22, onlineCount: 0, entries: later, you: { rank: 15, score: 1_340 } })
+  expect(w.get('[data-test="pinned"]').text()).toMatch(/#15.*Ana \(you\).*1340/s)
+})
+
 it('results: "Show all players" is not offered when every player is in the top 10', async () => {
   await join(false)
   await receive({ type: 'quiz_ended', seq: 6, playerCount: 10, entries: [...top(3), me(4, 900), ...top(6, 5)], you: { rank: 4, score: 900 } })

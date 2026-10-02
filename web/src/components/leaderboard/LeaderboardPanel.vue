@@ -11,8 +11,6 @@ import PinnedRow from './PinnedRow.vue'
 
 const store = useQuizStore()
 const me = computed(() => store.quiz?.userId ?? null)
-// rank_update keeps myRank current above 200 players, where the frames carry only the top 50.
-const pinned = computed(() => store.myRank !== null && !store.entries.some((row) => row.userId === me.value && row.rank <= TOP_ROWS))
 /** "Show all players" is open: its pages replace the top 10, so no player is listed twice. */
 const all = ref(false)
 </script>
@@ -46,7 +44,7 @@ const all = ref(false)
         :my-user-id="me"
         :replacements="store.replacements"
       />
-      <PinnedRow v-if="pinned" />
+      <PinnedRow />
     </template>
     <!-- With every player in the top 10 there is nothing more to show. -->
     <AllPlayers

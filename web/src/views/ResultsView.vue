@@ -16,7 +16,6 @@ const heading = useTemplateRef<HTMLElement>('heading')
 const podium = computed(() => store.entries.filter((row) => row.rank <= 3))
 // An ended snapshot carries every player up to 200; the list stops at the top 10.
 const rest = computed(() => store.entries.filter((row) => row.rank > 3 && row.rank <= TOP_ROWS))
-const pinned = computed(() => store.myRank !== null && !store.entries.some((row) => row.userId === store.quiz?.userId && row.rank <= TOP_ROWS))
 /** "Show all players" is open: its pages replace the list under the podium, so no player is listed twice. */
 const all = ref(false)
 const focusHeading = () => void nextTick(() => heading.value?.focus())
@@ -86,7 +85,7 @@ const timeLeft = computed(() => {
           :entries="rest"
           :my-user-id="store.quiz?.userId"
         />
-        <PinnedRow v-if="pinned" />
+        <PinnedRow />
       </template>
       <AllPlayers
         v-if="all || store.playerCount > TOP_ROWS"
