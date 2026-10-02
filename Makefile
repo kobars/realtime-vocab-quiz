@@ -61,7 +61,7 @@ ui_run = mkdir -p web/node_modules && docker run --rm --platform linux/amd64 --i
 # The bots that make demo starts.
 BOTS ?= 20
 
-.PHONY: help build up down demo demo-stop new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget
+.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -80,6 +80,8 @@ demo-stop: ## Stop the demo bots; the stack keeps running
 	$(COMPOSE_NO_SECRETS) rm --stop --force bots
 new-quiz: ## Start a fresh 60-min quiz on the running stack; print its ID and player URL
 	docker compose --progress quiet run --rm -T seed
+demo-end: ## End quiz ID=<id> now as the mock host; its players see the final results
+	docker compose --progress quiet run --rm -T seed python /opt/seed.py --end '$(ID)'
 smoke-full: ## Smoke-test the running full stack through nginx, stopping one API node
 	uv run --project api --locked python load/smoke_full.py
 dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)

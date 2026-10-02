@@ -33,8 +33,9 @@ uv run --project api pre-commit install    # run the hooks on staged files at ea
 |---|---|
 | `make dev-api` | One API node on `127.0.0.1:8001` (memory store) that allows the client dev server's origins; `DEV_API_PORT` and `DEV_ORIGINS` change them. `pnpm -C web dev` serves the client on :5173 and proxies `/api/*` (prefix dropped) and `/ws` to it, or to `QUIZ_API_URL` |
 | `make up`, `make down` | `make up` starts the development Redis on `127.0.0.1:6381`; `make down` stops it and the full stack, and keeps their data |
-| `make demo`, `make demo-stop` | `make demo` builds the images, starts the full stack, a fresh 60-minute quiz and `BOTS` bots (default 20) on it, and prints the quiz ID and player URL; it writes `.env` with new secrets when there is none. `make demo-stop` removes the bots |
-| `make new-quiz` | Start a fresh 60-minute quiz on the running stack and print its ID and player URL |
+| `make demo`, `make demo-stop` | `make demo` builds the images, starts the full stack, a fresh 60-minute quiz and `BOTS` bots (default 20) on it, and prints the quiz ID, the player URL and the command that ends the quiz; it writes `.env` with new secrets when there is none, and can run again on the same stack. `make demo-stop` removes the bots |
+| `make new-quiz` | Start a fresh 60-minute quiz on the running stack and print its ID, its player URL and the command that ends it. Each run gets a new ID (`VOCAB-42-7K3Q`) that plays the seed quiz `VOCAB-42` (`bankQuizId` of `POST /admin/quizzes`), so it never collides with an earlier run or with the seed quiz IDs that the system tests and browser specs create |
+| `make demo-end ID=<id>` | End that quiz now as the mock host (`POST /admin/quizzes/{id}/end`): every player sees the final results |
 | `make smoke-full` | Smoke-test the running full stack through nginx: health checks on each node, one answer, then stop the node that holds the socket and check the player comes back on the other node (`load/smoke_full.py`) |
 | `make load` | The bot swarm as a container on the stack network against the running full stack, with its options in `LOAD_ARGS` ([load/README.md](load/README.md) explains them and holds the measured runs) |
 | `make test` | The server unit, property and contract tests and the client tests, without Redis |

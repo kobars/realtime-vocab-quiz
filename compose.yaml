@@ -114,7 +114,8 @@ services:
     volumes:
       - ./load/results:/app/results
 
-  # make new-quiz and make demo: a fresh 60-minute run of a bank quiz, through nginx.
+  # make new-quiz and make demo: a fresh 60-minute run of a bank quiz, through nginx; make demo-end
+  # ends a quiz as the mock host.
   seed:
     <<: *hardened
     profiles: [demo]
