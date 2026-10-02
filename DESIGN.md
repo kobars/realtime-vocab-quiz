@@ -1,40 +1,26 @@
 # System design: real-time vocabulary quiz
 
-<!-- AI-ASSISTED-BEGIN: contents list and reading map drafted with Claude Code from the headings below. -->
+<!-- AI-ASSISTED-BEGIN: reading map drafted with Claude Code from the headings below. -->
 
-**Contents.**
+## Reading map
 
-1. [Summary](#1-summary)
-2. [Assumptions and non-goals](#2-assumptions-and-non-goals)
-3. [Architecture](#3-architecture)
-4. [Components](#4-components), with [Maintainability](#maintainability)
-5. [Data flow](#5-data-flow)
-6. [Technologies and justification](#6-technologies-and-justification)
-7. [Consistency contract](#7-consistency-contract)
-8. [Non-functional requirements](#8-non-functional-requirements)
-9. [Capacity estimate](#9-capacity-estimate)
-10. [Scalability and trade-offs](#10-scalability-and-trade-offs)
-11. [Reliability and failure modes](#11-reliability-and-failure-modes)
-12. [Security](#12-security)
-13. [Observability](#13-observability)
-14. [Implemented and mocked](#14-implemented-and-mocked)
-15. [AI Collaboration in Design](#15-ai-collaboration-in-design)
-16. [ADR index](#16-adr-index)
+Short on time: read §1, then §3 to §6 for the design, §9 for the measured results and §15 for how AI was used.
 
-**Where to find.**
-
-| Topic | Sections |
+| Topic | Where |
 |---|---|
-| Architecture | [§3](#3-architecture): context, containers, walk-through and deployment |
+| Architecture | [§3](#3-architecture): [context](#context), [containers](#containers), [walk-through](#walk-through) and [deployment](#deployment) |
 | Components | [§4](#4-components): every component, its role and what it talks to |
-| Data flow | [§5](#5-data-flow): join, answer to leaderboard, reconnect, hosting and quiz end |
-| Technologies | [§6](#6-technologies-and-justification): each choice against its alternative, with the ADRs of [§16](#16-adr-index) |
-| AI collaboration in the design | [§15](#15-ai-collaboration-in-design) |
-| Scalability | [§10](#10-scalability-and-trade-offs), sized by [§9](#9-capacity-estimate) |
-| Performance | The targets of [§2](#2-assumptions-and-non-goals) and [§8](#8-non-functional-requirements), measured in [§9](#9-capacity-estimate) |
+| Data flow | [§5](#5-data-flow): [join](#join), [answer → leaderboard](#answer--leaderboard), reconnect, hosting and quiz end |
+| Technologies | [§6](#6-technologies-and-justification): each choice against its alternative, with its ADR |
+| AI collaboration | [§15](#15-ai-collaboration-in-design) |
+| Implemented and mocked | [§14](#14-implemented-and-mocked) |
+| Scalability | [§10](#10-scalability-and-trade-offs), sized by [docs/capacity.md](docs/capacity.md) |
+| Performance | The targets of [§8](#8-non-functional-requirements), measured in [§9](#measured-results) |
 | Reliability | [§11](#11-reliability-and-failure-modes), on the guarantees of [§7](#7-consistency-contract) |
 | Maintainability | [Maintainability](#maintainability) in §4 |
 | Observability | [§13](#13-observability) |
+| Security | [§12](#12-security) |
+| Decisions | [§16](#16-adr-index) |
 
 <!-- AI-ASSISTED-END -->
 
@@ -86,14 +72,7 @@ Host-led stays future work.
 | Clients | Current browsers with WebSocket support; phones and desktops |
 | Store | One Redis 8 (Valkey 8 also works) with AOF `everysec`; a crash can lose about 1 s of answers (§11) |
 
-**Targets.** There is no load number in the requirements; these targets are ours. Two nodes are
-our choice: they make the scale-out claims of §10 real.
-
-| Target | Value | How it is measured |
-|---|---|---|
-| Latency (C5) | p99 below 500 ms from "answer accepted" to "leaderboard delivered"; frames come from a 200 ms coalescing tick, so the tick spends up to 200 ms of it | The bot swarm (`load/bots.py`) times each pair on the client side: the interval starts when the client receives the `answer_result` with points (the client's proof that the server accepted the answer) and ends at the first frame that shows the new total. A missing or timed-out sample, of the answer or of its frame, counts as a miss, and a run that misses the target exits with status 1; the measured runs go in §9 |
-| Throughput | Thousands of concurrent sockets over **two API nodes** behind nginx (a cap of 10,000 per process), and 1,000 answers per second in one quiz of 5,000 players (§9) | Bot swarm runs on one and on two nodes: sockets, messages per second, CPU and memory (§9) |
-| Availability | The service keeps running when one API node stops: its clients reconnect to the other node and resync. Retries follow a full-jitter backoff (protocol §7): a client that had stayed joined for 10 s makes its first retry within 250 ms, and each later retry waits at most 10 s (5 s more after an overload close, 1013); a socket that dies silently is detected after 50 s with no inbound message, then the same retries follow. Redis is the single point of failure: while it is down, requests get `UNAVAILABLE` | `make smoke-full` (`load/smoke_full.py`) stops the node that holds a protocol client's socket and requires the client back through nginx, resynced, within 10 s; that client retries every 250 ms on its own, so the browser client's backoff bounds are checked by `web/src/protocol/backoff.test.ts`; `/readyz` on each node (503 while Redis is unreachable); the failure table of §11 |
+The latency, throughput and availability targets are in [§8](#8-non-functional-requirements).
 
 **How the design meets each acceptance criterion.**
 
@@ -114,7 +93,9 @@ translations.
 
 ## 3. Architecture
 
-**Context.** The quiz service is the one component built for real. The identity provider and the
+### Context
+
+The quiz service is the one component built for real. The identity provider and the
 content service are mocks behind ports, so a real one can replace each without touching the
 core; both are dashed. A quiz host starts a quiz and ends it early from the host page, which
 calls the self-service hosting API with a host token; the make targets use the token-gated mock
@@ -138,7 +119,9 @@ flowchart LR
     class idp,content mock
 ```
 
-**Containers.** nginx is the edge of the stack: it proxies `/` to the `web` container, which
+### Containers
+
+nginx is the edge of the stack: it proxies `/` to the `web` container, which
 serves the built client from an nginx of its own, and `/api` and `/ws` to both API nodes. On a
 public VM (`compose.prod.yaml`) Caddy terminates HTTPS in front of it, and nginx publishes no
 port of its own; on Fly.io, Fly's proxy terminates HTTPS instead and one web Machine runs both
@@ -183,7 +166,9 @@ flowchart LR
     class ids1,bank1,ids2,bank2 mock
 ```
 
-**Walk-through.** The client gets a mock session once (`POST /sessions`) and a single-use,
+### Walk-through
+
+The client gets a mock session once (`POST /sessions`) and a single-use,
 30 s ticket before every connect (`POST /tickets`); the `/api` prefix is dropped before the
 API. It opens
 `GET /ws?ticket=…` with the subprotocol `quiz.v1`; nginx sends the socket to either node, and
@@ -199,7 +184,9 @@ own sockets. Redis is the only database: the mock identity keeps its sessions an
 there, so a ticket made on one node works on the other. The mock question bank is read from
 JSON files when a node starts.
 
-**Deployment.** One host runs the whole stack with Docker Compose. On a public host
+### Deployment
+
+One host runs the whole stack with Docker Compose. On a public host
 (`compose.prod.yaml`), Caddy terminates HTTPS in front of nginx. CI builds the API and web
 images for amd64 and arm64, scans them and publishes them to GitHub Container Registry
 (`ghcr.io/kobars/realtime-vocab-quiz-api` and `-web`, tagged `main`, the commit's short SHA and
@@ -283,63 +270,6 @@ Server paths are under `api/src/quiz/`; client paths under `web/src/`, and the d
 `adapters/redis/lua/` and runs through `adapters/redis/store.py` (`RedisStore`), which passes
 no time and no points: each script reads Redis `TIME` itself.
 
-**Join.**
-
-1. The client (`protocol/identity.ts`) creates a mock session once per tab
-   (`POST /api/sessions`, kept in `sessionStorage`) and asks for a single-use, 30 s ticket
-   before every connect (`POST /api/tickets`). The mock identity
-   (`adapters/mock_auth/redis_store.py`) keeps both in Redis, so a ticket made on one node works
-   on the other.
-2. `protocol/client.ts` opens `GET /ws?ticket=…` with the subprotocol `quiz.v1`; nginx sends it
-   to either node.
-3. `adapters/ws/endpoint.py` checks, before the upgrade: the `Origin` (403), the subprotocol
-   (400), the ticket, redeemed once (401; 503 when the ticket store is unreachable), then the
-   connection caps (503 per process, 429 per client address). The identity comes from the
-   ticket only.
-4. The client sends `join {quizId, displayName}`. `adapters/ws/session.py` checks the frame
-   size, the token bucket and the strict parser (`contracts/codec.py`), then calls
-   `QuizService` (`app/service.py`).
-5. `join.lua` checks the quiz and its deadline, creates the player with score 0 on the
-   first join, writes the presence entry with this connection's ID and sets the quiz's `dirty`
-   flag. It never increments `seq` and publishes no broadcast. If the user already held
-   another connection, the script returns that connection's ID and publishes a
-   `session_replaced` message on the quiz's `control` channel.
-6. The node replies `joined {atSeq, cursor, score, …}` and records the socket in its registry
-   (`adapters/ws/registry.py`). The user's older socket gets `SESSION_REPLACED` and close 4001:
-   at once on this node, or through the `control` message on the node that holds it (and the
-   scripts refuse its writes, since they compare the connection ID). The quiz's first socket on
-   a node starts that node's loop for the quiz (`fanout/tick.py`): it subscribes to
-   `quiz:{<quizId>}:events` and `quiz:{<quizId>}:control` and ticks.
-7. The client sends one `resync {lastSeq}` and gets a `snapshot`: the standings at one `seq`
-   from `read_standings.lua`, and its own row read fresh.
-8. The next tick's `leaderboard` frame carries the new player count to everyone.
-
-**Answer → leaderboard.**
-
-1. The client sends `next {questionIndex}`. `serve_question.lua` stores the serve time from
-   `TIME` once (a retry gets the same question and the same deadline) and returns the question
-   ID and the time left; the use case adds the prompt and the choices from the mock question
-   bank (`adapters/mock_questions/bank.py`) and replies `question`.
-2. The client sends `answer {questionIndex, choiceIndex, submissionId}`. `score_answer.lua`, in
-   one atomic step: a stored `submissionId` returns its stored result (`INVALID_MESSAGE` if it
-   was sent for another question); then the deadline and the player's connection are checked;
-   a question not served yet is `QUESTION_NOT_OPEN` and an answered one `ALREADY_ANSWERED`; then
-   it scores with `lib/points.lua` on the time since the serve (0 points when wrong or late) and
-   records the answer. When the answer scored, the same script adds the points to the total,
-   writes the packed sorted-set score and sets `dirty`.
-3. The node replies `answer_result` with the points, the new total and the correct choice.
-4. Every node that holds a socket of the quiz calls `publish_leaderboard.lua` every 200 ms. It
-   returns `clean` when `dirty` is unset and `busy` while another node's tick token lives;
-   otherwise it takes the token (`SET NX PX 200`), clears `dirty`, increments `seq`, builds the
-   frame (every player up to 200, else the top 50 and the ranks of the scorers outside them)
-   and publishes it once on `quiz:{<quizId>}:events`.
-5. On each node, `fanout/broadcast.py` (`Relay`) receives the frame, queues the same bytes on
-   every local socket of the quiz, and sends `rank_update` to each local scorer outside the top
-   50. Each socket's one writer (`adapters/ws/sender.py`) skips and conflates leaderboards for
-   a slow client.
-6. The client's `protocol/seq.ts` applies a frame whose `seq` is the last one plus 1, and the
-   Pinia store (`stores/quiz.ts`) redraws the leaderboard.
-
 ```mermaid
 sequenceDiagram
     autonumber
@@ -372,7 +302,64 @@ sequenceDiagram
     R-->>N1: busy: another node holds the token
 ```
 
-**Reconnect → resync.**
+### Join
+
+1. The client (`protocol/identity.ts`) creates a mock session once per tab
+   (`POST /api/sessions`, kept in `sessionStorage`) and asks for a single-use, 30 s ticket
+   before every connect (`POST /api/tickets`). The mock identity
+   (`adapters/mock_auth/redis_store.py`) keeps both in Redis, so a ticket made on one node works
+   on the other.
+2. `protocol/client.ts` opens `GET /ws?ticket=…` with the subprotocol `quiz.v1`; nginx sends it
+   to either node.
+3. `adapters/ws/endpoint.py` checks, before the upgrade: the `Origin` (403), the subprotocol
+   (400), the ticket, redeemed once (401; 503 when the ticket store is unreachable), then the
+   connection caps (503 per process, 429 per client address). The identity comes from the
+   ticket only.
+4. The client sends `join {quizId, displayName}`. `adapters/ws/session.py` checks the frame
+   size, the token bucket and the strict parser (`contracts/codec.py`), then calls
+   `QuizService` (`app/service.py`).
+5. `join.lua` checks the quiz and its deadline, creates the player with score 0 on the
+   first join, writes the presence entry with this connection's ID and sets the quiz's `dirty`
+   flag. It never increments `seq` and publishes no broadcast. If the user already held
+   another connection, the script returns that connection's ID and publishes a
+   `session_replaced` message on the quiz's `control` channel.
+6. The node replies `joined {atSeq, cursor, score, …}` and records the socket in its registry
+   (`adapters/ws/registry.py`). The user's older socket gets `SESSION_REPLACED` and close 4001:
+   at once on this node, or through the `control` message on the node that holds it (and the
+   scripts refuse its writes, since they compare the connection ID). The quiz's first socket on
+   a node starts that node's loop for the quiz (`fanout/tick.py`): it subscribes to
+   `quiz:{<quizId>}:events` and `quiz:{<quizId>}:control` and ticks.
+7. The client sends one `resync {lastSeq}` and gets a `snapshot`: the standings at one `seq`
+   from `read_standings.lua`, and its own row read fresh.
+8. The next tick's `leaderboard` frame carries the new player count to everyone.
+
+### Answer → leaderboard
+
+1. The client sends `next {questionIndex}`. `serve_question.lua` stores the serve time from
+   `TIME` once (a retry gets the same question and the same deadline) and returns the question
+   ID and the time left; the use case adds the prompt and the choices from the mock question
+   bank (`adapters/mock_questions/bank.py`) and replies `question`.
+2. The client sends `answer {questionIndex, choiceIndex, submissionId}`. `score_answer.lua`, in
+   one atomic step: a stored `submissionId` returns its stored result (`INVALID_MESSAGE` if it
+   was sent for another question); then the deadline and the player's connection are checked;
+   a question not served yet is `QUESTION_NOT_OPEN` and an answered one `ALREADY_ANSWERED`; then
+   it scores with `lib/points.lua` on the time since the serve (0 points when wrong or late) and
+   records the answer. When the answer scored, the same script adds the points to the total,
+   writes the packed sorted-set score and sets `dirty`.
+3. The node replies `answer_result` with the points, the new total and the correct choice.
+4. Every node that holds a socket of the quiz calls `publish_leaderboard.lua` every 200 ms. It
+   returns `clean` when `dirty` is unset and `busy` while another node's tick token lives;
+   otherwise it takes the token (`SET NX PX 200`), clears `dirty`, increments `seq`, builds the
+   frame (every player up to 200, else the top 50 and the ranks of the scorers outside them)
+   and publishes it once on `quiz:{<quizId>}:events`.
+5. On each node, `fanout/broadcast.py` (`Relay`) receives the frame, queues the same bytes on
+   every local socket of the quiz, and sends `rank_update` to each local scorer outside the top
+   50. Each socket's one writer (`adapters/ws/sender.py`) skips and conflates leaderboards for
+   a slow client.
+6. The client's `protocol/seq.ts` applies a frame whose `seq` is the last one plus 1, and the
+   Pinia store (`stores/quiz.ts`) redraws the leaderboard.
+
+### Reconnect → resync
 
 1. A socket drops (close 1006), or a side stops hearing the other: the client closes and
    reconnects after 50 s with no inbound message, and the server closes a socket that missed the
@@ -395,7 +382,9 @@ client wait 0–250 ms and resync; a lower `seq` (the store restarted) makes it 
 a `pong` whose `seq` is above the last one applied makes it check again after 1 s and resync if
 no frame arrived, which finds a lost last frame.
 
-**Hosting a quiz.** Any visitor can start a quiz without the admin token (`PUBLIC_HOSTING`,
+### Hosting a quiz
+
+Any visitor can start a quiz without the admin token (`PUBLIC_HOSTING`,
 on by default).
 
 1. The host page (`/host`, [ui.md §3.8](docs/spec/ui.md#38-host-a-quiz)) lists the bank
@@ -412,7 +401,7 @@ on by default).
    token's hash with the stored one in constant time (403 on a mismatch), then runs the host
    end below, which takes the run out of `quiz:hosted` (the admin end does too).
 
-**Quiz end.**
+### Quiz end
 
 1. At the deadline there is no timer: once `TIME` passes it, `publish_leaderboard.lua` returns
    `ended`, and the first write refused at the deadline (a join, a serve or an answer gets
@@ -482,140 +471,27 @@ serves a player, so any node can run any write, and the only ordering that matte
 
 ## 8. Non-functional requirements
 
-The latency, throughput and availability targets, each with how it is measured, are in
-[§2](#2-assumptions-and-non-goals) ("Targets"); the measured numbers go in §9, and §11 has the
-failure modes. Durability: Redis AOF `everysec`, so a Redis crash can lose about the last
+**Targets.** There is no load number in the requirements; these targets are ours. Two nodes are
+our choice: they make the scale-out claims of §10 real.
+
+| Target | Value | How it is measured |
+|---|---|---|
+| Latency (C5) | p99 below 500 ms from "answer accepted" to "leaderboard delivered"; frames come from a 200 ms coalescing tick, so the tick spends up to 200 ms of it | The bot swarm (`load/bots.py`) times each pair on the client side: the interval starts when the client receives the `answer_result` with points (the client's proof that the server accepted the answer) and ends at the first frame that shows the new total. A missing or timed-out sample, of the answer or of its frame, counts as a miss, and a run that misses the target exits with status 1; the measured runs go in §9 |
+| Throughput | Thousands of concurrent sockets over **two API nodes** behind nginx (a cap of 10,000 per process), and 1,000 answers per second in one quiz of 5,000 players (§9) | Bot swarm runs on one and on two nodes: sockets, messages per second, CPU and memory (§9) |
+| Availability | The service keeps running when one API node stops: its clients reconnect to the other node and resync. Retries follow a full-jitter backoff (protocol §7): a client that had stayed joined for 10 s makes its first retry within 250 ms, and each later retry waits at most 10 s (5 s more after an overload close, 1013); a socket that dies silently is detected after 50 s with no inbound message, then the same retries follow. Redis is the single point of failure: while it is down, requests get `UNAVAILABLE` | `make smoke-full` (`load/smoke_full.py`) stops the node that holds a protocol client's socket and requires the client back through nginx, resynced, within 10 s; that client retries every 250 ms on its own, so the browser client's backoff bounds are checked by `web/src/protocol/backoff.test.ts`; `/readyz` on each node (503 while Redis is unreachable); the failure table of §11 |
+
+Durability: Redis AOF `everysec`, so a Redis crash can lose about the last
 second of answers (§11).
 
 <!-- AI-ASSISTED-END -->
 
-## 9. Capacity estimate
+## 9. Performance and capacity
 
 <!-- AI-ASSISTED-BEGIN: sections 9 and 10 drafted with Claude Code from api/src/quiz/config.py, the contracts, docs/spec/ and docs/DECISIONS.md; the frame sizes were computed by encoding sample frames in compact JSON; the measured numbers are copied from the load runs in load/results/. -->
 
-Every number below is either an input with its source, a value computed from those inputs (the
-formula is given), or a measurement from a load-run file. The measured table is the last part.
+The sizing behind these runs (assumptions, frame sizes, buffer bounds, Redis load) is in [docs/capacity.md](docs/capacity.md).
 
-**Assumptions.**
-
-| # | Assumption | Value | Source |
-|---|---|---|---|
-| A1 | Quiz shape | 10 questions, 4 choices, `T` = 20 s each | ADR-002; [domain spec](docs/spec/domain.md) |
-| A2 | Coalescing tick | a poll every 200 ms by each node that holds a socket of the quiz; a frame only when the quiz is dirty | `tick_ms` in `api/src/quiz/config.py` |
-| A3 | Rows per `leaderboard` frame | every player up to 200 (`FULL_LIST_MAX`), else the top 50 (`TOP_N`) | `api/src/quiz/contracts/messages.py` |
-| A4 | Socket caps | 10,000 per process (`MAX_CONNECTIONS`), 50 per client address | `api/src/quiz/config.py` |
-| A5 | Send buffer per socket | soft 64 KiB (conflate leaderboards), hard 256 KiB (close 1013) | `api/src/quiz/config.py` |
-| A6 | Inbound limits | 16 KiB per message, checked before parsing; 64 KiB per transport frame; 20 msg/s, burst 40 | `api/src/quiz/contracts/codec.py`, `api/src/quiz/adapters/ws/heartbeat.py`, `api/src/quiz/config.py` |
-| A7 | Messages per connection per tick | at most 2: one `leaderboard` and, above 200 players, one `rank_update` | ADR-004 |
-| A8 | `userId` length | 18 characters (`u_` and 16 base64url characters) | `api/src/quiz/adapters/mock_auth/tokens.py` |
-| A9 | `displayName` length | 12 characters typical (our assumption), 32 characters at most (not bytes) | our assumption; `api/src/quiz/contracts/messages.py` |
-| A10 | Highest total | 1,500 (10 × 150), so a score has at most 4 digits | the scoring rule (ADR-002) |
-| A11 | Player pace | one answer per player every 5 s (reading plus thinking) | our assumption; the load bot's think time `think_s` (`load/player.py`) |
-| A12 | API nodes | 2, each one Python process on one event loop | ADR-001; ADR-003 |
-| A13 | Quiz subscriptions per node | active quizzes per node <= `REDIS_MAX_CONNECTIONS` (default 100): each quiz a node serves holds one connection of the node's subscription pool, which has that size | `connect_redis` in `api/src/quiz/main.py`; `redis_max_connections` in `api/src/quiz/config.py` |
-
-**Leaderboard frame size** (computed). One row is
-`{"rank":123,"userId":"u_…","displayName":"…","score":1234}`: 84 bytes with A8, a 12-character
-name and A10. A frame is about `100 + 85 × rows` bytes. Encoding sample frames gives:
-
-| Frame | Rows | Bytes, 12-character names | Bytes, 32 ASCII characters |
-|---|---|---|---|
-| 10 players | 10 | 932 | 1,132 |
-| 200 players (largest full frame) | 200 | 16,995 | 20,995 |
-| Above 200 players (top 50) | 50 | 4,296 | 5,296 |
-
-The cap of A9 counts characters, not bytes, and allows any text: the JSON writes non-ASCII
-characters as raw UTF-8 (up to 4 bytes each) and control characters as 6-byte `\u00XX` escapes.
-So a 200-row frame of 32-character names is at most about 40 KB with 4-byte characters
-(`20,995 + 200 × 32 × 3`) and about 53 KB with control characters (`20,995 + 200 × 32 × 5`).
-The rest of this section uses the 12-character column.
-
-**Per-connection memory** (computed, a partial estimate). A healthy socket's send queue is
-empty between ticks; one queued 200-row frame is 17 KB. The soft limit (A5) holds
-`64 KiB / 16,995 B` ≈ 3.9 full frames, so a client about 0.8 s behind at 5 frames/s gets
-conflated frames. A slow or abusive socket can fill these buffers in the process:
-
-| Buffer | Bound | Source |
-|---|---|---|
-| Send queue (`Sender.buffered`, the frame in flight included) | 256 KiB, then close 1013 | A5 |
-| Transport write buffer | 64 KiB high-water mark, plus the one frame that crossed it; WebSocket pongs to client pings skip that wait, so a client that floods pings and reads nothing grows it further | the event loop's default; uvicorn waits for `resume_writing` before the next message |
-| Inbound messages parsed from one read | 250 KiB: uvloop reads up to 256,000 bytes at a time, and uvicorn queues every complete frame of that read before reading pauses | uvloop's read size (uvicorn uses uvloop when it is installed); uvicorn's WebSocket protocol |
-| Partial inbound frame in the parser | 64 KiB (A6) | A6 |
-
-Their sum is about 634 KiB per socket plus one outbound frame, or 10,000 × 634 KiB ≈ 6.0 GiB
-at the 10,000-socket cap if every client is slow and floods at once. Python's object overhead,
-the decoded copies of queued messages and the kernel's socket buffers come on top, so this is
-not an upper bound. The steady-state memory per socket (RSS divided by sockets) comes from the
-measured runs below.
-
-**Connections per node** (computed). The cap is 10,000 sockets per process (A4); two nodes
-hold 20,000. In one hot quiz above 200 players, each socket gets at most 5 frames per second
-(A2), so 10,000 sockets need 50,000 frame writes per second, which is
-`50,000 × 4,296 B` ≈ 215 MB/s of egress per node, plus at most one `rank_update` per socket
-per tick (A7). All of it runs on one core (A12), so CPU or the network is likely to set the
-practical number below the cap: 215 MB/s is about 1.7 Gbit/s before framing, above a 1 Gbit/s
-link. Measured (the table below): one node held 2,500 sockets of one hot quiz within C5 (p99
-364 ms) at 63 % of its core on average, peaking at 89 %, and each node of the two-node run held
-about 2,500 at 71 to 73 %, peaking just above a full core (p99 409 ms). So the practical number per node in one hot quiz is 2,500
-measured, and by extrapolating the CPU about 3,500 at most (an estimate, not measured), against
-the computed cap of 10,000: CPU, not memory, sets it. Across many quizzes the first ceiling is
-A13: with the default pool a node serves at most 100 quizzes at once, so the 500-quiz run below
-set `REDIS_MAX_CONNECTIONS` to 1,000 (`load/compose.bank.yaml`). Past that limit a node refuses
-a `join` to one more quiz with `UNAVAILABLE` and close 1013, and counts it in
-`feed_subscribe_failures_total{reason="limit"}`; the client reconnects after 5 s plus its
-backoff, through the load balancer, which may reach the other node. A join holds its
-subscription while its store write runs, so concurrent joins never pass the limit together. The
-quizzes the node already follows are not affected, and a join to an ended quiz still gets the
-final standings, which need no subscription. It never accepts a player that it could not send
-live updates to.
-
-**When one node is lost** (computed from the measured numbers). The availability target (§2)
-moves every client of a stopped node to the other one. One hot quiz keeps C5 through that only
-while all its sockets fit on one node: about 2,500 measured, about 3,500 estimated. The 5,000
-sockets that the two nodes held within C5 do not: after one node stops, the other would serve
-twice its measured load and is expected to miss C5 until enough players leave. So the
-population that survives losing a node is about 2,500 to 3,500 sockets in one hot quiz, not the
-5,000 of the two-node run; no load run has stopped a node under load yet.
-
-**Messages per question** (computed). For a quiz of `N` players, per player and question:
-
-- in: 2 (`next`, then `answer`); out: 2 unicasts (`question`, `answer_result`);
-- broadcast: at most 5 `leaderboard` frames per second per quiz (A2), so at most
-  `T / 200 ms` = 100 frames in one 20 s question window, each sent to all `N` sockets: at most
-  `100 × N` frame writes per quiz per question window;
-- above 200 players, at most one `rank_update` per socket per tick (A7).
-
-The tick publishes only after a change: an answer that scores, a join or a leave sets `dirty`
-(`score_answer.lua`, `join.lua`, `leave.lua`). Counting answers only, with A11 they arrive at
-`N / 5` per second; if a share `p` of them scores, a 200 ms tick sees no change with probability `e^(−pN/25)` (Poisson arrivals): 1.8 % at
-`N` = 100 when every answer scores, 37 % when a quarter does. From about `100 / p` players on,
-nearly every tick publishes.
-
-| Players in one quiz | Frame | Frame writes per second (`5 × N`) | Egress per second (`5 × N × bytes`) | Answers per second (`N / 5`) |
-|---|---|---|---|---|
-| 10 | full, 932 B | 50 (if every tick has a change) | 47 KB | 2 |
-| 200 | full, 16,995 B | 1,000 | 17.0 MB | 40 |
-| 1,000 | top 50, 4,296 B | 5,000 | 21.5 MB | 200 |
-| 5,000 | top 50, 4,296 B | 25,000 | 107.4 MB | 1,000 |
-
-Redis load per second (computed, a subtotal of the main calls):
-
-- `N / 5` scoring scripts and `N / 5` serving scripts for `next`;
-- 5 tick-script calls per active quiz for every node that holds a socket of the quiz (ADR-006,
-  §10); above 200 players each call that publishes also runs one `ZRANK` for each scorer since
-  the last frame and one `HGET` for each of those outside the top 50, and the frames cost one
-  `PUBLISH` per tick per quiz;
-- one `GET` per `ping` for `pong.seq`: sockets / 25 s, 400 per second for 10,000 sockets
-  (ADR-004);
-- above 200 players, one `read_standings` per 1,000 local players per node per quiz per second
-  for players whose rank only shifted ([redis spec](docs/spec/redis.md), "Reads at one `seq`").
-
-5,000 players in one quiz on two nodes cost 1,000 + 1,000 + 10 + 6 script calls (3 reads of up to 1,000 players per node) and 200 `GET`s
-per second, plus up to 2,000 calls inside the tick script at A11's pace. Not counted: snapshots (1 to 3
-script calls each; concurrent misses of the cached standings share one read), the presence renew every 3 s per node and quiz, joins and reconnects, and
-clients that send faster than A11 (up to 20 messages per second per socket, A6).
-
-**Measured numbers.**
+### Measured results
 
 Copied from [load/README.md](load/README.md), which says how to repeat each run. Machine: an
 Apple M4 Pro laptop (12 cores, 24 GB) running Docker Desktop with a Linux VM of 12 CPUs and
@@ -644,23 +520,13 @@ delivers at least 99 % of updates below 500 ms (99.32 % in the many-quizzes run,
 margin). The p50 of about 120 ms in one hot quiz is the tick: a new total waits on average half
 of the 200 ms tick. The tail grows with the node's CPU, so the margin at 2,500 sockets per node in one hot quiz is small.
 
-**Steady-state memory per socket** = `(peak RSS − idle RSS) / sockets on the node`, with the
-idle RSS taken before the run (in the `-nodes.json` files): 1,000 sockets
-`(121.0 − 56.5) MiB / 1,000` = 66 KiB; 2,500 sockets `(196.7 − 55.6) MiB / 2,500` = 58 KiB; the
-two-node hot quiz 60 and 61 KiB; 500 quizzes 76 KiB on each node (each served quiz adds its own
-state and a Redis subscription). The two-node figures assume an even split of 2,500 sockets per
-node: nginx balances requests round-robin and no result file counts sockets per node, but the
-nodes' near-equal CPU and memory growth agree with it. That is about a tenth of the 634 KiB per socket that the buffer bounds
-above allow a slow, flooding client, so 10,000 healthy sockets need about 0.5 to 0.8 GiB per
-node.
-
 ## 10. Scalability and trade-offs
 
 **How it scales out today.** Any node can take any socket and score any answer, because every
 write is one Lua script in Redis and no node owns a quiz (ADR-006). Adding an API node adds
 sockets and CPU for frame writes; each node subscribes once per quiz it serves and receives
 one copy of each frame from Redis. Each of those subscriptions holds one Redis connection, so a
-node serves at most `REDIS_MAX_CONNECTIONS` quizzes at once (A13 in §9). Redis is the shared part: every write and every tick of
+node serves at most `REDIS_MAX_CONNECTIONS` quizzes at once (A13 in [docs/capacity.md](docs/capacity.md)). Redis is the shared part: every write and every tick of
 every quiz runs there.
 
 **Trade-offs.**
@@ -687,11 +553,11 @@ every quiz runs there.
    after the deadline is refused), but its final scores can lose that second of answers. We also accept that results expire 24 h after the last write (ADR-005, ADR-008).
 4. **A coalescing tick against a frame per answer.** We chose one frame per quiz per 200 ms
    over a broadcast per answer, because the cost per socket stays at most 5 frames per second
-   whatever the answer rate (§9), and we accept up to 200 ms of the 500 ms C5 budget spent
+   whatever the answer rate ([docs/capacity.md](docs/capacity.md)), and we accept up to 200 ms of the 500 ms C5 budget spent
    waiting for the tick (ADR-004).
 5. **Full standings against diffs.** We chose frames with full standings (up to 200 rows) over
    diffs, because a lost or conflated frame never leaves a client with wrong standings, and we
-   accept the bytes: at 200 players a socket receives up to `5 × 16,995 B` ≈ 85 KB/s (§9).
+   accept the bytes: at 200 players a socket receives up to `5 × 16,995 B` ≈ 85 KB/s ([docs/capacity.md](docs/capacity.md)).
    Above 200 players the frame shrinks to the top 50, and each other player gets their own
    `rank_update`.
 6. **What changes at 100,000 players.** We chose a design sized for thousands of sockets on two
