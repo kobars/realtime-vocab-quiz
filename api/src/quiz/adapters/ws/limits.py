@@ -123,6 +123,13 @@ class AddressRateLimiter:
         return bucket.take(now_ms)
 
 
+def address_limiter(per_ip_conn_cap: int, clock: Clock) -> AddressRateLimiter:
+    """Two attempts per socket one address may hold (a session and a ticket, or an upgrade and
+    its reconnect), refilled over ``ADDRESS_REFILL_S``."""
+    burst = 2 * per_ip_conn_cap
+    return AddressRateLimiter(burst / ADDRESS_REFILL_S, burst, clock)
+
+
 def _trusted(address: str, proxies: Sequence[IPv4Network | IPv6Network]) -> bool:
     with suppress(ValueError):
         return any(ip_address(address) in network for network in proxies)

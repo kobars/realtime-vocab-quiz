@@ -23,13 +23,7 @@ import structlog
 from fastapi import Response, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
-from quiz.adapters.ws.limits import (
-    ADDRESS_REFILL_S,
-    AddressRateLimiter,
-    ConnectionCaps,
-    RateLimiter,
-    connection_ip,
-)
+from quiz.adapters.ws.limits import ConnectionCaps, RateLimiter, address_limiter, connection_ip
 from quiz.adapters.ws.registry import Registry
 from quiz.adapters.ws.sender import Sender
 from quiz.adapters.ws.session import Deps, serve
@@ -78,10 +72,8 @@ class Gateway:
         self._deps = Deps(service, self.registry, settings.max_payload_bytes)
         self.caps = ConnectionCaps(settings.max_connections, settings.per_ip_conn_cap)
         self.clock: Clock = lambda: time.monotonic_ns() // 1_000_000  # paces the token buckets
-        # Each attempt below costs a ticket lookup in the store: one attempt per socket the
-        # address may hold, and one reconnect each.
-        burst = 2 * settings.per_ip_conn_cap
-        self.upgrades = AddressRateLimiter(burst / ADDRESS_REFILL_S, burst, self._now)
+        # Each upgrade attempt costs a ticket lookup in the store.
+        self.upgrades = address_limiter(settings.per_ip_conn_cap, self._now)
         for name in UVICORN_LOGGERS:  # adding it twice is a no-op
             logging.getLogger(name).addFilter(path_only)
         logging.getLogger("uvicorn.error").addFilter(not_after_a_denial)

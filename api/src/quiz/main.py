@@ -22,7 +22,7 @@ from quiz.adapters.mock_auth.tokens import TICKET_TTL_S
 from quiz.adapters.mock_questions import MockQuestionBank
 from quiz.adapters.redis import RedisStore
 from quiz.adapters.ws.endpoint import Gateway
-from quiz.adapters.ws.limits import ADDRESS_REFILL_S, AddressRateLimiter
+from quiz.adapters.ws.limits import address_limiter
 from quiz.app.service import QuizService
 from quiz.config import Settings
 from quiz.fanout.presence import PresenceRenewer
@@ -164,8 +164,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
     services.shutdown.append(renewer.stop)
     s, ttl_ms = services.settings, TICKET_TTL_S * 1000
     token = s.admin_token.get_secret_value() if s.admin_mock and s.admin_token else None
-    burst = 2 * s.per_ip_conn_cap  # a session and a ticket for each socket one address may hold
-    limit = AddressRateLimiter(burst / ADDRESS_REFILL_S, burst, monotonic_ms)
+    limit = address_limiter(s.per_ip_conn_cap, monotonic_ms)
     deps = HttpDeps(services.store, services.tickets, services.bank, services.ready, ttl_ms, limit)
     proxies = s.trusted_proxies
     install(app, replace(deps, trusted_proxies=proxies, admin_token=token, outages=OUTAGES))
