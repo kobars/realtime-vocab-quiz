@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link, the quiz preview and the join, in a clay card over the hero decoration (UI spec §3.1). -->
+<!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link, the quiz preview and the join (with the busy retry, the blocking card and the rejoin after a reload), a link back to the quiz this tab is still in, in a clay card over the hero decoration (UI spec §3.1). -->
 <script setup lang="ts">
 import { LoaderCircle } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
@@ -7,6 +7,7 @@ import JoinField from '@/components/join/JoinField.vue'
 import QuizPreviewCard from '@/components/join/QuizPreviewCard.vue'
 import { fetchQuizPreview, type PreviewResult } from '@/components/join/preview'
 import { displayNameError, normalizeQuizId, QUIZ_ID_MAX, quizIdError, readName, saveName } from '@/components/join/validation'
+import ErrorMessage from '@/components/status/ErrorMessage.vue'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { useQuizStore } from '@/stores/quiz'
@@ -16,13 +17,21 @@ const route = useRoute()
 const router = useRouter()
 const store = useQuizStore()
 
-const quizId = ref('')
+/** A join already under way when the screen opens: the router joins again after a reload of the quiz screen. */
+const resuming = store.waiting && store.quiz === null && !store.ended
+const quizId = ref(resuming ? (store.quizId ?? '') : '')
 const name = ref(readName())
 const idError = ref<string | null>(null)
 const nameError = ref<string | null>(null)
-const joining = ref(false)
+const joining = ref(resuming)
 /** The last join failed for a reason other than the quiz ID: the form is open again, to retry. */
 const joinFailed = ref(false)
+/** The last join ended in a blocked state (UI spec §3.7): its card says what to do instead of "try again". */
+const joinBlocked = ref(false)
+/** The client sends a join that got `UNAVAILABLE` again after the backoff: the spinner stays and says so. */
+const busy = computed(() => joining.value && store.busy !== null)
+/** The quiz this tab is still in, after the wordmark led here from its screen. */
+const live = computed(() => (!joining.value && store.blocked === null && (store.quiz !== null || store.ended) ? store.quizId : null))
 let mounted = true
 onBeforeUnmount(() => {
   mounted = false
@@ -85,6 +94,7 @@ async function submit(): Promise<void> {
   if (idError.value !== null) return focus(idField)
   if (nameError.value !== null) return focus(nameField)
   joining.value = true
+  joinBlocked.value = false
   const id = quizId.value
   // A miss or a failed lookup is asked again: the quiz may exist by now.
   const known = lookup.value?.quizId === id ? lookup.value.result : null
@@ -114,17 +124,24 @@ function failJoin(): void {
 }
 
 /**
- * How the join ended, or null while it runs (a `reconnecting` link may still join). Any other error reply to the
- * join, or a final close before `joined`, failed it: the client never sends that join again (protocol §1).
+ * How the join ended, or null while it runs (a `reconnecting` link or a busy server may still join). A blocked state
+ * has its own card. Any other error reply to the join returns the store to `idle`, and a final close before `joined`
+ * leaves it `closed`: the client never sends that join again (protocol §1).
  */
 const outcome = computed(() => {
   if (store.quiz !== null || store.ended) return 'ready'
   if (store.lastError?.code === 'QUIZ_NOT_FOUND') return 'not-found'
-  return store.lastError?.requestType === 'join' || store.connection === 'closed' ? 'failed' : null
+  if (store.blocked !== null) return 'blocked'
+  return store.connection === 'idle' || store.connection === 'closed' ? 'failed' : null
 })
 
 // The fields are read-only and links are ignored while joining, so `quizId` is still the ID that was sent.
-watch(outcome, (result) => {
+watch(outcome, (result, before) => {
+  // "Try again" or "Use this tab" on the blocking card joins again from this screen.
+  if (before === 'blocked' && result === null) {
+    joining.value = true
+    joinBlocked.value = false
+  }
   if (!joining.value) return
   if (result === 'ready') void router.push({ name: 'quiz', params: { quizId: quizId.value } })
   else if (result === 'not-found') {
@@ -132,6 +149,10 @@ watch(outcome, (result) => {
     idError.value = strings.join.notFound
     focus(idField)
   } else if (result === 'failed') failJoin()
+  else if (result === 'blocked') {
+    joining.value = false
+    joinBlocked.value = true
+  }
 })
 
 // `/?quiz=VOCAB-42` (also the target of `/q/VOCAB-42`) fills the quiz ID and moves on to the name.
@@ -158,6 +179,20 @@ watch(
     <h1 class="text-title sm:text-display">
       {{ strings.join.title }}
     </h1>
+    <Button
+      v-if="live !== null"
+      as-child
+      variant="outline"
+      class="self-start"
+    >
+      <RouterLink
+        :to="{ name: 'quiz', params: { quizId: live } }"
+        data-test="resume"
+      >
+        {{ strings.join.resume(live) }}
+      </RouterLink>
+    </Button>
+    <ErrorMessage v-if="joinBlocked && store.blocked !== null" />
     <Card>
       <form
         class="flex flex-col gap-5"
@@ -214,6 +249,14 @@ watch(
           class="text-sm text-destructive"
         >
           {{ strings.join.failed }}
+        </p>
+        <!-- The live region stays in the page, so the busy text is announced when it appears. -->
+        <p
+          role="status"
+          data-test="join-status"
+          :class="busy ? 'text-sm text-muted-foreground' : 'sr-only'"
+        >
+          {{ busy ? strings.connection.busy : '' }}
         </p>
 
         <Button

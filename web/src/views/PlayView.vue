@@ -1,6 +1,6 @@
-<!-- AI-ASSISTED: the quiz screen after the join: header with progress, score and rank, the connection pill and error messages, then intro, question, feedback or results by the client phase, as Quiz and Leaderboard pill tabs on phones, header pills, an intro card, with the score count-up, the answer and rank announcements and the quiz time left on the intro (UI spec §2, §3.2–§3.4, §3.6, §3.7, §4.1, §6.1, §6.3). -->
+<!-- AI-ASSISTED: the quiz screen after the join: header with progress, score and rank, the connection pill and error messages, then intro, question, feedback or results by the client phase, as Quiz and Leaderboard pill tabs on phones, header pills, an intro card, a loading card while a rejoin asks for the open question again, with the score count-up, the answer and rank announcements and the quiz time left on the intro (UI spec §2, §3.2–§3.4, §3.6, §3.7, §4.1, §6.1, §6.3). -->
 <script setup lang="ts">
-import { Rocket } from '@lucide/vue'
+import { LoaderCircle, Rocket } from '@lucide/vue'
 import { useIntervalFn, useMediaQuery } from '@vueuse/core'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import LeaderboardPanel from '@/components/leaderboard/LeaderboardPanel.vue'
@@ -70,11 +70,6 @@ onBeforeUnmount(() => {
 // While a question is open the join re-asks for it (UI spec §4.2): no intro, so Continue never sends `cursor`.
 const intro = computed(() => store.quiz !== null && !store.quiz.cursorOpen && (store.phase === 'intro' || store.phase === 'join'))
 watch(intro, (shown) => shown && void nextTick(() => start.value?.$el.focus()), { immediate: true })
-// The client drops a `next` sent while the socket is down (UI spec §4.1); `resyncing` sends at once.
-const online = computed(() => store.connection === 'joined' || store.connection === 'resyncing')
-function begin(): void {
-  if (online.value) store.next()
-}
 
 // The quiz time left on the intro, read again each second; display only.
 const now = ref(store.now())
@@ -218,12 +213,31 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
             ref="start"
             data-test="start"
             size="lg"
-            :aria-disabled="!online"
+            :aria-disabled="!store.online"
+            :aria-busy="store.requested !== null"
             class="aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
-            @click="begin"
+            @click="store.next()"
           >
+            <LoaderCircle
+              v-if="store.requested !== null"
+              class="motion-safe:animate-spin"
+              aria-hidden="true"
+            />
             {{ store.quiz.cursor < 0 ? strings.quiz.start : strings.quiz.continue }}
           </Button>
+        </Card>
+        <!-- The join asked for the open question again; the card holds its place until the question arrives. -->
+        <Card
+          v-else-if="store.quiz?.cursorOpen"
+          role="status"
+          data-test="loading"
+          class="flex-row items-center gap-3"
+        >
+          <LoaderCircle
+            class="size-5 motion-safe:animate-spin"
+            aria-hidden="true"
+          />
+          {{ strings.quiz.loading }}
         </Card>
       </div>
       <div

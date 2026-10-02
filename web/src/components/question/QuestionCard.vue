@@ -16,21 +16,12 @@ const KEY_FILLS = ['bg-input', 'bg-mint', 'bg-cyan', 'bg-sun'] as const
 const store = useQuizStore()
 const heading = useTemplateRef<HTMLElement>('heading')
 const msLeft = useCountdown(() => store.msLeft(), () => props.question.deadlineAt)
-// `resyncing` is a healthy socket: requests go out at once (UI spec §4.1).
-const online = computed(() => store.connection === 'joined' || store.connection === 'resyncing')
-const locked = computed(() => store.pending !== null || !online.value)
-// Only a link that is coming back says so; after a final close or an unknown quiz no reconnect follows (UI spec §3.3).
-const waiting = computed(() => store.connection === 'connecting' || store.connection === 'reconnecting')
+const locked = computed(() => store.pending !== null || !store.online)
 
 watch(() => props.question.questionIndex, () => void nextTick(() => heading.value?.focus()), { immediate: true })
 
 function choose(choiceIndex: number): void {
   if (!locked.value) store.answer(choiceIndex)
-}
-
-// The client drops a `next` sent while the socket is down, so Skip waits for it (UI spec §4.1).
-function skip(): void {
-  if (online.value) store.next()
 }
 
 // Keys 1–4 choose, unless a text field has the focus, a modifier is held or the phone's Leaderboard tab hides the question.
@@ -89,7 +80,7 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
       </button>
     </div>
     <p
-      v-if="waiting"
+      v-if="store.waiting"
       class="text-sm text-muted-foreground"
     >
       {{ strings.quiz.waiting }}
@@ -105,9 +96,9 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
       <Button
         v-if="store.pending === null"
         variant="outline"
-        :aria-disabled="!online"
+        :aria-disabled="!store.online"
         class="aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
-        @click="skip"
+        @click="store.next()"
       >
         {{ strings.quiz.skip }}
       </Button>

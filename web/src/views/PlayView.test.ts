@@ -1,10 +1,12 @@
-// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement, one-shot motion behind motion-safe), the phone tabs, the connection pill and the error messages, driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement, one-shot motion behind motion-safe), the phone tabs, the connection pill, the error messages and blocking cards, the loading card and the busy and locked next buttons, driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
+import { createMemoryHistory } from 'vue-router'
 import type { ClientEvent } from '@/protocol/client'
 import type { AnswerResult, Joined, Question, ServerMessage, Snapshot } from '@/protocol/types.generated'
+import { createAppRouter } from '@/router'
 import { configureQuizStore, type QuizClientPort, useQuizStore } from '@/stores/quiz'
 import PlayView from './PlayView.vue'
 
@@ -464,14 +466,71 @@ it('the rank is announced in its own polite region only when it changes, at most
   expect(rank.text()).toBe('Rank 1 of 3')
 })
 
-it.each([
-  ['a final close', status('closed', 1000)],
-  ['QUIZ_NOT_FOUND', error('QUIZ_NOT_FOUND')],
-])('after %s no Waiting for the connection note stays, and the choices stay locked', async (_, event) => {
+it('after a final close no Waiting for the connection note stays, and the choices stay locked', async () => {
   const w = await playing()
-  await receive(event as ClientEvent)
+  await receive(status('closed', 1000))
   expect(w.text()).not.toContain('Waiting for the connection…')
   expect(choice(w, 0).attributes('aria-disabled')).toBe('true')
+})
+
+it('QUIZ_NOT_FOUND during the quiz: a blocking This quiz is no longer available card whose Back to join routes to /', async () => {
+  useQuizStore().join('VOCAB-42', 'Ana')
+  await receive(joined(), snapshot(0), question())
+  const router = createAppRouter(createMemoryHistory())
+  await router.push('/quiz/VOCAB-42')
+  const w = mount(PlayView, { props: { quizId: 'VOCAB-42' }, attachTo: document.body, global: { plugins: [router] } })
+  wrappers.push(w)
+  await receive(error('QUIZ_NOT_FOUND', 'next'))
+  expect(port.stop).toHaveBeenCalled()
+  expect(w.get('[role="alert"]').text()).toContain('This quiz is no longer available.')
+  expect(w.find('[data-choice="0"]').exists()).toBe(false)
+  expect(w.get('[data-test="connection"]').text()).toBe('')
+  expect(document.activeElement?.textContent?.trim()).toBe('Back to join')
+  await w.get('[data-test="back"]').trigger('click')
+  await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/'))
+})
+
+it('feedback: while reconnecting, Next question is locked, sends nothing and says it waits for the connection', async () => {
+  const w = await playing()
+  press('3')
+  await receive(result(2, 133), status('reconnecting', 1006))
+  const next = w.get('[data-test="feedback"] button')
+  expect(next.attributes('aria-disabled')).toBe('true')
+  await next.trigger('click')
+  expect(port.next).not.toHaveBeenCalled()
+  expect(w.get('[data-test="feedback"]').text()).toContain('Waiting for the connection…')
+  await receive(status('open'), joined({ cursor: 0, cursorOpen: false, score: 133 }), snapshot(133))
+  expect(next.attributes('aria-disabled')).toBe('false')
+  expect(w.get('[data-test="feedback"]').text()).not.toContain('Waiting for the connection…')
+})
+
+it('a join on an open question shows a Loading the question status card until the question arrives', async () => {
+  useQuizStore().join('VOCAB-42', 'Ana')
+  await receive(joined({ cursor: 3, cursorOpen: true }), snapshot(0))
+  const w = await view()
+  expect(w.get('[data-test="loading"]').attributes('role')).toBe('status')
+  expect(w.get('[data-test="loading"]').text()).toBe('Loading the question…')
+  await receive(question(3))
+  expect(w.find('[data-test="loading"]').exists()).toBe(false)
+  expect(w.get('h2').text()).toBe('bright')
+})
+
+it('Start and Next question are busy from the click until the question arrives', async () => {
+  const w = await playing(board(1))
+  const start = w.get('[data-test="start"]')
+  expect(start.attributes('aria-busy')).toBe('false')
+  await start.trigger('click')
+  expect(start.attributes('aria-busy')).toBe('true')
+  await receive(question(0))
+  press('3')
+  await receive(result(2, 133))
+  const next = w.get('[data-test="feedback"] button')
+  expect(next.attributes('aria-busy')).toBe('false')
+  await next.trigger('click')
+  expect(next.attributes('aria-busy')).toBe('true')
+  await receive(question(1))
+  expect(w.find('[data-test="feedback"]').exists()).toBe(false)
+  expect(port.next.mock.calls).toEqual([[0], [1]])
 })
 
 it('phones: Quiz and Leaderboard tabs; the hidden question keeps its countdown and the header keeps the score and rank', async () => {

@@ -12,8 +12,8 @@ export const RETRY_AFTER_MS = 1_000
 export const REPLY_TIMEOUT_MS = 5_000
 /** A failed or slow open, a failed ticket request and a silent link all count as this close code. */
 const DEAD_LINK = 1006
-/** Answer errors that mean "not done": the answer stays unsettled. Every other answer error settles it. */
-export const RETRY_ANSWER_ON: readonly ErrorCode[] = ['RATE_LIMITED', 'UNAVAILABLE', 'NOT_JOINED']
+/** Errors that mean "not done": the answer or `next` stays unsettled and goes out again. Every other error settles it. */
+export const RETRY_ON: readonly ErrorCode[] = ['RATE_LIMITED', 'UNAVAILABLE', 'NOT_JOINED']
 
 /** The part of the browser WebSocket that the client uses. */
 export interface QuizSocket {
@@ -394,7 +394,7 @@ export class QuizClient {
     const submissionId = this.inFlight.shift()
     if (submissionId === undefined) return
     this.cancelAnswerRetry(submissionId)
-    if (!RETRY_ANSWER_ON.includes(code)) return this.settle(submissionId)
+    if (!RETRY_ON.includes(code)) return this.settle(submissionId)
     if (code === 'NOT_JOINED') return
     let wait = RETRY_AFTER_MS
     if (code === 'UNAVAILABLE') {

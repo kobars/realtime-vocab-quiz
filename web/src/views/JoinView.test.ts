@@ -1,4 +1,4 @@
-// AI-ASSISTED: tests for the landing and join screen: the wordmark and decoration, validation, the share link, the preview and the join outcomes.
+// AI-ASSISTED: tests for the landing and join screen: the wordmark and decoration, validation, the share link, the preview, the join outcomes, the rejoin after a reload and the way back to a live quiz.
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -247,6 +247,9 @@ describe('preview', () => {
 })
 
 describe('join', () => {
+  const joinedFrame: ClientEvent = { v: 1, type: 'joined', atSeq: 0, quizId: 'VOCAB-42', userId: 'u1', displayName: 'Ana', questionCount: 10,
+    timeLimitMs: 20_000, quizRemainingMs: 600_000, cursor: -1, cursorOpen: false, finished: false, score: 0 }
+
   async function joining() {
     sessionStorage.setItem('quiz.displayName', 'Ana')
     const view = await screen('/?quiz=VOCAB-42')
@@ -259,8 +262,7 @@ describe('join', () => {
     const { router, id, button } = await joining()
     expect(button()).toBe(strings.join.joining)
     expect(id.attributes('readonly')).toBeDefined()
-    emit({ v: 1, type: 'joined', atSeq: 0, quizId: 'VOCAB-42', userId: 'u1', displayName: 'Ana', questionCount: 10,
-      timeLimitMs: 20_000, quizRemainingMs: 600_000, cursor: -1, cursorOpen: false, finished: false, score: 0 })
+    emit(joinedFrame)
     // The quiz route loads its view lazily, so the navigation can take more than one flush.
     await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/quiz/VOCAB-42'))
   })
@@ -276,9 +278,8 @@ describe('join', () => {
   })
 
   it.each([
-    ['an error reply to the join', () => emit({ v: 1, type: 'error', code: 'UNAVAILABLE', message: '', requestType: 'join' })],
-    ['a final close before joined', () => emit({ type: 'status', status: 'closed', code: 1008 })],
-    ['10 connects without a joined', () => emit({ type: 'status', status: 'failed', code: 1006 })],
+    ['an error reply to the join', () => emit({ v: 1, type: 'error', code: 'INVALID_MESSAGE', message: '', requestType: 'join' })],
+    ['a final close before joined', () => emit({ type: 'status', status: 'closed', code: 1000 })],
   ])('unlocks the form after %s and lets the player retry', async (_, fail) => {
     const { router, id, wrapper, button, submit } = await joining()
     fail()
@@ -290,6 +291,81 @@ describe('join', () => {
     await submit()
     expect(start).toHaveBeenCalledTimes(2)
     expect(wrapper.find('[role=alert]').exists()).toBe(false)
+  })
+
+  it('keeps the progress and says the server is busy while the client sends a join that got UNAVAILABLE again', async () => {
+    const { wrapper, button } = await joining()
+    expect(wrapper.get('[data-test="join-status"]').text()).toBe('')
+    emit({ v: 1, type: 'error', code: 'UNAVAILABLE', message: '', requestType: 'join' })
+    await flushPromises()
+    expect(button()).toBe(strings.join.joining)
+    expect(wrapper.find('button[type=submit] svg').exists()).toBe(true)
+    expect(wrapper.get('[data-test="join-status"]').attributes('role')).toBe('status')
+    expect(wrapper.get('[data-test="join-status"]').text()).toBe(strings.connection.busy)
+    expect(wrapper.text()).not.toContain(strings.join.failed)
+  })
+
+  it.each([
+    ['UNSUPPORTED_VERSION', 'version', () => emit({ v: 1, type: 'error', code: 'UNSUPPORTED_VERSION', message: '', requestType: 'join' })],
+    ['close 1008', 'policy', () => emit({ type: 'status', status: 'closed', code: 1008 })],
+  ] as const)('a first join ended by %s shows the blocking card with Reload, not try again', async (_, blocked, fail) => {
+    const reload = vi.fn()
+    vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, reload })
+    const { wrapper, button } = await joining()
+    fail()
+    await flushPromises()
+    expect(wrapper.get('[role=alert]').text()).toContain(strings.blocked[blocked].title)
+    expect(wrapper.get('[role=alert] button').text()).toBe('Reload')
+    expect(wrapper.text()).not.toContain(strings.join.failed)
+    expect(button()).toBe(strings.join.submit)
+    await wrapper.get('[role=alert] button').trigger('click')
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it("10 connects without a joined show Still can't connect, whose Try again joins again and opens the quiz", async () => {
+    const { wrapper, router } = await joining()
+    emit({ type: 'status', status: 'failed', code: 1006 })
+    await flushPromises()
+    expect(wrapper.get('[role=alert]').text()).toContain(strings.blocked.unreachable.title)
+    expect(wrapper.text()).not.toContain(strings.join.failed)
+    await wrapper.get('[role=alert] button').trigger('click')
+    await flushPromises()
+    expect(start).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[role=alert]').exists()).toBe(false)
+    emit(joinedFrame)
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/quiz/VOCAB-42'))
+  })
+
+  it('a reload of the quiz screen after a join in this tab joins again by itself and opens the quiz', async () => {
+    const first = await joining()
+    emit(joinedFrame)
+    await vi.waitFor(() => expect(first.router.currentRoute.value.fullPath).toBe('/quiz/VOCAB-42'))
+    first.wrapper.unmount()
+    // A reload: a new store and router; the tab's sessionStorage stays.
+    setActivePinia(createPinia())
+    const { router, id, button } = await screen('/quiz/VOCAB-42')
+    expect(start).toHaveBeenLastCalledWith('VOCAB-42', 'Ana')
+    expect(start).toHaveBeenCalledTimes(2)
+    expect(button()).toBe(strings.join.joining)
+    expect(id.element.value).toBe('VOCAB-42')
+    emit(joinedFrame)
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/quiz/VOCAB-42'))
+  })
+
+  it('after the wordmark leads away mid-quiz, Resume quiz goes back to the live quiz', async () => {
+    const { wrapper, router } = await joining()
+    emit(joinedFrame)
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/quiz/VOCAB-42'))
+    await wrapper.get('[data-test="wordmark"]').trigger('click')
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/'))
+    await flushPromises()
+    const resume = wrapper.get('[data-test="resume"]')
+    expect(resume.text()).toBe(strings.join.resume('VOCAB-42'))
+    await resume.trigger('click')
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/quiz/VOCAB-42'))
+    await flushPromises()
+    expect(wrapper.get('main h1').text()).toBe(strings.quiz.title('VOCAB-42'))
+    expect(start).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the progress while the client reconnects', async () => {

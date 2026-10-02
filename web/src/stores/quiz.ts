@@ -1,7 +1,7 @@
 // AI-ASSISTED: the Pinia quiz store: turns QuizClient events into the state the screens read (UI spec §3, §4).
 import { defineStore } from 'pinia'
 import { computed, reactive, shallowRef, toRefs } from 'vue'
-import { type ClientEvent, QuizClient, RETRY_ANSWER_ON } from '@/protocol/client'
+import { type ClientEvent, QuizClient, RETRY_ON } from '@/protocol/client'
 import { httpAuthApi } from '@/protocol/identity'
 import type { AnswerResult, Entry, ErrorCode, Joined, ProtocolError, Question, ServerMessage, You } from '@/protocol/types.generated'
 
@@ -10,9 +10,10 @@ export type Connection = 'idle' | 'connecting' | 'joined' | 'reconnecting' | 're
 export type Phase = 'join' | 'intro' | 'question' | 'feedback' | 'finished' | 'results'
 /**
  * The UI spec's `blocked` state, which only the player can leave: another tab took the session, the client is outdated,
- * the server closed with a policy violation (1008), or the client gave up after 10 connects without a `joined`.
+ * the server closed with a policy violation (1008), the client gave up after 10 connects without a `joined`, or the
+ * quiz the player is in no longer exists (`QUIZ_NOT_FOUND` after the join).
  */
-export type Blocked = 'replaced' | 'version' | 'policy' | 'unreachable'
+export type Blocked = 'replaced' | 'version' | 'policy' | 'unreachable' | 'gone'
 export type QuizClientPort = Pick<QuizClient, 'start' | 'next' | 'answer' | 'rejoin' | 'refresh' | 'getLeaderboard' | 'stop'>
 
 export interface QuizStoreDeps {
@@ -44,7 +45,13 @@ const RETRIED_BY_REPLY: Partial<Record<ServerMessage['type'], string>> = {
 const RETRIED_ON_UNAVAILABLE: readonly (string | null)[] = Object.values(RETRIED_BY_REPLY)
 /** The final close codes that block the screen (protocol §7): 4001, another tab took the session; 1008, a policy violation. */
 const BLOCKED_BY_CLOSE: Partial<Record<number, Blocked>> = { 4001: 'replaced', 1008: 'policy' }
+/** The quiz this tab last joined, so a reload of its screen joins it again (UI spec §2). */
+const JOINED_KEY = 'quiz.joined'
+/** Blocked states after which a reload must not join again: another tab holds the session, or the quiz is gone. */
+const FORGET_ON: readonly Blocked[] = ['replaced', 'gone']
 
+/** The arguments of a join. */
+interface JoinArgs { quizId: string; displayName: string }
 /** The `joined` reply; `cursor` and `cursorOpen` follow later questions and results, `endsAt` is on the `now` clock. */
 export type QuizInfo = Joined & { endsAt: number }
 /**
@@ -86,13 +93,15 @@ const initial = () => ({
   blocked: null as Blocked | null,
   /** The request type that got `UNAVAILABLE` and is being retried, until a reply to it arrives (UI spec §3.7). */
   busy: null as string | null,
+  /** The question index of the last `next` the player asked for, until its `question`, `finished` or final error. */
+  requested: null as number | null,
 })
 
 export const useQuizStore = defineStore('quiz', () => {
   const s = reactive(initial())
   const client = shallowRef<QuizClientPort | null>(null)
   /** The arguments of the last join, for `retry`: a blocked screen may have no `quiz` yet. */
-  let lastJoin: { quizId: string; displayName: string } | null = null
+  let lastJoin: JoinArgs | null = null
 
   const nextIndex = computed(() => {
     if (s.phase === 'question' && s.question) return s.question.questionIndex + 1
@@ -105,16 +114,22 @@ export const useQuizStore = defineStore('quiz', () => {
     return s.question === null ? 0 : Math.max(0, s.question.deadlineAt - at)
   }
 
+  /** `resyncing` is a healthy socket: requests go out at once (UI spec §4.1). */
+  const online = computed(() => s.connection === 'joined' || s.connection === 'resyncing')
+  /** A link that is coming back; after a final close, a failed join or a blocked state no reconnect follows (UI spec §3.3). */
+  const waiting = computed(() => s.connection === 'connecting' || s.connection === 'reconnecting')
+
   /** Display only: the time until the quiz window closes, from `quizRemainingMs`. */
   const quizMsLeft = (at = deps.now()): number => (s.quiz === null ? 0 : Math.max(0, s.quiz.endsAt - at))
 
+  /** A client that cannot be made (blocked storage) throws before anything changes, so no join looks under way. */
   function join(quizId: string, displayName: string): void {
-    lastJoin = { quizId, displayName }
-    client.value?.stop()
-    Object.assign(s, initial(), { connection: 'connecting', quizId })
     const created = deps.createClient((event) => {
       if (client.value === created) handle(event)
     })
+    lastJoin = { quizId, displayName }
+    client.value?.stop()
+    Object.assign(s, initial(), { connection: 'connecting', quizId })
     client.value = created
     created.start(quizId, displayName)
   }
@@ -124,6 +139,14 @@ export const useQuizStore = defineStore('quiz', () => {
     if (lastJoin !== null) join(lastJoin.quizId, lastJoin.displayName)
   }
 
+  /** Joins `quizId` again when it is the quiz this tab last joined (a reload of its screen); returns whether it did. */
+  function resume(quizId: string): boolean {
+    const last = readJoined()
+    if (last?.quizId !== quizId) return false
+    join(last.quizId, last.displayName)
+    return true
+  }
+
   function answer(choiceIndex: number): void {
     const current = s.question
     if (client.value === null || s.phase !== 'question' || current === null || s.pending !== null) return
@@ -131,22 +154,33 @@ export const useQuizStore = defineStore('quiz', () => {
     s.pending = { questionIndex: current.questionIndex, choiceIndex, submissionId }
   }
 
-  /** Start, Continue, Skip, Next question or See my result: each asks for the index the current screen implies. */
-  const next = (): void => (s.quiz === null || s.ended ? undefined : client.value?.next(nextIndex.value))
+  /**
+   * Start, Continue, Skip, Next question or See my result: each asks for the index the current screen implies. Nothing
+   * goes out while the link is down, because the client drops a `next` with no open socket (UI spec §4.1).
+   */
+  function next(): void {
+    if (s.quiz === null || s.ended || !online.value) return
+    s.requested = nextIndex.value
+    client.value?.next(nextIndex.value)
+  }
   const loadPage = (offset: number): void => client.value?.getLeaderboard(offset, PAGE_SIZE)
 
   function handle(event: ClientEvent): void {
     if (event.type !== 'status') return receive(event)
     s.closeCode = event.code
     s.connection = event.status === 'open' ? 'connecting' : event.status === 'failed' ? 'closed' : event.status
-    // A gap resync keeps the socket; any other status means a new or no socket, which drops the retry.
-    if (event.status !== 'resyncing') s.busy = null
+    // A gap resync keeps the socket; any other status means a new or no socket, which drops the retries and the `next`.
+    if (event.status !== 'resyncing') Object.assign(s, { busy: null, requested: null })
     if (event.status === 'failed') s.blocked = 'unreachable'
-    else if (event.status === 'closed' && event.code !== null) s.blocked = BLOCKED_BY_CLOSE[event.code] ?? s.blocked
+    else if (event.status === 'closed' && event.code !== null) {
+      const reason = BLOCKED_BY_CLOSE[event.code]
+      if (reason !== undefined) setBlocked(reason)
+    }
   }
 
   function receive(message: Exclude<ClientEvent, { type: 'status' }>): void {
     if (s.busy !== null && (RETRIED_BY_REPLY[message.type] === s.busy || message.type === 'quiz_ended')) s.busy = null
+    if (message.type === 'question' || message.type === 'finished') s.requested = null
     switch (message.type) {
       case 'joined':
         return onJoined(message)
@@ -211,6 +245,7 @@ export const useQuizStore = defineStore('quiz', () => {
   }
 
   function onJoined(message: Joined): void {
+    if (lastJoin !== null) writeJoined(lastJoin)
     s.quiz = { ...message, endsAt: deps.now() + message.quizRemainingMs }
     Object.assign(s, { finished: message.finished, connection: 'resyncing' })
     if (s.ended) return
@@ -229,19 +264,35 @@ export const useQuizStore = defineStore('quiz', () => {
     s.lastError = { code, message, requestType }
     if (code === 'UNAVAILABLE') s.busy = RETRIED_ON_UNAVAILABLE.includes(requestType) ? requestType : s.busy
     else if (requestType === s.busy) s.busy = null
-    // The client settles every answer error but these, so the choices unlock.
-    if (requestType === 'answer' && !RETRY_ANSWER_ON.includes(code)) s.pending = null
-    if (code === 'QUIZ_NOT_FOUND') idle()
-    else if (code === 'QUIZ_ENDED') {
+    // The client settles every answer and `next` error but these: the choices unlock, the button is no longer busy.
+    if (!RETRY_ON.includes(code)) {
+      if (requestType === 'answer') s.pending = null
+      if (requestType === 'next') s.requested = null
+    }
+    // A quiz that disappears after the join leaves nothing to play; before the join, or after the end, it is a plain miss.
+    if (code === 'QUIZ_NOT_FOUND') {
+      if (s.quiz === null || s.ended) idle()
+      else block('gone')
+    } else if (code === 'QUIZ_ENDED') {
       if (s.connection === 'connecting') s.connection = 'joined'
       end()
-    } else if (code === 'UNSUPPORTED_VERSION' || code === 'SESSION_REPLACED') {
-      s.blocked = code === 'SESSION_REPLACED' ? 'replaced' : 'version'
-      client.value?.stop()
-    }
-    // A failed first join binds nothing (protocol §1): back to idle, which also stops the client's retry of it.
-    else if (requestType === 'join' && s.quiz === null) idle()
+    } else if (code === 'UNSUPPORTED_VERSION' || code === 'SESSION_REPLACED') block(code === 'SESSION_REPLACED' ? 'replaced' : 'version')
+    // A failed first join binds nothing (protocol §1): back to idle, which also stops the client. The client sends a
+    // join that got `UNAVAILABLE` again after the backoff, so that one keeps the client.
+    else if (requestType === 'join' && s.quiz === null && code !== 'UNAVAILABLE') idle()
     else if (REJOIN_ON.includes(code) && !s.ended) client.value?.rejoin()
+  }
+
+  /** Shows the blocking card; after some, a reload no longer joins the quiz again. */
+  function setBlocked(reason: Blocked): void {
+    s.blocked = reason
+    if (FORGET_ON.includes(reason)) writeJoined(null)
+  }
+
+  /** Shows the blocking card and stops the client: only the player can leave this state. */
+  function block(reason: Blocked): void {
+    setBlocked(reason)
+    client.value?.stop()
   }
 
   /** Drops the client for good, so the join screen can start a new one. */
@@ -293,9 +344,31 @@ export const useQuizStore = defineStore('quiz', () => {
    * It also drops a live "Show all players" page, so the results list waits for a final one.
    */
   function end(): void {
-    Object.assign(s, { ended: true, pending: null, phase: 'results', page: s.page?.final ? s.page : null })
+    Object.assign(s, { ended: true, pending: null, requested: null, phase: 'results', page: s.page?.final ? s.page : null })
     if (s.connection === 'resyncing') s.connection = 'joined'
   }
 
-  return { ...toRefs(s), nextIndex, msLeft, quizMsLeft, join, retry, answer, next, loadPage, now: (): number => deps.now() }
+  return { ...toRefs(s), nextIndex, online, waiting, msLeft, quizMsLeft, join, retry, resume, answer, next, loadPage, now: (): number => deps.now() }
 })
+
+/** Storage may be blocked (private mode, a sandboxed frame); a reload then shows the join screen, as without a join. */
+function readJoined(): JoinArgs | null {
+  try {
+    const value: unknown = JSON.parse(sessionStorage.getItem(JOINED_KEY) ?? 'null')
+    return isJoin(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+function writeJoined(join: JoinArgs | null): void {
+  try {
+    if (join === null) sessionStorage.removeItem(JOINED_KEY)
+    else sessionStorage.setItem(JOINED_KEY, JSON.stringify(join))
+  } catch {
+    // Not remembered: a reload shows the join screen.
+  }
+}
+
+const isJoin = (value: unknown): value is JoinArgs =>
+  typeof value === 'object' && value !== null && typeof Reflect.get(value, 'quizId') === 'string' && typeof Reflect.get(value, 'displayName') === 'string'

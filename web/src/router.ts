@@ -1,4 +1,4 @@
-// AI-ASSISTED: the client routes: join at `/`, the quiz at `/quiz/:quizId` (only for the joined quiz), the share link and a 404 page.
+// AI-ASSISTED: the client routes: join at `/`, the quiz at `/quiz/:quizId` (only for the joined quiz, which a reload joins again), the share link and a 404 page.
 import { createRouter, createWebHistory, type RouteRecordRaw, type RouterHistory } from 'vue-router'
 import { useQuizStore } from '@/stores/quiz'
 
@@ -23,11 +23,14 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
   const router = createRouter({ history, routes })
   // The quiz screen needs a store joined to that quiz, or showing the results of that quiz after an ended join (which
   // binds no quiz). A direct load, a refresh or another ID goes to the join screen with the ID filled in, like `/q/:quizId`.
+  // A reload of the quiz this tab last joined also joins it again: the join screen shows the progress and opens it on `joined`.
   router.beforeEach((to) => {
     if (to.name !== 'quiz') return
     const store = useQuizStore()
-    const joined = store.quizId === to.params.quizId && (store.quiz !== null || store.ended)
-    if (!joined) return { name: 'join', query: { quiz: to.params.quizId } }
+    const quizId = String(to.params.quizId)
+    if (store.quizId === quizId && (store.quiz !== null || store.ended)) return
+    if (store.quizId === null) store.resume(quizId)
+    return { name: 'join', query: { quiz: quizId } }
   })
   return router
 }

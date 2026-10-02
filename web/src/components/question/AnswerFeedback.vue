@@ -1,6 +1,6 @@
-<!-- AI-ASSISTED: answer feedback: correct or wrong, the correct choice, the points with the speed bonus counting up, and the next action, in a clay card that pops in once (a wrong answer only fades in) behind motion-safe (UI spec §3.4, §5.5). -->
+<!-- AI-ASSISTED: answer feedback: correct or wrong, the correct choice, the points with the speed bonus counting up, and the next action (locked while the socket is down, busy while its request runs), in a clay card that pops in once (a wrong answer only fades in) behind motion-safe (UI spec §3.4, §5.5). -->
 <script setup lang="ts">
-import { CircleCheck, CircleX } from '@lucide/vue'
+import { CircleCheck, CircleX, LoaderCircle } from '@lucide/vue'
 import { computed, nextTick, onMounted, useTemplateRef } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -86,10 +86,23 @@ function mark(i: number): { label: string; good: boolean } | null {
     <Button
       ref="button"
       size="lg"
-      class="self-start"
+      :aria-disabled="!store.online"
+      :aria-busy="store.requested !== null"
+      class="self-start aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
       @click="store.next()"
     >
+      <LoaderCircle
+        v-if="store.requested !== null"
+        class="motion-safe:animate-spin"
+        aria-hidden="true"
+      />
       {{ last ? strings.quiz.seeResult : strings.quiz.nextQuestion }}
     </Button>
+    <p
+      v-if="store.waiting"
+      class="text-sm text-muted-foreground"
+    >
+      {{ strings.quiz.waiting }}
+    </p>
   </Card>
 </template>
