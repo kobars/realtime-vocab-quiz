@@ -39,39 +39,54 @@ uv run --project api pre-commit install    # run the hooks on staged files at ea
 | `make check` | Every check a change must pass; it stops at the first failing step |
 | `make contracts` | Regenerate the JSON Schema and the client's TypeScript types from the server's models |
 | `make build` | Build the images `elsaquiz-api` and `elsaquiz-web` (tag `IMAGE_TAG`, default `dev`) |
+| `make review-budget` | Count the branch's review input (the diff plus the full changed files) in tokens, against `BASE_SHA` or `origin/main` |
 | `make audit` | The dependency audits (`pip-audit`, `pnpm audit`) and the gitleaks scan of the whole history; needs the network, a full clone and gitleaks 8.25 or later |
 
 ## What `make check` runs
 
-In order:
+In order, stopping at the first failing step:
 
 1. The client install from the lock file (`pnpm install --frozen-lockfile`).
-2. Every pre-commit hook on every file: the internal-content check
-   (`scripts/check_internal.py`), ruff lint and format, ESLint, typos, and lychee (in Docker)
-   on the relative links and anchors of the tracked Markdown.
+2. Every pre-commit hook on every file: ruff lint and format, ESLint, typos, and lychee (in
+   Docker) on the relative links and anchors of the tracked Markdown.
 3. mypy (strict) and import-linter.
-4. pytest without the `integration` and `acceptance` markers, with a branch-coverage floor
-   (`api/pyproject.toml`).
-5. The contract drift check: the generated schema and types match the server's models.
-6. vue-tsc, then Vitest with coverage thresholds (`web/vitest.config.ts`).
-7. The client build (`pnpm -C web build`).
+4. deptry: every import in `api/src` is a declared dependency and every runtime dependency is
+   used; `api/tests`, `scripts/` and `load/` import only declared packages.
+5. pytest without the `integration` and `acceptance` markers, with a unit branch-coverage floor
+   (`UNIT_COVERAGE_FLOOR` in the `Makefile`).
+6. The contract drift check: the generated schema and types match the server's models.
+7. vue-tsc, then Vitest with coverage thresholds (`web/vitest.config.ts`).
+8. The client build (`pnpm -C web build`).
 
 ## Continuous integration
 
-Every pull request runs these GitHub Actions workflows:
+Every pull request and every push to `main` runs these GitHub Actions workflows:
 
-- `ci.yml`: `make check`, the Redis integration tests, and the internal-content check on the
-  commit messages and the PR text (run again when the PR text is edited).
+- `ci.yml`: `make check` and the Redis integration tests. Its `coverage` job combines the
+  coverage data of the test jobs and fails below the combined floor (`fail_under` in
+  `api/pyproject.toml`) and, on a pull request, when less than 90% of the changed lines are
+  covered (diff-cover). Each run keeps the JUnit reports (`reports-*`) and the coverage data
+  (`coverage-*`) as artifacts for 7 days. On a pull request it also runs
+  `scripts/check_pr.py` (the size limit, the frozen acceptance tests, the commit trailer and
+  the AI-LOG entry; the labels `size-exception` and `acceptance-change` waive the first two)
+  and the review budget (`make review-budget`), which fails a PR whose diff plus changed files
+  reach the `limit` in `api/pyproject.toml`. Neither counts the paths that `.gitattributes`
+  marks `linguist-generated` (lock files, generated contracts, shadcn-vue components).
 - `containers.yml`: the container and infrastructure files. hadolint (`.hadolint.yaml`),
   shellcheck, `docker compose config`, `scripts/check_nginx.sh` (`nginx -t` on the web image's
-  site), Trivy on the configuration (fails on any finding) and on both images (fails on a
-  CRITICAL or HIGH finding that has a fix), and `scripts/smoke_images.sh`. The smoke test runs
-  each image as a non-root user on a read-only root filesystem until its healthcheck passes,
-  then checks that the web image sends every header of `web/security-headers.conf` on `/` and
-  on a hashed asset. Locally: `make build && scripts/smoke_images.sh`.
+  site and on any `nginx.conf` under `infra/`), Trivy on the configuration (fails on any
+  finding) and on both images (fails on a CRITICAL or HIGH finding that has a fix), and
+  `scripts/smoke_images.sh`. The smoke test runs each image as a non-root user on a read-only
+  root filesystem until its healthcheck passes, then checks that the web image sends every
+  header of `web/security-headers.conf` on `/` and on a hashed asset. Locally:
+  `make build && scripts/smoke_images.sh`.
 - `codeql.yml` and `security.yml`: CodeQL, the gitleaks scan, dependency review and the
   dependency audits ([SECURITY.md](SECURITY.md) has the details). Both also run weekly.
 - `links.yml` runs weekly and also checks the external links.
+
+The CI, security and container workflows each end in one gate job (`ci-required`,
+`security-required`, `containers-required`) that fails when a job it needs fails or is
+cancelled.
 
 ## Pull requests
 
