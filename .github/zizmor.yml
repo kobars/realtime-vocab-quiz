@@ -1,0 +1,9 @@
+# AI-ASSISTED: zizmor settings: every action, GitHub's own included, is pinned to a commit SHA.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": hash-pin
+  # The `$/` form it suggests for the in-repository workflow is rejected by actionlint 1.7.12.
+  self-repository:
+    disable: true

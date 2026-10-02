@@ -1,0 +1,50 @@
+# AI-ASSISTED: weekly dependency updates; minor and patch grouped per ecosystem, each release a week old.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        update-types: [minor, patch]
+  - package-ecosystem: uv
+    directory: /api
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      python:
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm:
+        update-types: [minor, patch]
+  # Updates the base image digests in the Dockerfiles.
+  - package-ecosystem: docker
+    directories: [/api, /web, /load]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      docker:
+        update-types: [minor, patch]
+  # compose.yaml's Redis; ci.yml and api/tests/conftest.py must follow (scripts/tests/test_images.py).
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      docker-compose:
+        update-types: [minor, patch]

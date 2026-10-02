@@ -1,7 +1,7 @@
-# AI-ASSISTED: static guards on the Dockerfiles, the build context and the make build recipe.
-"""The image rules that a build alone does not enforce: the locked install, the non-root user,
-the healthchecks, the uvicorn transport flags, the SPA fallback and a build context without
-local state.
+# AI-ASSISTED: static guards on the Dockerfiles, the image pins, the build context and make build.
+"""The image rules that a build alone does not enforce: images pinned by digest, the locked
+install, the non-root user, the healthchecks, the uvicorn transport flags, the SPA fallback and
+a build context without local state.
 
 The files are read as text, so the tests need no Docker daemon.
 """
@@ -36,10 +36,127 @@ def _stages(dockerfile: Path) -> list[list[str]]:
     return stages
 
 
+# The ``docker run`` options that take a value as the next argument.
+_RUN_OPTIONS_WITH_VALUE = {"-e", "--env", "-p", "--publish", "-v", "--volume", "-w", "--workdir"}
+_RUN_OPTIONS_WITH_VALUE |= {"--name", "--tmpfs", "-u", "--user", "--network", "--entrypoint"}
+
+
+def _docker_run_images(text: str) -> list[str]:
+    """Return the image of each ``docker run`` in a shell script or a workflow: its first argument
+    that is neither an option nor an option's value. An image held in a shell variable, such as
+    the ``"$image"`` that ``make build`` makes, is left out."""
+    lines = text.replace("\\\n", " ").splitlines()
+    commands = [line for line in lines if not line.lstrip().startswith("#")]
+    images: list[str] = []
+    for match in (m for line in commands for m in re.finditer(r"docker run\s(.*)", line)):
+        args = iter(match.group(1).split())
+        for arg in args:
+            if arg in _RUN_OPTIONS_WITH_VALUE:
+                next(args, None)
+            elif not arg.startswith("-"):
+                if not arg.strip('"').startswith("$"):
+                    images.append(arg)
+                break
+    return images
+
+
+def _pulled_images(path: Path) -> list[str]:
+    """Return each image that a file pulls. A Dockerfile pulls every ``FROM`` image and every
+    ``COPY --from`` image that is not a build stage; any other file pulls every ``image:`` value
+    except the images that ``make build`` makes here (``elsaquiz-*``), and every ``docker run``
+    image."""
+    if path.name != "Dockerfile":
+        text = path.read_text(encoding="utf-8")
+        lines = [line.strip() for line in text.splitlines()]
+        values = [
+            line.removeprefix("image:").strip() for line in lines if line.startswith("image:")
+        ]
+        return [value for value in values if not value.startswith("elsaquiz-")] + (
+            _docker_run_images(text)
+        )
+    images: list[str] = []
+    stage_names: set[str] = set()
+    for stage in _stages(path):
+        image, *alias = stage[0].split()[1:]
+        images.append(image)
+        for line in stage[1:]:
+            source = line.split()[1].removeprefix("--from=")
+            if line.startswith("COPY --from=") and source not in stage_names:
+                images.append(source)
+        stage_names.update(alias[-1:])
+    return images
+
+
 def _api_cmd() -> list[str]:
     _, runtime = _stages(ROOT / "api" / "Dockerfile")
     cmd: list[str] = json.loads(next(line for line in runtime if line.startswith("CMD "))[3:])
     return cmd
+
+
+DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
+
+
+def _image_files() -> list[Path]:
+    """Every file that can pull an image: the Dockerfiles, the compose files, the workflows and
+    the shell scripts."""
+    globs = ("*/Dockerfile", "compose*.yaml", ".github/workflows/*.yml", "scripts/*.sh")
+    return sorted(path for pattern in globs for path in ROOT.glob(pattern))
+
+
+def test_every_pulled_image_is_pinned_by_digest() -> None:
+    """A tag can move; a digest is the exact image that the scans and the tests ran."""
+    images = {str(path.relative_to(ROOT)): _pulled_images(path) for path in _image_files()}
+    unpinned = {path: [i for i in found if not DIGEST.search(i)] for path, found in images.items()}
+    assert {path: found for path, found in unpinned.items() if found} == {}
+    # Each kind of file still yields its images, so a parser that finds nothing cannot pass.
+    for path in ("api/Dockerfile", "compose.yaml", ".github/workflows/containers.yml"):
+        assert images[path], path
+    assert images["scripts/check_links.sh"], "scripts/check_links.sh"
+
+
+def test_pulled_images_read_docker_run_and_skip_comments_and_variables(tmp_path: Path) -> None:
+    script = tmp_path / "check.sh"
+    script.write_text(
+        "# usage: check <image> [docker run options...]\n"
+        'docker run --rm -i -e TOKEN -v "$PWD:/in:ro" -w /in owner/tool:1.2 \\\n'
+        "  --flag value\n"
+        'uid="$(docker run --rm "$image" id -u)"\n'
+        "xargs docker run --tmpfs /tmp alpine:3.22 true\n",
+        encoding="utf-8",
+    )
+    workflow = tmp_path / "workflow.yml"
+    workflow.write_text(
+        "services:\n  redis:\n    image: redis:8-alpine\n"
+        "steps:\n  - run: git ls-files | xargs docker run --rm hadolint/hadolint:v2 hadolint\n",
+        encoding="utf-8",
+    )
+    assert _pulled_images(script) == ["owner/tool:1.2", "alpine:3.22"]
+    assert _pulled_images(workflow) == ["redis:8-alpine", "hadolint/hadolint:v2"]
+
+
+def test_pulled_images_skip_build_stages_and_keep_an_image_without_a_digest(
+    tmp_path: Path,
+) -> None:
+    pinned = f"python:3.14-slim@sha256:{'0' * 64}"
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        f"FROM {pinned} AS builder\nCOPY --from=uv:0.10 /uv /uv\n"
+        "FROM nginx:1.29-alpine\nCOPY --from=builder /dist /html\n",
+        encoding="utf-8",
+    )
+    images = _pulled_images(dockerfile)
+    assert images == [pinned, "uv:0.10", "nginx:1.29-alpine"]
+    assert [image for image in images if not DIGEST.search(image)] == images[1:]
+
+
+def test_the_tests_and_ci_run_the_redis_image_that_compose_runs() -> None:
+    """Dependabot updates compose.yaml only; the CI service and the test fixture follow it."""
+    # Not a host name such as stack-redis:6379.
+    redis = re.compile(r"(?<![\w.-])redis:[\w.-]+(?:@sha256:[0-9a-f]{64})?")
+    paths = ["compose.yaml", ".github/workflows/ci.yml", "api/tests/conftest.py"]
+    found = [set(redis.findall((ROOT / path).read_text(encoding="utf-8"))) for path in paths]
+    assert len(found[0]) == 1
+    assert all(images == found[0] for images in found), dict(zip(paths, found, strict=True))
 
 
 def test_api_image_installs_locked_runtime_dependencies_only() -> None:

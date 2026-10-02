@@ -26,7 +26,7 @@ jobs:
       GITLEAKS_VERSION: 8.30.1
       GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -46,35 +46,61 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/dependency-review-action@v5
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
 
+  # A new advisory against an unchanged lock file is not the pull request's fault: on pull
+  # requests the audits run only when a lock file changes; main and the weekly run catch the rest.
+  # On a pull request the audits run only when a lock file or a file that sets how they run changes.
+  audit-inputs:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILES_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files
+          PATHS: '^(api/uv\.lock|api/pyproject\.toml|web/pnpm-lock\.yaml|web/package\.json|\.nvmrc|Makefile|\.github/workflows/security\.yml)$'
+        run: |
+          files=$(gh api --paginate "$FILES_URL" --jq '.[].filename')
+          if grep -qE "$PATHS" <<<"$files"; then changed=true; else changed=false; fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
   python-audit:
+    needs: audit-inputs
+    if: ${{ !failure() && !cancelled() && (github.event_name != 'pull_request' || needs.audit-inputs.outputs.changed == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - run: make audit-python
 
   web-audit:
+    needs: audit-inputs
+    if: ${{ !failure() && !cancelled() && (github.event_name != 'pull_request' || needs.audit-inputs.outputs.changed == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
       - run: make audit-web
@@ -82,10 +108,17 @@ jobs:
   # The ruleset requires this job only; a job joins the gate by being listed in needs.
   security-required:
     if: always()
-    needs: [secrets, dependency-review]
+    needs: [secrets, dependency-review, audit-inputs, python-audit, web-audit]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       # A skipped job passes, so a job that runs only on some events never blocks a merge.
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: exit 1
+
+  scheduled-failure:
+    if: failure() && github.event_name == 'schedule'
+    needs: [secrets, python-audit, web-audit]
+    permissions:
+      issues: write
+    uses: ./.github/workflows/scheduled-failure.yml

@@ -8,6 +8,7 @@ config loader.
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -74,7 +75,11 @@ GATE_FAILS = "- if: contains(needs.*.result, 'failure') || contains(needs.*.resu
     ("workflow", "gate", "needs"),
     [
         ("ci.yml", "ci-required", "[check, integration, coverage, guards, review-budget]"),
-        ("security.yml", "security-required", "[secrets, dependency-review]"),
+        (
+            "security.yml",
+            "security-required",
+            "[secrets, dependency-review, audit-inputs, python-audit, web-audit]",
+        ),
         ("containers.yml", "containers-required", "[config, images]"),
     ],
 )
@@ -211,11 +216,113 @@ def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
     assert workflow.count("severity: CRITICAL,HIGH") == 2
 
 
+def test_web_image_scan_runs_only_when_the_images_were_built() -> None:
+    images = _section(WORKFLOWS / "containers.yml", "images", 2)
+    build = images.index("- run: make build")
+    assert images[build + 1] == "id: build"
+    web_scan = images.index("- name: trivy image (web)")
+    condition = next(line for line in images[web_scan:] if line.startswith("if:"))
+    assert "steps.build.outcome == 'success'" in condition
+    # The api scan is skipped after a failed smoke test, so the web scan sets Trivy up itself.
+    assert "skip-setup-trivy: true" not in images
+
+
+def _audit_inputs() -> re.Pattern[str]:
+    """Return the pattern of the changed paths that make a pull request run the audits."""
+    lines = _section(WORKFLOWS / "security.yml", "audit-inputs", 2)
+    (pattern,) = [line.split(": ", 1)[1].strip("'") for line in lines if line.startswith("PATHS:")]
+    assert any('grep -qE "$PATHS"' in line for line in lines)
+    return re.compile(pattern)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "api/uv.lock",
+        "web/pnpm-lock.yaml",
+        "api/pyproject.toml",
+        "web/package.json",
+        ".nvmrc",
+        "Makefile",
+        ".github/workflows/security.yml",
+    ],
+)
+def test_a_pull_request_that_changes_how_the_audits_run_runs_them(path: str) -> None:
+    assert _audit_inputs().search(path)
+
+
+@pytest.mark.parametrize("path", ["README.md", "api/src/quiz/app.py", "web/Makefile.txt"])
+def test_a_pull_request_that_leaves_the_audits_alone_skips_them(path: str) -> None:
+    assert not _audit_inputs().search(path)
+
+
 def test_make_check_runs_every_pre_commit_hook_on_every_file() -> None:
     recipe = _block(
         ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
     )
     assert any("pre-commit run --all-files" in line for line in recipe)
+
+
+def test_make_check_lints_the_workflows() -> None:
+    recipe = _block(
+        ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
+    )
+    assert any("uv run --project api --locked actionlint" in line for line in recipe)
+    assert any("$(ZIZMOR)" in line for line in recipe)
+
+
+def test_workflow_lint_runs_the_locked_shellcheck_on_run_scripts(tmp_path: Path) -> None:
+    """actionlint skips shellcheck when it is not on PATH; the dev group locks one."""
+    workflow = tmp_path / "probe.yml"
+    workflow.write_text(
+        "on: push\njobs:\n  probe:\n    runs-on: ubuntu-latest\n"
+        "    steps:\n      - run: echo $FOO\n",
+        encoding="utf-8",
+    )
+    venv_bin = Path(sys.executable).parent
+    result = subprocess.run(
+        [venv_bin / "actionlint", workflow],
+        cwd=tmp_path,
+        env={**os.environ, "PATH": str(venv_bin)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "SC2086" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("uses", "fails"),
+    [
+        ("actions/checkout@v7", True),
+        ("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1", False),
+    ],
+)
+def test_workflow_lint_fails_on_an_action_that_is_not_pinned_to_a_commit(
+    tmp_path: Path, uses: str, *, fails: bool
+) -> None:
+    """The Makefile's zizmor command with the repository's settings, on a one-step workflow."""
+    line = next(
+        line
+        for line in (ROOT / "Makefile").read_text(encoding="utf-8").splitlines()
+        if line.startswith("ZIZMOR = ")
+    )
+    args = shlex.split(line.split(" zizmor ", 1)[1])
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    shutil.copy(ROOT / ".github" / "zizmor.yml", tmp_path / ".github")
+    (workflows / "probe.yml").write_text(
+        "on: push\npermissions: {}\njobs:\n  probe:\n    runs-on: ubuntu-latest\n"
+        f"    steps:\n      - uses: {uses}\n        with:\n          persist-credentials: false\n",
+        encoding="utf-8",
+    )
+    zizmor = Path(sys.executable).with_name("zizmor")
+    result = subprocess.run(
+        [zizmor, *args], cwd=tmp_path, capture_output=True, text=True, check=False
+    )
+    assert (result.returncode != 0) is fails, result.stdout + result.stderr
+    assert ("unpinned-uses" in result.stdout) is fails
 
 
 def _deptry_tools() -> tuple[list[str], list[str]]:

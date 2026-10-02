@@ -1,0 +1,32 @@
+# AI-ASSISTED: reports a failed scheduled run in one open issue labelled ci-scheduled.
+name: scheduled-failure
+
+# Called by the last job of each scheduled workflow, so a failure that no pull request caused
+# lands in one tracking issue instead of on someone's next pull request.
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the ci-scheduled issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create ci-scheduled --force --color B60205 --description "A scheduled workflow run failed"
+          body="The scheduled run of the $WORKFLOW workflow failed: $RUN_URL"
+          issue=$(gh issue list --label ci-scheduled --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --body "$body"
+          else
+            gh issue create --title "A scheduled workflow run failed" --label ci-scheduled --body "$body"
+          fi

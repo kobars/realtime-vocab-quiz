@@ -22,5 +22,5 @@ async def test_async_tests_run_without_a_marker() -> None:
 
 @given(st.integers())
 def test_hypothesis_runs_with_a_registered_profile(value: int) -> None:
-    assert settings().max_examples in {50, 500}
+    assert settings().max_examples in {50, 500, 5000}
     assert -value == 0 - value

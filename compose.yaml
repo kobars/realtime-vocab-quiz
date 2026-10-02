@@ -40,7 +40,7 @@ x-api-env: &api-env
 services:
   redis:
     profiles: [dev]
-    image: redis:8-alpine
+    image: redis:8.10-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     ports:
       - "127.0.0.1:6381:6379" # local only: the development Redis has no password
@@ -50,7 +50,7 @@ services:
 
   stack-redis:
     <<: *hardened
-    image: redis:8-alpine
+    image: redis:8.10-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
     user: redis # the entrypoint then runs the server as is, with no capability to drop to it
     command:
       - redis-server

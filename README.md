@@ -1,6 +1,8 @@
 <!-- AI-ASSISTED: project overview: what it does, how to try it, run the tests, how it works, configuration and layout. -->
 # Real-time vocabulary quiz
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/kobars/realtime-vocab-quiz/badge)](https://scorecard.dev/viewer/?uri=github.com/kobars/realtime-vocab-quiz)
+
 Players join a quiz by its ID, answer timed vocabulary questions, and see a shared
 leaderboard that updates live as anyone scores. The real-time server is Python (FastAPI over
 WebSockets, with Redis for scores and fan-out across nodes); a Vue 3 single-page app is its
