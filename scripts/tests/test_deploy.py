@@ -48,7 +48,11 @@ def _run(
 
 
 def _sourced(
-    tmp_path: Path, call: str, *args: str, env: dict[str, str] | None = None, **stubs: str
+    tmp_path: Path,
+    call: str,
+    *args: str,
+    env: dict[str, str] | None = None,
+    **stubs: str,
 ) -> subprocess.CompletedProcess[str]:
     """Source install.sh and run one helper call; ARGS are $2, $3 and so on."""
     install = str(DEPLOY / "install.sh")
@@ -84,7 +88,11 @@ esac"""
     [
         ("203.0.113.7", "198.51.100.2", "203.0.113.7"),  # the metadata service first
         ("", "198.51.100.2", "198.51.100.2"),  # not a Droplet: the echo service
-        ("<html>404</html>", "198.51.100.2", "198.51.100.2"),  # an answer that is not an address
+        (
+            "<html>404</html>",
+            "198.51.100.2",
+            "198.51.100.2",
+        ),  # an answer that is not an address
         ("", "300.1.1.1", None),
     ],
 )
@@ -97,7 +105,10 @@ def test_the_public_ip_comes_from_the_metadata_service_then_the_echo_service(
 
 def test_the_domain_is_the_one_given_else_the_ip_on_sslip_io(tmp_path: Path) -> None:
     call = "choose_domain quiz.example.com 203.0.113.7; choose_domain '' 203.0.113.7"
-    assert _sourced(tmp_path, call).stdout.split() == ["quiz.example.com", "203.0.113.7.sslip.io"]
+    assert _sourced(tmp_path, call).stdout.split() == [
+        "quiz.example.com",
+        "203.0.113.7.sslip.io",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -112,15 +123,41 @@ def test_the_domain_is_the_one_given_else_the_ip_on_sslip_io(tmp_path: Path) -> 
 def test_a_domain_must_point_at_this_vm_before_caddy_asks_for_a_certificate(
     tmp_path: Path, records: str, error: str | None
 ) -> None:
+    """Here the public resolver cannot be reached, so the system's resolver answers."""
     getent = 'for a in $RECORDS; do echo "$a STREAM $2"; done; [[ -n $RECORDS ]] || exit 2'
     result = _sourced(
         tmp_path,
         "check_dns quiz.example.com 203.0.113.7 0",
         env={"RECORDS": records},
         getent=getent,
+        curl="exit 7",
     )
     assert result.returncode == (1 if error else 0)
     assert error is None or error in result.stderr
+
+
+# Google Public DNS's JSON answer for a name that is a CNAME of a name with one A record.
+DOH_ANSWER = (
+    """printf '{"Status":0,"Answer":[{"name":"quiz.example.com.","type":5,"TTL":60,"""
+    """"data":"edge.example.net."},{"name":"edge.example.net.","type":1,"TTL":60,"""
+    """"data":"%s"}]}\\n' "$ADDRESS" """
+)
+
+
+@pytest.mark.parametrize(("address", "code"), [("203.0.113.7", 0), ("198.51.100.2", 1)])
+def test_the_dns_check_asks_public_dns_not_etc_hosts(
+    tmp_path: Path, address: str, code: int
+) -> None:
+    """/etc/hosts may map the VM's own host name, the domain here, to 127.0.1.1."""
+    result = _sourced(
+        tmp_path,
+        "check_dns quiz.example.com 203.0.113.7 0",
+        env={"ADDRESS": address},
+        curl=DOH_ANSWER,
+        getent='echo "127.0.1.1 STREAM $2"',
+    )
+    assert result.returncode == code
+    assert not code or f"resolves to {address}, not to this VM" in result.stderr
 
 
 def test_the_vms_own_sslip_io_name_needs_no_lookup(tmp_path: Path) -> None:
@@ -173,28 +210,39 @@ def test_the_env_gets_new_secrets_once_and_keeps_them(tmp_path: Path) -> None:
         k: v for k, v in first.items() if k not in {"DOMAIN", "ADMIN_TOKEN", "REDIS_PASSWORD"}
     } == {k: v for k, v in example.items() if k not in {"DOMAIN", "ADMIN_TOKEN", "REDIS_PASSWORD"}}
     assert env.stat().st_mode & 0o077 == 0
-    for domain, expected in (("", "a.sslip.io"), ("quiz.example.com", "quiz.example.com")):
+    for domain, expected in (
+        ("", "a.sslip.io"),
+        ("quiz.example.com", "quiz.example.com"),
+    ):
         _sourced(tmp_path, render, str(env), domain)
         assert _env(env) == {**first, "DOMAIN": expected}
 
 
 OLD_ENV = "DOMAIN=quiz.example.com\nADMIN_TOKEN=old\n"
-# The checkout is at the commit in $STATE; make fails on $BAD_UP and readyz on $BAD_READY.
-FAKE_GIT = """echo "git $*" >> "$LOG"
+# The checkout is at the commit in $STATE, on branch main unless $DETACHED is set; the merge of
+# main's upstream brings "new" (or fails on $PULL_FAILS). make fails on $BAD_UP, readyz on
+# $BAD_READY.
+FAKE_GIT = """[[ $1 != -C ]] || shift 2
+echo "git $*" >> "$LOG"
 case "$1" in
   rev-parse) cat "$STATE" ;;
-  pull) [[ -z ${PULL_FAILS:-} ]] || exit 1; echo new > "$STATE" ;;
+  symbolic-ref) [[ -z ${DETACHED:-} ]] || exit 1; [[ $* != *--short* ]] || echo main ;;
+  describe) echo v1 ;;
+  checkout) [[ ${*: -1} == main ]] || echo "${*: -1}" > "$STATE" ;;
+  merge) [[ -z ${PULL_FAILS:-} ]] || exit 1; echo new > "$STATE" ;;
   reset) echo "$3" > "$STATE" ;;
 esac"""
 FAKE_MAKE = 'echo "make $* @ $(cat "$STATE")" >> "$LOG"; [[ $(cat "$STATE") != "${BAD_UP:-}" ]]'
 FAKE_READY = '[[ $(cat "$STATE") != "${BAD_READY:-}" ]]'
 
 
-# compose's Redis counts one more save after each BGSAVE; each cp writes a file.
+# compose's Redis counts one more save after each BGSAVE; each cp writes a file. The Redis restore
+# fails on $REDIS_FAILS.
 FAKE_DOCKER = """echo "docker $*" >> "$LOG"
 saves="$(cat "$LOG.saves" 2>/dev/null || echo 0)"
 case "$*" in
-  *"redis-cli BGSAVE") echo $((saves + 1)) > "$LOG.saves" ;;
+  *"redis-cli BGSAVE SCHEDULE") echo $((saves + 1)) > "$LOG.saves" ;;
+  *" --entrypoint sh stack-redis "*) [[ -z ${REDIS_FAILS:-} ]] ;;
   *"redis-cli INFO persistence")
     printf '%s\\r\\n' rdb_bgsave_in_progress:0 "rdb_saves:$saves" rdb_last_bgsave_status:ok ;;
   *" cp stack-redis:/data/dump.rdb "*) echo REDIS > "${@: -1}" ;;
@@ -205,10 +253,11 @@ esac"""
 def _ops(tmp_path: Path, *args: str, **env: str) -> tuple[int, list[str], str, Path]:
     """Run ops.sh from a copy; return its exit code, the stubs' calls, its output and the copy."""
     repo = tmp_path / "repo"
-    (repo / "scripts").mkdir(parents=True, exist_ok=True)
-    shutil.copytree(DEPLOY, repo / "scripts" / "deploy", dirs_exist_ok=True)
-    if not (repo / ".env").exists():
+    if not repo.exists():  # the first call: a checkout with OLD_ENV
+        repo.mkdir()
         (repo / ".env").write_text(OLD_ENV, encoding="utf-8")
+    (repo / ".git").mkdir(exist_ok=True)
+    shutil.copytree(DEPLOY, repo / "scripts" / "deploy", dirs_exist_ok=True)
     state, log = tmp_path / "state", tmp_path / "calls.log"
     if not state.exists():
         state.write_text("old\n", encoding="utf-8")
@@ -235,43 +284,86 @@ def _ops(tmp_path: Path, *args: str, **env: str) -> tuple[int, list[str], str, P
     )
 
 
+PULL = ["git checkout --quiet main", "git merge --quiet --ff-only @{upstream}"]
+BACK = ["git checkout --quiet main", "git reset --keep old"]
+
+
 @pytest.mark.parametrize(
-    ("env", "calls", "message"),
+    ("args", "env", "calls", "message"),
     [
-        ({}, ["make prod-up @ new"], "Updated old -> new"),
+        ([], {}, [*PULL, "make prod-up @ new"], "Updated old -> new"),
         (
+            [],
             {"BAD_UP": "new"},
-            ["make prod-up @ new", "git reset --keep old", "make prod-up @ old"],
+            [*PULL, "make prod-up @ new", *BACK, "make prod-up @ old"],
             "rolled back to old, which is ready again",
         ),
         (
+            [],
             {"BAD_READY": "new"},
-            ["make prod-up @ new", "git reset --keep old", "make prod-up @ old"],
+            [*PULL, "make prod-up @ new", *BACK, "make prod-up @ old"],
             "rolled back to old, which is ready again",
         ),
         (
+            [],
             {"BAD_UP": "new", "BAD_READY": "old"},
-            ["make prod-up @ new", "git reset --keep old", "make prod-up @ old"],
+            [*PULL, "make prod-up @ new", *BACK, "make prod-up @ old"],
             "old is not ready either",
         ),
-        ({"PULL_FAILS": "1"}, [], "nothing changed, the stack still runs old"),
+        (
+            [],
+            {"PULL_FAILS": "1"},
+            [*PULL, *BACK],
+            "could not move to main; the stack still runs old",
+        ),
+        # A tag install: the checkout is on no branch.
+        ([], {"DETACHED": "1"}, [], "on v1, not on a branch; name the tag or branch"),
+        (
+            ["v2"],
+            {"DETACHED": "1"},
+            ["git checkout --quiet v2", "make prod-up @ v2"],
+            "old -> v2",
+        ),
+        (
+            ["v2"],
+            {"DETACHED": "1", "BAD_READY": "v2"},
+            [
+                "git checkout --quiet v2",
+                "make prod-up @ v2",
+                "git checkout --quiet --detach old",
+                "make prod-up @ old",
+            ],
+            "rolled back to old, which is ready again",
+        ),
     ],
 )
 def test_an_update_that_does_not_get_ready_rolls_back_to_the_commit_that_ran(
-    tmp_path: Path, env: dict[str, str], calls: list[str], message: str
+    tmp_path: Path, args: list[str], env: dict[str, str], calls: list[str], message: str
 ) -> None:
-    code, log, out, _ = _ops(tmp_path, "update", **env)
-    assert code == (0 if env == {} else 1), out
-    assert [c for c in log if not c.startswith(("git rev-parse", "git pull"))] == calls
+    code, log, out, _ = _ops(tmp_path, "update", *args, **env)
+    assert code == (1 if {"BAD_UP", "BAD_READY", "PULL_FAILS"} & set(env) or not calls else 0), out
+    assert [
+        c for c in log if c.startswith(("make", "git checkout", "git merge", "git reset"))
+    ] == calls
     assert message in out
+
+
+def _backup(tmp_path: Path) -> tuple[Path, Path]:
+    """Back up to out/b.tar.gz, relative to the folder ops.sh runs in; return it and the copy."""
+    code, _, out, repo = _ops(tmp_path, "backup", "out/b.tar.gz")
+    assert code == 0, out
+    return tmp_path / "out" / "b.tar.gz", repo
 
 
 def test_a_backup_holds_the_redis_snapshot_the_certificates_and_env_and_restores(
     tmp_path: Path,
 ) -> None:
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "b.tar.gz").write_text("an older backup", encoding="utf-8")
+    (tmp_path / "out" / "b.tar.gz").chmod(0o644)
     code, log, out, repo = _ops(tmp_path, "backup", "out/b.tar.gz")
     assert code == 0, out
-    backup = repo / "out" / "b.tar.gz"  # relative to the checkout
+    backup = tmp_path / "out" / "b.tar.gz"
     assert backup.stat().st_mode & 0o077 == 0  # it holds the secrets and the private keys
     with tarfile.open(backup) as tar:
         assert {m.name for m in tar.getmembers() if m.isfile()} == {
@@ -279,11 +371,11 @@ def test_a_backup_holds_the_redis_snapshot_the_certificates_and_env_and_restores
             "redis/dump.rdb",
             "caddy/caddy/key.pem",
         }
-    assert any(c.endswith("redis-cli BGSAVE") for c in log)
+    assert any(c.endswith("redis-cli BGSAVE SCHEDULE") for c in log)
 
     fresh = "DOMAIN=quiz.example.com\nADMIN_TOKEN=fresh\n"
     (repo / ".env").write_text(fresh, encoding="utf-8")
-    code, log, out, _ = _ops(tmp_path, "restore", str(backup))
+    code, log, out, _ = _ops(tmp_path, "restore", "out/b.tar.gz")
     assert code == 0, out
     assert (repo / ".env").read_text(encoding="utf-8") == OLD_ENV
     assert (repo / ".env.before-restore").read_text(encoding="utf-8") == fresh
@@ -294,11 +386,61 @@ def test_a_backup_holds_the_redis_snapshot_the_certificates_and_env_and_restores
     assert log[-1] == "make prod-up @ old"
 
 
+def test_a_restore_onto_a_new_host_keeps_its_own_sslip_io_name(tmp_path: Path) -> None:
+    (tmp_path / "repo").mkdir()
+    (tmp_path / "repo" / ".env").write_text(
+        "DOMAIN=203.0.113.7.sslip.io\nADMIN_TOKEN=old\n", encoding="utf-8"
+    )
+    backup, repo = _backup(tmp_path)
+    (repo / ".env").write_text(
+        "DOMAIN=198.51.100.2.sslip.io\nADMIN_TOKEN=fresh\n", encoding="utf-8"
+    )
+    code, _, out, _ = _ops(tmp_path, "restore", str(backup))
+    assert code == 0, out
+    assert _env(repo / ".env") == {
+        "DOMAIN": "198.51.100.2.sslip.io",
+        "ADMIN_TOKEN": "old",
+    }
+    assert (repo / ".env").stat().st_mode & 0o077 == 0
+
+
+def test_a_snapshot_that_does_not_load_puts_the_previous_env_back_and_restarts(
+    tmp_path: Path,
+) -> None:
+    backup, repo = _backup(tmp_path)
+    fresh = "DOMAIN=quiz.example.com\nADMIN_TOKEN=fresh\n"
+    (repo / ".env").write_text(fresh, encoding="utf-8")
+    code, log, out, _ = _ops(tmp_path, "restore", str(backup), REDIS_FAILS="1")
+    assert code == 1
+    assert "did not load; the previous .env and data are back" in out
+    assert (repo / ".env").read_text(encoding="utf-8") == fresh
+    assert not any(" --entrypoint sh caddy " in c for c in log)
+    assert log[-1] == "make prod-up @ old"
+
+
+def test_a_restore_into_a_checkout_without_env_stops_nothing(tmp_path: Path) -> None:
+    backup, repo = _backup(tmp_path)
+    (repo / ".env").unlink()
+    code, log, out, _ = _ops(tmp_path, "restore", str(backup))
+    assert code == 0, out
+    assert (repo / ".env").read_text(encoding="utf-8") == OLD_ENV
+    assert not any(c.endswith(" down") for c in log)
+
+
+def _docker_runs() -> bool:
+    return DOCKER is not None and (
+        subprocess.run([DOCKER, "info"], capture_output=True, check=False, timeout=30).returncode
+        == 0
+    )
+
+
 @pytest.mark.skipif(DOCKER is None, reason="needs Docker")
 @pytest.mark.slow
 def test_the_install_writes_env_once_in_a_fresh_ubuntu() -> None:
     """Offline, as root, without Docker in the container: --dry-run prints the package, clone and
     stack commands and writes .env; a run with a domain that does not resolve stops before them."""
+    if not _docker_runs():
+        pytest.skip("the Docker daemon is not running")
     script = """set -u
 mkdir -p /opt/q && cp /example /opt/q/.env.prod.example
 bash /install.sh --dry-run --dir /opt/q --ip 203.0.113.7 && cp /opt/q/.env /tmp/first
@@ -357,7 +499,9 @@ echo "exit=$? mode=$(stat -c %a /opt/q/.env)"; cat /tmp/first; echo ---; cat /op
     assert last_env == {**first_env, "DOMAIN": "quiz.example.com"}  # the same secrets
 
 
-def test_the_cloud_init_user_data_runs_the_install_script_and_logs_it(tmp_path: Path) -> None:
+def test_the_cloud_init_user_data_runs_the_install_script_and_logs_it(
+    tmp_path: Path,
+) -> None:
     text = (ROOT / "infra" / "deploy" / "cloud-init.yaml").read_text(encoding="utf-8")
     assert text.startswith("#cloud-config\n")  # cloud-init ignores user data without it
     data = yaml_load(text)
@@ -365,7 +509,8 @@ def test_the_cloud_init_user_data_runs_the_install_script_and_logs_it(tmp_path: 
     ((shell, flag, script),) = data["runcmd"]
     assert (shell, flag) == ("bash", "-c")
     url = re.search(
-        r"https://raw\.githubusercontent\.com/kobars/realtime-vocab-quiz/main/(\S+)", script
+        r"https://raw\.githubusercontent\.com/kobars/realtime-vocab-quiz/main/(\S+)",
+        script,
     )
     assert url is not None
     assert url[1] == "scripts/deploy/install.sh"
@@ -374,6 +519,9 @@ def test_the_cloud_init_user_data_runs_the_install_script_and_logs_it(tmp_path: 
     (tmp_path / "user-data.sh").write_text(f"#!/usr/bin/env bash\n{script}", encoding="utf-8")
     for check in (["bash", "-n"], ["shellcheck"]):
         result = subprocess.run(
-            [*check, str(tmp_path / "user-data.sh")], capture_output=True, text=True, check=False
+            [*check, str(tmp_path / "user-data.sh")],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         assert result.returncode == 0, result.stdout + result.stderr
