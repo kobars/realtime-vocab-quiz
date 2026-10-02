@@ -336,7 +336,8 @@ export class QuizClient {
     if (answer === undefined || !this.joined) return
     this.inFlight.push(submissionId)
     this.send(answer)
-    // The deadline replaces any retry still waiting. The first send keeps its place in `inFlight`: a slow reply to it still arrives first.
+    // The deadline replaces a retry still waiting. The first send keeps its place in `inFlight`: a slow reply to it
+    // still arrives first.
     this.retryAnswer(submissionId, REPLY_TIMEOUT_MS)
   }
 
@@ -349,7 +350,11 @@ export class QuizClient {
   /** Sends an unsettled answer again after `wait` ms instead of at its earlier retry or deadline. */
   private retryAnswer(submissionId: string, wait: number): void {
     this.cancelAnswerRetry(submissionId)
-    this.answerRetries.set(submissionId, this.after(wait, () => this.sendAnswer(submissionId)))
+    const timer = this.after(wait, () => {
+      this.answerRetries.delete(submissionId)
+      this.sendAnswer(submissionId)
+    })
+    this.answerRetries.set(submissionId, timer)
   }
 
   private cancelAnswerRetry(submissionId: string): void {
