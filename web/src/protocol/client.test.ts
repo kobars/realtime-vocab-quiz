@@ -1,6 +1,6 @@
 // AI-ASSISTED: tests for QuizClient: connect, reconnect, seq wiring, liveness and answer retries, on a fake socket and fake timers.
 import { afterEach, beforeEach, expect, expectTypeOf, it, vi } from 'vitest'
-import { type ClientEvent, QuizClient, type QuizClientOptions, type QuizSocket, SNAPSHOT_TIMEOUT_MS } from './client'
+import { type ClientEvent, QuizClient, type QuizClientOptions, type QuizSocket, REPLY_TIMEOUT_MS } from './client'
 import { httpAuthApi, IDENTITY_TIMEOUT_MS } from './identity'
 import type { ServerMessage } from './types.generated'
 
@@ -258,15 +258,15 @@ it('sends a resync again each time its snapshot does not arrive in time, until i
   socket.receive(board(2))
   const resyncs = () => socket.sent.filter((message) => message.type === 'resync').length
   for (let seq = 3; seq <= 7; seq++) {
-    await wait(SNAPSHOT_TIMEOUT_MS / 5)
+    await wait(REPLY_TIMEOUT_MS / 5)
     socket.receive(board(seq))
     socket.receive({ type: 'pong', seq })
   }
   expect(resyncs()).toBe(3)
-  await wait(SNAPSHOT_TIMEOUT_MS)
+  await wait(REPLY_TIMEOUT_MS)
   expect(resyncs()).toBe(4)
   socket.receive({ type: 'snapshot', atSeq: 2, status: 'open' })
-  await wait(3 * SNAPSHOT_TIMEOUT_MS)
+  await wait(3 * REPLY_TIMEOUT_MS)
   expect([resyncs(), leaderboards()]).toEqual([4, [3, 4, 5, 6, 7]])
 })
 
@@ -652,7 +652,8 @@ it('repeats no next after NOT_JOINED when a newer next replaced it before the jo
   socket.receive(overload('NOT_JOINED'))
   client.next(2)
   socket.receive(joined())
-  await wait(5_000)
+  // Short of the reply deadline of the newer next.
+  await wait(REPLY_TIMEOUT_MS - 1)
   expect(nexts(socket)).toEqual([3, 2])
 })
 
@@ -723,7 +724,8 @@ it('retries only the newest next when the player asks again before the retry', a
   client.next(1)
   socket.receive(overload('RATE_LIMITED'))
   client.next(2)
-  await wait(5_000)
+  // Short of the reply deadline of the newer next.
+  await wait(REPLY_TIMEOUT_MS - 1)
   expect(nexts(socket)).toEqual([1, 2])
 })
 
@@ -760,4 +762,74 @@ it('sends a join that got UNAVAILABLE again after the growing backoff, then rese
   second.receive(joined())
   expect(second.types()).toEqual(['join', 'join', 'join', 'resync', 'answer'])
   expect(answers(second)).toEqual([answerMsg('s-1')])
+})
+
+/** Advances `ms` in steps of 1 s with a pong after each, so the link stays alive and no reconnect resends anything. */
+async function quietFor(socket: FakeSocket, ms: number) {
+  for (let elapsed = 0; elapsed < ms; elapsed += 1_000) {
+    await wait(1_000)
+    socket.receive({ type: 'pong', seq: 0 })
+  }
+}
+
+it('sends a next that gets no reply again after the reply deadline, until its question arrives', async () => {
+  const client = start()
+  const socket = await joinedSocket()
+  socket.receive(bucketDrop)
+  client.next(3)
+  await quietFor(socket, REPLY_TIMEOUT_MS - 1_000)
+  expect(nexts(socket)).toEqual([3])
+  await quietFor(socket, 2_000)
+  expect(nexts(socket)).toEqual([3, 3])
+  socket.receive(question(3))
+  await quietFor(socket, 2 * REPLY_TIMEOUT_MS)
+  expect(nexts(socket)).toEqual([3, 3])
+})
+
+it('sends an answer that gets no reply again with the same submissionId after the reply deadline, until answer_result', async () => {
+  uuids('s-1')
+  const client = start()
+  const socket = await joinedSocket()
+  client.answer(0, 2)
+  await quietFor(socket, REPLY_TIMEOUT_MS - 1_000)
+  expect(answers(socket)).toEqual([answerMsg('s-1')])
+  await quietFor(socket, 2_000)
+  expect(answers(socket)).toEqual([answerMsg('s-1'), answerMsg('s-1')])
+  socket.receive(result('s-1'))
+  await quietFor(socket, 2 * REPLY_TIMEOUT_MS)
+  expect(answers(socket)).toHaveLength(2)
+})
+
+it('an error reply replaces the reply deadline with its own retry, which then waits for a reply again', async () => {
+  uuids('s-1')
+  const client = start(() => 0.5)
+  const socket = await joinedSocket()
+  client.next(3)
+  client.answer(0, 2)
+  await wait(REPLY_TIMEOUT_MS - 100)
+  // The next is retried 1 s later; the answer after floor(0.5 × 250) = 125 ms.
+  socket.receive(overload('RATE_LIMITED'))
+  socket.receive(answerError('UNAVAILABLE'))
+  await wait(200)
+  expect([nexts(socket), answers(socket)]).toEqual([[3], [answerMsg('s-1'), answerMsg('s-1')]])
+  await wait(800)
+  expect(nexts(socket)).toEqual([3, 3])
+  await wait(REPLY_TIMEOUT_MS - 1_000)
+  expect([nexts(socket), answers(socket).length]).toEqual([[3, 3], 2])
+  await wait(1_000)
+  expect([nexts(socket), answers(socket).length]).toEqual([[3, 3, 3], 3])
+})
+
+it('cancels the reply deadlines on a disconnect, so the answer goes out once on the next socket', async () => {
+  uuids('s-1')
+  const client = start()
+  const first = await joinedSocket()
+  client.next(3)
+  client.answer(0, 2)
+  await wait(REPLY_TIMEOUT_MS - 1_000)
+  first.drop()
+  const second = await connected()
+  second.receive(joined())
+  await quietFor(second, REPLY_TIMEOUT_MS - 1_000)
+  expect([nexts(first), answers(first).length, nexts(second), answers(second)]).toEqual([[3], 1, [], [answerMsg('s-1')]])
 })
