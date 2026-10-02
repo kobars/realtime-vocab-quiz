@@ -227,7 +227,7 @@ composition root alone wires them is a convention, not a check.
 | Design system (`web/packages/clay/`) | The client's look, as the workspace package `@quiz/clay` | The design tokens (light and dark), the Tailwind theme and utilities, the self-hosted font, the components (button, card, badge, input, progress, toaster) and their gallery ([README](web/packages/clay/README.md)) | Imported by the web client through its entry points only |
 | nginx (`infra/nginx/`) | The edge: the stack's single entry | The routes (`/` to the web container; `/api`, its prefix dropped, and `/ws` to both API nodes), WebSocket upgrade headers, `X-Forwarded-For`, the request limits and an access log without the query string | Browser, or Caddy on a public host; the web container; both API nodes |
 | Web container (`web/Dockerfile`, `web/nginx.conf`) | Serves the built client | The Vite build's static files, their cache headers, the CSP and the other security headers (`web/security-headers.conf`) | nginx |
-| Caddy (`infra/caddy/`, `compose.prod.yaml`) | HTTPS on a public host only | The certificate for `DOMAIN` (Let's Encrypt, renewed), the redirect to HTTPS, HSTS, a fresh `X-Forwarded-For` and a log without the admin token or the ticket | Browser; nginx |
+| Caddy (`infra/caddy/`, `compose.prod.yaml`) | HTTPS on a public host only | The certificate for `DOMAIN` (Let's Encrypt, renewed), the redirect to HTTPS, HSTS, a fresh `X-Forwarded-For` and a log without the admin token, the host token or the ticket | Browser; nginx |
 | API node (`quiz/main.py`) | One FastAPI process; two run side by side | `create_app()`: settings, the chosen adapters, start and stop hooks | nginx; Redis |
 | Domain (`quiz/domain/`) | The quiz rules with no I/O | Scoring, standings order and ranks, the player's session states, domain errors | Nothing |
 | Contracts (`quiz/contracts/`) | The wire protocol, defined once | Pydantic models of every message and the codec; the source of the generated JSON Schema and TypeScript types | Used by the use cases, the gateway and the client (generated types) |
@@ -823,8 +823,9 @@ The client address comes from `X-Forwarded-For` only when the peer is a trusted 
 `TRUSTED_PROXIES`). On a public host (`compose.prod.yaml`), Caddy terminates HTTPS, sends HSTS
 and replaces any `X-Forwarded-For` a client sent; nginx trusts that header from Caddy's network
 alone, so each player keeps their own address for the caps, and its request zones stay ceilings
-for the whole stack. Caddy's error log drops the admin token and the WebSocket ticket. The mock admin API exists only with `ADMIN_MOCK=1`; without the
-`X-Admin-Token` header (compared in constant time) its paths answer 404 like unknown paths.
+for the whole stack. Caddy's error log drops the admin token, the host token and the WebSocket
+ticket. The mock admin API exists only with `ADMIN_MOCK=1`; without the `X-Admin-Token` header
+(compared in constant time) its paths answer 404 like unknown paths.
 nginx answers 404 for `/api/metrics`. The containers run as non-root users on read-only root
 filesystems with every capability dropped, and the web image sends a CSP and the other
 security headers (`web/security-headers.conf`). [SECURITY.md](SECURITY.md) lists the scans.
@@ -832,8 +833,9 @@ security headers (`web/security-headers.conf`). [SECURITY.md](SECURITY.md) lists
 **Self-service hosting.** Any visitor can host a quiz (`PUBLIC_HOSTING`, on by default; `0`
 removes the routes, which then answer 404). The host token is 32 random bytes (base64url),
 returned once; the store keeps only its SHA-256 with the quiz, the node compares hashes in
-constant time (`hmac.compare_digest`), and no log line carries the token
-(`adapters/http/hosting.py`). A request whose `Origin` names a site outside `ALLOWED_ORIGINS`
+constant time (`hmac.compare_digest`), and no log line carries the token: the node logs the
+path only (`adapters/http/hosting.py`), and on a public host Caddy deletes the `X-Host-Token`
+header from the requests it logs. A request whose `Origin` names a site outside `ALLOWED_ORIGINS`
 gets 403 on all three routes; a request without `Origin` comes from no browser, so no other site
 can make a visitor send it. Creation has two limits: `HOSTING_PER_IP` (5) creations per client
 address in each `HOSTING_PER_IP_WINDOW_S` (600 s), a token bucket on each node, so up to twice
