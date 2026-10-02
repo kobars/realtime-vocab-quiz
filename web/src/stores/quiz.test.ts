@@ -483,3 +483,20 @@ it('final standings with you: null set my score from my row, even when their seq
   socket.receive({ type: 'quiz_ended', seq: 2, playerCount: 2, entries: [rival, { ...me, score: 60 }], you: null })
   expect([store.phase, store.myScore, myRow(store)?.score]).toEqual(['results', 60, 60])
 })
+
+it('a snapshot whose you holds a better rank than my row moves my row there, so the header and my row agree', async () => {
+  const { store, socket } = await joinQuiz()
+  socket.receive(joined())
+  socket.receive({ ...snapshot(3), entries: [rival, { ...me, score: 50 }], you: { rank: 1, score: 150 } })
+  expect([store.myRank, store.myScore, store.entries]).toEqual([1, 150, [{ ...me, rank: 1, score: 150 }, { ...rival, rank: 2 }]])
+})
+
+it('a snapshot whose you holds a worse rank moves my row down, or off the list when it is past the last row', async () => {
+  const third = { rank: 3, userId: 'u3', displayName: 'Cy', score: 100 }
+  const { store, socket } = await joinQuiz()
+  socket.receive(joined())
+  socket.receive({ ...snapshot(3), entries: [{ ...me, rank: 1 }, { ...rival, rank: 2 }, third], you: { rank: 3, score: 0 } })
+  expect(store.entries).toEqual([{ ...rival, rank: 1 }, { ...third, rank: 2 }, { ...me, rank: 3 }])
+  socket.receive({ ...snapshot(4), entries: [{ ...me, rank: 1 }, { ...rival, rank: 2 }, third], you: { rank: 60, score: 0 } })
+  expect([store.myRank, store.entries]).toEqual([60, [{ ...rival, rank: 1 }, { ...third, rank: 2 }]])
+})

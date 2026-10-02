@@ -249,17 +249,32 @@ export const useQuizStore = defineStore('quiz', () => {
 
   /**
    * Applies the standings; returns whether they gave my rank and score, from `you` or my row in `rows`. `you` is read
-   * when the message is built, so it can be newer than the rows; my row then shows its score, like the header.
+   * when the message is built, so it can be newer than the rows; my row then shows its rank and score, like the header.
    */
   function standings(seq: number, rows: Entry[], players: number, online: number, you?: You | null, replace = false): boolean {
     const row = rows.find((entry) => entry.userId === s.quiz?.userId)
     const mine = you ?? row
     // Only live `leaderboard` rows (no `you` field) can predate my last answer; a snapshot or the final standings set it.
     if (mine) Object.assign(s, { myRank: mine.rank, myScore: you === undefined ? ownScore(seq, mine.score) : mine.score })
-    const entries = row && row.score !== s.myScore ? rows.map((entry) => (entry === row ? { ...row, score: s.myScore } : entry)) : rows
-    Object.assign(s, { seq, entries, playerCount: players, onlineCount: online })
+    Object.assign(s, { seq, entries: row ? placeMe(rows, row) : rows, playerCount: players, onlineCount: online })
     if (replace) s.replacements += 1
     return mine !== undefined
+  }
+
+  /**
+   * `rows` with my row at my current rank and score. When `you` holds a rank other than my row's, my row moves there and
+   * the rows between shift by one, so the ranks stay unique; a rank past the last row leaves my row to the pinned row.
+   */
+  function placeMe(rows: Entry[], row: Entry): Entry[] {
+    const rank = s.myRank ?? row.rank
+    if (rank === row.rank) return row.score === s.myScore ? rows : rows.map((entry) => (entry === row ? { ...row, score: s.myScore } : entry))
+    const [low, high, shift] = rank < row.rank ? [rank, row.rank, 1] : [row.rank, rank, -1]
+    const others = rows.filter((entry) => entry !== row)
+      .map((entry) => (entry.rank >= low && entry.rank <= high ? { ...entry, rank: entry.rank + shift } : entry))
+    if (!rows.some((entry) => entry.rank >= rank)) return others
+    const at = others.findIndex((entry) => entry.rank > rank)
+    others.splice(at === -1 ? others.length : at, 0, { ...row, rank, score: s.myScore })
+    return others
   }
 
   /**
