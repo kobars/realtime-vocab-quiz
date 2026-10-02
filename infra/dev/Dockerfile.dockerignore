@@ -1,0 +1,22 @@
+# AI-ASSISTED: the development image's build context: the whole repository with its tests, without local state.
+**/.git
+.worktrees
+**/.venv
+**/node_modules
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.hypothesis
+**/dist
+**/*.tsbuildinfo
+**/coverage
+**/.coverage*
+**/htmlcov
+**/.env
+**/.DS_Store
+**/test-results
+**/playwright-report
+reports
+load/results

@@ -1,5 +1,6 @@
-# AI-ASSISTED: the development Redis (profile dev) and the full stack (profile full): two API nodes
-# on one Redis behind nginx, the only service that publishes a port.
+# AI-ASSISTED: the development Redis (profile dev), the full stack (profile full): two API nodes on
+# one Redis behind nginx, the only service that publishes a port; the bot swarm (profile load), the
+# demo's seed (profile demo) and the tests (profile test), none of which needs uv or pnpm on the host.
 name: elsaquiz
 
 x-hardened: &hardened
@@ -111,6 +112,31 @@ services:
       LOAD_URL: ${LOAD_URL:-http://nginx:8080/api}
     volumes:
       - ./load/results:/app/results
+
+  # make new-quiz and make demo: a fresh 60-minute run of a bank quiz, through nginx.
+  seed:
+    <<: *hardened
+    profiles: [demo]
+    image: elsaquiz-api:${IMAGE_TAG:-dev}
+    volumes:
+      - ./scripts/seed.py:/opt/seed.py:ro
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env}
+      QUIZ_PORT: ${QUIZ_PORT:-8080}
+    command: ["python", "/opt/seed.py"]
+
+  # docker compose --profile test run --rm test: make test and the acceptance tests on the memory
+  # store, in the repository image of infra/dev/Dockerfile, rebuilt from the checkout on every run.
+  test:
+    profiles: [test]
+    image: elsaquiz-dev:${IMAGE_TAG:-dev}
+    build:
+      context: .
+      dockerfile: infra/dev/Dockerfile
+    pull_policy: build
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command: ["make", "test", "acceptance"]
 
 networks:
   stack:
