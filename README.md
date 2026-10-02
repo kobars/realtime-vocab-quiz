@@ -14,6 +14,9 @@ self-hosted quizzes, and one address can start only a few in a short time.
 
 **Video walkthrough:** <https://www.youtube.com/watch?v=7gOKTPEs5Ak>
 
+**Test plan:** <https://claude.ai/artifact/3i4p3bdSeFWfEen9UehCJi>: the manual and automated test
+cases, each mapped to the requirement it proves, with the result of the latest verification run.
+
 ![Two players in one quiz: each window shows its question and the same live leaderboard](docs/images/demo.png)
 
 ## What it does
