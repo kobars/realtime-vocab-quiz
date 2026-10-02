@@ -1,4 +1,5 @@
-# AI-ASSISTED: end_quiz.lua on a real Redis: the host mark, then one quiz_ended broadcast.
+# AI-ASSISTED: end_quiz.lua on a real Redis: the host mark, then one quiz_ended broadcast; a mark
+# that is not yet durable reads open and refuses writes as UNAVAILABLE.
 import asyncio
 import json
 import uuid
@@ -6,8 +7,11 @@ import uuid
 import pytest
 from redis.asyncio import Redis
 
+from quiz.adapters.mock_questions import MockQuestionBank
 from quiz.adapters.redis import RedisStore
 from quiz.adapters.redis.keys import quiz_keys
+from quiz.app.service import Connection, QuizService
+from quiz.contracts import messages as m
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.session import Question
 from quiz.ports.store import End, Publish
@@ -125,3 +129,45 @@ async def test_overlapping_host_ends_each_wait_for_the_fsync_before_announcing(
         release.set()
     assert await first == 1
     assert seen == [None, None]  # the second end waited for its own fsync, not the first one's
+
+
+async def test_an_unconfirmed_host_mark_reads_open_and_refuses_writes_as_unavailable(
+    redis_store: RedisStore, redis_client: Redis, redis_prefix: str
+) -> None:
+    quiz_id = f"T-{uuid.uuid4().hex[:12].upper()}"
+    keys = quiz_keys(quiz_id, redis_prefix)
+    create = redis_store.create_quiz
+    await create(quiz_id, (Question("q0", 1),), window_ms=60_000, time_limit_ms=20_000)
+    service, player = (
+        QuizService(redis_store, MockQuestionBank.load(), lambda: 0),
+        Connection("c-a", "a"),
+    )
+    await service.handle(player, m.Join(quizId=quiz_id, displayName="A"))
+    await redis_store.serve_next(quiz_id, "a", 0, "c-a")
+    assert await redis_store.end_quiz(quiz_id, "mark") == End("marked")  # its fsync is pending
+
+    async def replies(conn: Connection, msg: m.ClientMessage) -> list[m.ServerMessage]:
+        return list((await service.handle(conn, msg)).replies)
+
+    answer = m.Answer(questionIndex=0, choiceIndex=1, submissionId=str(uuid.uuid4()))
+    [refused] = await replies(player, answer)
+    assert isinstance(refused, m.ProtocolError)
+    assert refused.code is m.ErrorCode.UNAVAILABLE
+    assert (await redis_store.snapshot(quiz_id, "a")).status == "open"
+    late = Connection("c-b", "b")
+    [refused] = await replies(late, m.Join(quizId=quiz_id, displayName="B"))
+    assert isinstance(refused, m.ProtocolError)
+    assert (refused.code, late.read_only) == (m.ErrorCode.UNAVAILABLE, False)
+    await redis_client.hdel(keys.meta, "endedMs")  # the mark is lost before its fsync
+    [scored] = await replies(player, answer)
+    assert isinstance(scored, m.AnswerResult)
+    assert await redis_store.end_by_host(quiz_id) == 1  # control: an announced end
+    another = m.Answer(questionIndex=0, choiceIndex=1, submissionId=str(uuid.uuid4()))
+    [ended] = await replies(player, another)
+    assert isinstance(ended, m.ProtocolError)
+    assert ended.code is m.ErrorCode.QUIZ_ENDED
+    assert (await redis_store.snapshot(quiz_id, "a")).status == "ended"
+    snapshot, ended = await replies(late, m.Join(quizId=quiz_id, displayName="B"))
+    assert isinstance(snapshot, m.Snapshot)
+    assert isinstance(ended, m.ProtocolError)
+    assert (snapshot.status, ended.code, late.read_only) == ("ended", m.ErrorCode.QUIZ_ENDED, True)
