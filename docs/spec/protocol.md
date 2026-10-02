@@ -129,7 +129,7 @@ Between sending `resync` and receiving `snapshot`, the client buffers broadcasts
 
 ## 6. Countdown
 
-`question` carries `remainingMs = max(0, min(serveMs + T, deadlineMs) − now)` on the server clock (domain §2), on the first serve and on every re-serve (a repeat of `next {i}` or a reconnect). The client starts its countdown from the moment it receives the message, using a monotonic clock (`performance.now()`), and never reads its wall clock. The countdown is display only: the server decides lateness when the answer arrives.
+`question` carries `remainingMs = max(0, min(serveMs + T, deadlineMs) − now)` on the server clock (domain §2), on the first serve and on every re-serve (a repeat of `next {i}` or a reconnect). The client starts its countdown from the moment it sent the `next` that the `question` answers, using a monotonic clock (`performance.now()`), and never reads its wall clock. The server computed `remainingMs` after that send, so the countdown is offset by the whole `next`-to-`question` round trip and never shows time the server will not honour; a slow reply shortens it instead of lengthening it. The countdown is display only: the server decides lateness when the answer arrives.
 
 ## 7. Errors and close codes
 

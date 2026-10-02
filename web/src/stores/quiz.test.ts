@@ -446,3 +446,11 @@ it('a snapshot whose rows are older than its you shows the score of you in the h
   socket.receive({ ...snapshot(3), entries: [rival, { ...me, score: 50 }], you: { rank: 2, score: 150 } })
   expect([store.myScore, myRow(store)?.score, store.entries[0]]).toEqual([150, 150, rival])
 })
+
+it('the countdown starts when next was sent, so a slow question reply shortens it by the round trip', async () => {
+  const { store, socket } = await playing()
+  store.next()
+  clock = 1_400
+  socket.receive(question(0, 20_000))
+  expect([store.question?.deadlineAt, store.msLeft()]).toEqual([21_000, 19_600])
+})
