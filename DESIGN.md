@@ -80,7 +80,7 @@ Host-led stays future work.
 | Topic | Assumption |
 |---|---|
 | Players | Anonymous: a mock session gives a user ID; the player types a display name (1–32 characters). One open tab per player and quiz; a second tab replaces the first |
-| Quiz shape | 10 questions, 4 choices each, `T` = 20 s per question; the quiz is open for a window from its creation (default 10 min, at most 60 min) or until its host ends it (with the host token, or through the mock admin API) |
+| Quiz shape | 10 questions, 4 choices each, `T` = 20 s per question; the quiz is open for a window from its creation (default 10 min, at most 60 min; 30 min for a self-hosted quiz) or until its host ends it (with the host token, or through the mock admin API) |
 | Time | The server decides time on one clock (Redis `TIME`); the client countdown is display only |
 | Clients | Current browsers with WebSocket support; phones and desktops |
 | Store | One Redis 8 (Valkey 8 also works) with AOF `everysec`; a crash can lose about 1 s of answers (§11) |
@@ -243,7 +243,8 @@ composition root alone wires them is a convention, not a check.
 
 ### Maintainability
 
-What keeps the code easy to change, each kept by a check rather than by convention alone:
+What keeps the code easy to change, and the check behind each point (the wiring that the
+paragraph above calls a convention is the one exception):
 
 - **Layers.** The domain, ports, use cases and adapters follow the import rules above, and the
   import-linter contracts in `api/pyproject.toml` fail `make check` when an import crosses them.
@@ -835,13 +836,15 @@ removes the routes, which then answer 404). The host token is 32 random bytes (b
 returned once; the store keeps only its SHA-256 with the quiz, the node compares hashes in
 constant time (`hmac.compare_digest`), and no log line carries the token: the node logs the
 path only (`adapters/http/hosting.py`), and on a public host Caddy deletes the `X-Host-Token`
-header from the requests it logs. A request whose `Origin` names a site outside `ALLOWED_ORIGINS`
-gets 403 on all three routes; a request without `Origin` comes from no browser, so no other site
-can make a visitor send it. Creation has two limits: `HOSTING_PER_IP` (5) creations per client
-address in each `HOSTING_PER_IP_WINDOW_S` (600 s), a token bucket on each node, so up to twice
-that through nginx's two nodes (429 with `Retry-After`); and at most `HOSTING_MAX_OPEN` (50) open
-self-hosted quizzes across every node, counted in Redis by `hold_hosted.lua` (503
-`HOSTING_FULL`). Each self-hosted quiz is open for `HOSTING_WINDOW_MS` (30 min). The routes and
+header from the requests it logs. A request whose `Origin` names a site outside
+`ALLOWED_ORIGINS` gets 403 on all three routes. A browser sends `Origin` with every `POST`, so a
+`POST` without it comes from no browser and no other site can make a visitor send it; a `GET
+/banks` without it, such as a navigation, only reads the list of question sets. Creation has two
+limits. Per client address, a token bucket on each node holds `HOSTING_PER_IP` (5) creations and
+refills them over `HOSTING_PER_IP_WINDOW_S` (600 s), one every 120 s: a burst of 5, then one per
+refill (429 with `Retry-After`), and nginx's two nodes each keep their own bucket. Across every
+node, at most `HOSTING_MAX_OPEN` (50) self-hosted quizzes are open, counted in Redis by
+`hold_hosted.lua` (503 `HOSTING_FULL`). Each self-hosted quiz is open for `HOSTING_WINDOW_MS` (30 min). The routes and
 their errors are in [protocol §8](docs/spec/protocol.md#8-authentication).
 
 **The reveal abuse.** `answer_result` reveals the correct choice at once, and a mock identity
@@ -975,8 +978,9 @@ it.
 
 **Mocked.** The identity and question-bank mocks sit behind ports (`TicketStore`,
 `QuestionBank`); quiz admin for the make targets is a token-gated mock admin API in the HTTP
-adapter, off unless `ADMIN_MOCK=1`, beside the self-service hosting above. All three say `MOCK:` in their code: the adapters' module docstrings, the
-`/admin` routes and the `ADMIN_MOCK` setting in `quiz/config.py`.
+adapter, off unless `ADMIN_MOCK=1`, beside the self-service hosting above. The three mocks say
+`MOCK:` in their code: the adapters' module docstrings, the `/admin` routes and the
+`ADMIN_MOCK` setting in `quiz/config.py`.
 
 | Mock | What this build does | What production would use instead |
 |---|---|---|
