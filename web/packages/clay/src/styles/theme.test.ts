@@ -1,4 +1,5 @@
 // AI-ASSISTED: the Clay theme keeps dark: inert, serves the font from our origin, gives body the font and puts transitions and the clay utilities on the tokens.
+import { existsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import fonts from './fonts.css?raw'
 import main from './theme.css?raw'
@@ -42,6 +43,14 @@ describe('Clay theme', () => {
       expect(face).toContain('font-display: swap;')
       // Relative to this package, so the app that imports the theme needs no font dependency of its own.
       expect(face).toMatch(/url\('\.\.\/\.\.\/node_modules\/@fontsource-variable\/nunito\/files\/nunito-latin(-ext)?-wght-normal\.woff2'\)/)
+    }
+  })
+
+  it('points every font URL at a file that exists, since a build with a missing one still passes and ships no font', () => {
+    const urls = [...fonts.matchAll(/url\('([^']+)'\)/g)].map(([, url = '']) => url)
+    expect(urls).toHaveLength(2)
+    for (const url of urls) {
+      expect(existsSync(new URL(url, import.meta.url)), url).toBe(true)
     }
   })
 
