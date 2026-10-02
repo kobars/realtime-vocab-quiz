@@ -34,7 +34,7 @@ def _stubs(tmp_path: Path, **bodies: str) -> Path:
 
 
 def _run(
-    args: list[str], bin_dir: Path, cwd: Path = ROOT, **env: str
+    args: list[str], bin_dir: Path, env: dict[str, str], cwd: Path = ROOT
 ) -> subprocess.CompletedProcess[str]:
     path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
     return subprocess.run(
@@ -55,7 +55,7 @@ def _sourced(
     return _run(
         ["bash", "-c", f'. "$1"; {call}', "bash", install, *args],
         _stubs(tmp_path, **stubs),
-        **(env or {}),
+        env or {},
     )
 
 
@@ -217,12 +217,15 @@ def _ops(tmp_path: Path, *args: str, **env: str) -> tuple[int, list[str], str, P
     result = _run(
         ["bash", str(repo / "scripts" / "deploy" / "ops.sh"), *args],
         bin_dir,
+        # COPYFILE_DISABLE: macOS's tar adds no ._ files.
+        {
+            "STATE": str(state),
+            "LOG": str(log),
+            "READY_TIMEOUT": "0",
+            "COPYFILE_DISABLE": "1",
+            **env,
+        },
         cwd=tmp_path,
-        STATE=str(state),
-        LOG=str(log),
-        READY_TIMEOUT="0",
-        COPYFILE_DISABLE="1",  # macOS tar: no ._ files
-        **env,
     )
     return (
         result.returncode,
