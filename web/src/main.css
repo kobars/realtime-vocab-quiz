@@ -1,6 +1,8 @@
 /*
- * AI-ASSISTED: the app's Tailwind entry: Tailwind, scanning only the app's source, then the Clay theme of the
+ * AI-ASSISTED: the app's Tailwind entry: Tailwind, scanning only the app's source (not its tests), then the Clay theme of the
  * design-system package, which adds its components' classes (but not its gallery's or its docs').
  */
 @import 'tailwindcss' source('.');
 @import '@quiz/clay/theme.css';
+/* The tests name classes that no screen draws, such as the raw ones the design-system guard refuses. */
+@source not './**/*.test.ts';

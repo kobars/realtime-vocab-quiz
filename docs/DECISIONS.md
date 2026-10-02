@@ -416,7 +416,7 @@ Clay (ADR-010) lived inside the app: the tokens and the Tailwind theme in `web/s
 
 ### Consequences
 
-- The app's screenshot baselines did not change. Its built CSS differs only by utility classes no element used, which Tailwind used to find in tests and docs: the app's entry now scans only `web/src/`, and the theme adds the package's components.
+- The app's screenshot baselines did not change. Its built CSS differs only by utility classes no element used, which Tailwind used to find in tests and docs: the app's entry now scans only `web/src/` without its tests, and the theme adds the package's components.
 - A change to the look is made, tested and shown in one folder; `CHANGELOG.md` records it and the semantic version says whether consumers must change.
 - The package's dependencies (reka-ui, vue-sonner, class-variance-authority, tailwind-merge, clsx, the font) are its own; the app no longer lists them. The web image copies the package manifest before the frozen install.
 - The gallery adds two full-page baselines to the visual suite; a component change regenerates them with `make ui-baselines`.

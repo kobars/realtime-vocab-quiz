@@ -54,5 +54,7 @@ describe('app code and the design system', () => {
     // Tailwind scans only the app's source; the theme adds the package's components, not its gallery or docs.
     expect(entry).toMatch(/@import 'tailwindcss' source\('\.'\);\s*@import '@quiz\/clay\/theme\.css';/)
     expect(entry).not.toMatch(/@theme|@utility|@font-face|--[\w-]+\s*:/)
+    // The tests name classes no screen draws, such as the raw ones above; the build leaves them out.
+    expect(entry).toContain("@source not './**/*.test.ts';")
   })
 })
