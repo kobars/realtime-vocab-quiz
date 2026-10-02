@@ -37,7 +37,7 @@ class Settings(BaseSettings):
         default_factory=_default_node_id
     )
 
-    tick_ms: PositiveInt = 200  # the coalescing tick, only while the quiz is dirty
+    tick_ms: PositiveInt = 200  # the coalescing tick: polls every tick, publishes only when dirty
     top_n: Annotated[int, Field(ge=1, le=TOP_N)] = TOP_N
     full_list_max: Annotated[int, Field(ge=1, le=FULL_LIST_MAX)] = FULL_LIST_MAX
     # At most the parser's limit, so every frame above it closes with 1009.

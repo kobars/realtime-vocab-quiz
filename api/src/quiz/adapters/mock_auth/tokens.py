@@ -13,7 +13,8 @@ import unicodedata
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.session import MAX_WINDOW_MS
 
-# Twice the longest quiz window: a session made to join a quiz outlives it, and unused ones go soon.
+# Twice the longest quiz window, counted from the session's last ticket: a player who reconnects
+# keeps their identity through any quiz, and unused sessions go soon.
 SESSION_TTL_S = 2 * MAX_WINDOW_MS // 1000
 TICKET_TTL_S = 30
 TOKEN_BYTES = 32

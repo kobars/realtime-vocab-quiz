@@ -1,14 +1,23 @@
 # AI-ASSISTED: the composition root on Redis: the start hook loads every Lua script; a join burst
 # above the connection pool's size waits for a connection instead of failing; quiz subscriptions
-# never take the command pool's connections; readiness needs a write that Redis accepts.
+# never take the command pool's connections; readiness needs a write that Redis accepts; a ticket
+# renews its session's expiry; a node with every subscription taken refuses a join to a new quiz.
 import asyncio
 import hashlib
+import json
 import uuid
-from contextlib import AsyncExitStack
+from collections.abc import Callable
+from contextlib import AsyncExitStack, ExitStack
+from functools import partial
 
 import httpx
+import pytest
 from redis.asyncio import Redis
+from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
+from quiz.adapters.mock_auth import tokens
+from quiz.adapters.mock_auth.redis_store import SESSION_KEY
 from quiz.adapters.redis.scripts import SCRIPTS, source
 from quiz.app.service import Connection
 from quiz.config import Settings
@@ -79,3 +88,47 @@ async def test_open_subscriptions_leave_the_command_pool_free(redis_url: str) ->
             assert await services.tickets.redeem(ticket) is not None
         async with asyncio.timeout(bound_s):
             assert await services.ready()
+
+
+async def test_a_ticket_renews_its_session_for_the_full_lifetime(redis_url: str) -> None:
+    app = create_app(Settings(store="redis", redis_url=redis_url))
+    tickets = services_of(app).tickets
+    async with Redis.from_url(redis_url) as admin, app.router.lifespan_context(app):
+        _, token = await tickets.create_session("Ana")
+        key = SESSION_KEY + tokens.digest(token)
+        await admin.expire(key, 60)  # 1 h 59 min old
+        assert await tickets.issue_ticket(token) is not None
+        assert await admin.ttl(key) == tokens.SESSION_TTL_S
+
+
+def test_a_join_to_a_quiz_past_the_subscription_limit_is_unavailable(
+    redis_url: str, metric: Callable[..., float]
+) -> None:
+    settings = Settings(store="redis", redis_url=redis_url, redis_max_connections=1)
+    app = create_app(settings)
+    services, replies, opened = services_of(app), [], []
+    quizzes = [f"F-{uuid.uuid4().hex[:8].upper()}" for _ in range(2)]
+    create = partial(services.store.create_quiz, window_ms=60_000, time_limit_ms=20_000)
+
+    async def ticket() -> str | None:
+        return await services.tickets.issue_ticket((await services.tickets.create_session("A"))[1])
+
+    with TestClient(app) as client, ExitStack() as sockets:
+        portal = client.portal
+        assert portal is not None
+        before = metric("feed_subscribe_failures_total", reason="limit")
+        for quiz_id in quizzes:  # both sockets stay open: the first quiz keeps its subscription
+            portal.call(create, quiz_id, (Question("q0", 1),))
+            url, origin = f"/ws?ticket={portal.call(ticket)}", {"origin": "http://localhost:8080"}
+            ws = sockets.enter_context(client.websocket_connect(url, ["quiz.v1"], headers=origin))
+            ws.send_text(
+                json.dumps({"v": 1, "type": "join", "quizId": quiz_id, "displayName": "A"})
+            )
+            replies.append(ws.receive_json())
+            opened.append(ws)
+        with pytest.raises(WebSocketDisconnect) as closed:  # to reconnect, maybe to another node
+            opened[-1].receive_json()
+    assert closed.value.code == 1013
+    assert replies[0]["type"] == "joined"
+    assert (replies[1]["type"], replies[1]["code"]) == ("error", "UNAVAILABLE")
+    assert metric("feed_subscribe_failures_total", reason="limit") == before + 1
