@@ -72,7 +72,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         quiz_id = create_quiz(args.api_url.rstrip("/"), token, args.bank_id)
-    except (RuntimeError, urllib.error.URLError, OSError) as error:
+    except RuntimeError as error:  # the stack answered and refused
+        print(error, file=sys.stderr)
+        return 1
+    except (urllib.error.URLError, OSError) as error:
         print(f"{error}\nIs the stack up? make demo starts it.", file=sys.stderr)
         return 1
     print(f"Quiz ID:    {quiz_id} (open for {LIMIT_MS // 60_000} min)")

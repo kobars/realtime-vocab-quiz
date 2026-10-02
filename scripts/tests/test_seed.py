@@ -87,7 +87,9 @@ def test_another_refusal_stops_with_the_status(
     admin.statuses = [404]
     monkeypatch.setenv("ADMIN_TOKEN", TOKEN)
     assert seed.main(["--api-url", admin.url]) == 1
-    assert "HTTP 404" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "HTTP 404" in err
+    assert "Is the stack up?" not in err  # it answered
 
 
 def test_an_unreachable_stack_points_at_make_demo(
