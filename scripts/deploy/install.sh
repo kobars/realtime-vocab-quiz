@@ -131,6 +131,11 @@ check_dns() {
 
 install_packages() {
   local cmd missing=""
+  # On a first boot, unattended-upgrades may hold the dpkg lock: every apt-get below, the Docker
+  # script's included, waits for it instead of failing.
+  APT_CONFIG=$(mktemp)
+  echo 'DPkg::Lock::Timeout "600";' >"$APT_CONFIG"
+  export APT_CONFIG
   for cmd in curl git make openssl; do
     command -v "$cmd" >/dev/null || missing="$missing $cmd"
   done
