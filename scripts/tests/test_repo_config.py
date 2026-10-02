@@ -271,6 +271,27 @@ def test_make_check_lints_the_workflows() -> None:
     assert any("$(ZIZMOR)" in line for line in recipe)
 
 
+def test_workflow_lint_runs_the_locked_shellcheck_on_run_scripts(tmp_path: Path) -> None:
+    """actionlint skips shellcheck when it is not on PATH; the dev group locks one."""
+    workflow = tmp_path / "probe.yml"
+    workflow.write_text(
+        "on: push\njobs:\n  probe:\n    runs-on: ubuntu-latest\n"
+        "    steps:\n      - run: echo $FOO\n",
+        encoding="utf-8",
+    )
+    venv_bin = Path(sys.executable).parent
+    result = subprocess.run(
+        [venv_bin / "actionlint", workflow],
+        cwd=tmp_path,
+        env={**os.environ, "PATH": str(venv_bin)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "SC2086" in result.stdout
+
+
 @pytest.mark.parametrize(
     ("uses", "fails"),
     [
