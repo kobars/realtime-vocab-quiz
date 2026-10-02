@@ -14,6 +14,7 @@ from quiz.ports.clock import Clock
 
 ABUSE_MS = 10_000  # dropping messages this long without a quiet second: close 1008
 QUIET_MS = 1_000  # a gap with no drop that ends an abuse streak; also the RATE_LIMITED interval
+ADDRESS_REFILL_S = 60  # a client address's bucket of identity requests or upgrades refills in it
 
 
 class Verdict(Enum):

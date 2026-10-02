@@ -1,8 +1,9 @@
 # AI-ASSISTED: the /ws upgrade: every check before accept, then the receive loop; path-only logs.
 """``GET /ws?ticket=…`` with the subprotocol ``quiz.v1`` (docs/spec/protocol.md §8).
 
-Before accept, in order: the Origin (403), the subprotocol (400), the ticket (401), then the
-caps (503 per process, 429 per client address). A refusal is a plain HTTP response.
+Before accept, in order: the Origin (403), the subprotocol (400), the upgrade attempts of the
+client address (429), the ticket (401), then the caps (503 per process, 429 per client address).
+A refusal is a plain HTTP response.
 
 A socket whose close the sender gave up (the peer reads nothing, so not even the close frame
 goes out) leaves the registry at once but keeps its cap slots, and its close frame stays
@@ -22,7 +23,13 @@ import structlog
 from fastapi import Response, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
-from quiz.adapters.ws.limits import ConnectionCaps, RateLimiter, connection_ip
+from quiz.adapters.ws.limits import (
+    ADDRESS_REFILL_S,
+    AddressRateLimiter,
+    ConnectionCaps,
+    RateLimiter,
+    connection_ip,
+)
 from quiz.adapters.ws.registry import Registry
 from quiz.adapters.ws.sender import Sender
 from quiz.adapters.ws.session import Deps, serve
@@ -71,6 +78,10 @@ class Gateway:
         self._deps = Deps(service, self.registry, settings.max_payload_bytes)
         self.caps = ConnectionCaps(settings.max_connections, settings.per_ip_conn_cap)
         self.clock: Clock = lambda: time.monotonic_ns() // 1_000_000  # paces the token buckets
+        # Each attempt below costs a ticket lookup in the store: one attempt per socket the
+        # address may hold, and one reconnect each.
+        burst = 2 * settings.per_ip_conn_cap
+        self.upgrades = AddressRateLimiter(burst / ADDRESS_REFILL_S, burst, lambda: self.clock())
         for name in UVICORN_LOGGERS:  # adding it twice is a no-op
             logging.getLogger(name).addFilter(path_only)
         logging.getLogger("uvicorn.error").addFilter(not_after_a_denial)
@@ -81,6 +92,9 @@ class Gateway:
             return await _refuse(ws, 403, "origin not allowed")
         if SUBPROTOCOL not in ws.scope.get("subprotocols", ()):
             return await _refuse(ws, 400, f"subprotocol {SUBPROTOCOL} not offered")
+        ip = connection_ip(ws, settings.trusted_proxies)
+        if not self.upgrades.allow(ip):
+            return await _refuse(ws, 429, "too many upgrade attempts")
         ticket = ws.query_params.get("ticket")
         try:
             identity = await self._tickets.redeem(ticket) if ticket else None
@@ -88,7 +102,6 @@ class Gateway:
             return await _refuse(ws, 503, "ticket store unreachable")
         if identity is None:
             return await _refuse(ws, 401, "missing, used or expired ticket")
-        ip = connection_ip(ws, settings.trusted_proxies)
         if (status := self.caps.acquire(ip)) is not None:
             return await _refuse(ws, status, "connection cap reached")
         try:
