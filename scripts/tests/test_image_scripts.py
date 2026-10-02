@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[2]
 # set. `docker inspect` fails, unless $RESPONSE names a file: then every container whose name
 # lacks $UNHEALTHY is healthy, has one hashed asset and answers each request with that file. The
 # API image's store is $STORE (default redis) and its Lua scripts are the lines of $LUA_FILES.
-# The smoke test's Redis answers PING unless $REDIS_DOWN is set.
+# The smoke test's Redis answers PING unless $REDIS_DOWN is set. `nginx -T` prints the rendered
+# real-ip directive unless $NO_REAL_IP is set.
 FAKE_DOCKER = """#!/usr/bin/env bash
 echo "$*" >> "$DOCKER_LOG"
 case "$*" in
@@ -31,6 +32,7 @@ case "$*" in
   *"print(Settings().store)"*) echo "${STORE:-redis}" ;;
   *" redis-cli ping") [[ -z "${REDIS_DOWN:-}" ]] || exit 1 ;;
   *"rglob('*.lua')"*) cat "${LUA_FILES:-/dev/null}" ;;
+  "run "*" nginx -T") [[ -n "${NO_REAL_IP:-}" ]] || echo 'set_real_ip_from 10.89.79.0/24;' ;;
 esac
 """
 LUA = "api/src/quiz/adapters/redis/lua/"
@@ -90,6 +92,27 @@ def test_infra_nginx_config_is_tested_with_the_compose_service_names_resolvable(
         assert f"--add-host={service}:127.0.0.1" in infra
     mount = f"{repo}/infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
     assert infra.endswith(f"-v {mount} elsaquiz-web:ci nginx -t")
+
+
+def test_the_nginx_check_also_runs_with_the_real_ip_template_rendered(tmp_path: Path) -> None:
+    """compose.prod.yaml's nginx: the entrypoint renders the template into /tmp/edge/."""
+    repo = _repo_with_infra_nginx_conf(tmp_path)
+    (repo / "infra" / "nginx" / "real-ip.conf.template").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "infra"], cwd=repo, check=True)  # noqa: S607
+    code, calls, _ = _run("check_nginx.sh", repo, tmp_path)
+    assert code == 0
+    (rendered,) = [c for c in calls if c.endswith(" nginx -T")]
+    assert "-e NGINX_ENVSUBST_OUTPUT_DIR=/tmp -e EDGE_SUBNET=10.89.79.0/24" in rendered
+    template = f"{repo}/infra/nginx/real-ip.conf.template"
+    assert f"-v {template}:/etc/nginx/templates/edge/real-ip.conf.template:ro" in rendered
+
+
+def test_the_nginx_check_fails_when_the_rendered_template_is_not_included(tmp_path: Path) -> None:
+    repo = _repo_with_infra_nginx_conf(tmp_path)
+    (repo / "infra" / "nginx" / "real-ip.conf.template").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "infra"], cwd=repo, check=True)  # noqa: S607
+    code, _, _ = _run("check_nginx.sh", repo, tmp_path, env_extra={"NO_REAL_IP": "1"})
+    assert code != 0
 
 
 def test_the_nginx_check_stops_when_compose_cannot_list_the_services(tmp_path: Path) -> None:
