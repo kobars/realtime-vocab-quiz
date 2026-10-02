@@ -109,7 +109,7 @@ def test_coverage_job_combines_every_job_that_uploads_test_results() -> None:
     assert "uv run --locked coverage combine ../reports" in coverage
     assert "uv run --locked coverage report" in coverage
     assert "--fail-under=90 --format markdown:diff-cover.md || rc=$?" in coverage
-    assert "fetch-depth: 0 # diff-cover diffs against the base branch" in coverage
+    assert "fetch-depth: 0" in [line.split(" #")[0] for line in coverage]
 
 
 def _make_dry_run(target: str, *variables: str) -> str:
