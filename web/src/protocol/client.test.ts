@@ -495,7 +495,8 @@ it('keeps an answer after NOT_JOINED, joins again and resends it after the next 
   await wait(5_000)
   expect(answers(socket)).toHaveLength(1)
   socket.receive(joined())
-  expect(socket.types().slice(-2)).toEqual(['resync', 'answer'])
+  // The join after NOT_JOINED, its resend at the reply deadline, then the resync and the answer after joined.
+  expect(socket.types().slice(4)).toEqual(['join', 'resync', 'answer'])
   expect(answers(socket)).toEqual([answerMsg('s-1'), answerMsg('s-1')])
 })
 
@@ -944,4 +945,41 @@ it.each([
   const next = await connected()
   next.receive(joined())
   expect([sockets(), answers(next)]).toEqual([2, []])
+})
+
+it('ignores the joined of a join sent again while the first was only slow: one resync, one joined event', async () => {
+  start()
+  const socket = await connected()
+  await wait(REPLY_TIMEOUT_MS)
+  expect(joins(socket)).toBe(2)
+  socket.receive(joined())
+  socket.receive(joined())
+  const resyncs = socket.types().filter((type) => type === 'resync').length
+  expect([resyncs, events.filter((event) => event.type === 'joined').length]).toEqual([1, 1])
+})
+
+it('sends the join again after UNAVAILABLE for a second join whose first already got joined', async () => {
+  start()
+  const socket = await connected()
+  await wait(REPLY_TIMEOUT_MS)
+  socket.receive(joined())
+  socket.receive({ type: 'snapshot', atSeq: 0, status: 'open' })
+  socket.receive({ type: 'error', code: 'UNAVAILABLE', requestType: 'join' } as Partial<ServerMessage>)
+  await wait(1)
+  expect(joins(socket)).toBe(3)
+  // Its joined is not ignored: the UI hears that the join that got UNAVAILABLE is done.
+  socket.receive(joined())
+  expect(events.filter((event) => event.type === 'joined')).toHaveLength(2)
+})
+
+it('keeps the backoff of a join after UNAVAILABLE when a RATE_LIMITED names no request', async () => {
+  start(() => 0.99)
+  const socket = await connected()
+  socket.receive({ type: 'error', code: 'UNAVAILABLE', requestType: 'join' } as Partial<ServerMessage>)
+  socket.receive(bucketDrop)
+  // The backoff is floor(0.99 × 250) = 247 ms; the bucket error does not move it to 1 s.
+  await wait(247)
+  expect(joins(socket)).toBe(2)
+  await wait(RETRY_AFTER_MS)
+  expect(joins(socket)).toBe(2)
 })

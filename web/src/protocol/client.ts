@@ -79,8 +79,10 @@ export class QuizClient {
   private nextRetry: Timer | undefined
   /** True once the current socket got `joined`, and false again after `NOT_JOINED`: answers go out only while true. */
   private joined = false
-  /** True from a `join` sent on the current socket until its `joined` or its error, through its retries after `UNAVAILABLE`. */
+  /** True from a `join` sent on the current socket until its `joined` or a final error, through all its resends. */
   private joining = false
+  /** True while the `join` in flight was sent and waits for its reply; false while it waits on its backoff after `UNAVAILABLE`. */
+  private joinSent = false
   /** The one timer of the `join` in flight: its retry after an error, or else its reply deadline. */
   private joinRetry: Timer | undefined
   /** The one timer of each unsettled answer, by `submissionId`: its retry after an error, or else its reply deadline. */
@@ -146,7 +148,7 @@ export class QuizClient {
    * REPLY_TIMEOUT_MS after a send with no reply, until `joined` or another join error.
    */
   rejoin(): void {
-    this.joining = this.open
+    this.joining = this.joinSent = this.open
     this.send({ v: 1, type: 'join', quizId: this.quizId, displayName: this.displayName })
     this.retryJoin(REPLY_TIMEOUT_MS)
   }
@@ -202,10 +204,12 @@ export class QuizClient {
   private receive(message: ServerMessage): void {
     switch (message.type) {
       case 'joined': {
+        // A second `joined` answers a join sent again while the first was only slow: the socket is joined already.
+        if (!this.joining) return
         // The resync goes out before the UI hears of the join.
         this.backoff.joined(this.o.now())
         this.run(this.tracker.joined())
-        this.joining = false
+        this.joining = this.joinSent = false
         this.cancel(this.joinRetry)
         this.joinFailures = 0
         if (!this.joined) {
@@ -261,7 +265,8 @@ export class QuizClient {
         if (message.code === 'RATE_LIMITED' && message.requestType === null) {
           this.resendInFlight()
           this.retryResync(RETRY_AFTER_MS)
-          this.retryJoin(RETRY_AFTER_MS)
+          // The bucket may have dropped a join that waits for its reply, never one that waits on its backoff.
+          if (this.joinSent) this.retryJoin(RETRY_AFTER_MS)
         }
         if (message.requestType === 'answer') this.answerFailed(message.code)
         // A bucket RATE_LIMITED comes before parsing, so its requestType is null: it may be the dropped `next`.
@@ -297,9 +302,16 @@ export class QuizClient {
     this.resyncRetry = this.after(wait, () => this.sendResync(lastSeq))
   }
 
-  /** Sends a `join` that got `UNAVAILABLE` again after the backoff (a failed join binds nothing, spec §1). */
+  /**
+   * Sends a `join` that got `UNAVAILABLE` again after the backoff (a failed join binds nothing, spec §1), also when an
+   * earlier join already got `joined`, so that a `joined` always follows; any other join error is final.
+   */
   private joinFailed(code: ErrorCode): void {
-    if (code === 'UNAVAILABLE') return this.retryJoin(backoffDelay(this.joinFailures++, this.o.random))
+    this.joinSent = false
+    if (code === 'UNAVAILABLE') {
+      this.joining = true
+      return this.retryJoin(backoffDelay(this.joinFailures++, this.o.random))
+    }
     this.joining = false
     this.cancel(this.joinRetry)
   }
@@ -478,7 +490,7 @@ export class QuizClient {
     this.socket = null
     this.open = false
     this.joined = false
-    this.joining = false
+    this.joining = this.joinSent = false
     this.outstandingResync = null
     this.resyncFailures = 0
     this.joinFailures = 0
