@@ -14,18 +14,22 @@ fi
 # A fresh clone has no .env: write the two secrets that compose requires.
 if [[ ! -f .env ]]; then
   secret() { od -An -tx1 -N24 /dev/urandom | tr -d ' \n'; }
-  printf 'ADMIN_TOKEN=%s\nREDIS_PASSWORD=%s\n' "$(secret)" "$(secret)" > .env
+  (umask 077 && printf 'ADMIN_TOKEN=%s\nREDIS_PASSWORD=%s\n' "$(secret)" "$(secret)" > .env)
   echo "Wrote .env with a new ADMIN_TOKEN and REDIS_PASSWORD."
 fi
 
 # Every bot connects from the bots container's one address, and each player it starts takes a
 # session and a ticket from that address's budget (2 x PER_IP_CONN_CAP a minute). Unless the shell
-# or .env sets the cap, raise it far above the bots, in steps of 1,000 so that a change of BOTS
-# rarely restarts the API nodes.
+# or .env sets the cap, raise it far above the bots. A changed cap recreates the API nodes and
+# drops every socket, so it stays at 10,000 up to 1,799 bots and grows in steps of 1,000 above.
 if [[ -z "${PER_IP_CONN_CAP:-}" ]] && ! grep -q '^PER_IP_CONN_CAP=.' .env; then
-  export PER_IP_CONN_CAP=$(( (bots * 5 / 1000 + 1) * 1000 ))
+  cap=$(( (bots * 5 / 1000 + 1) * 1000 ))
+  export PER_IP_CONN_CAP=$(( cap > 10000 ? cap : 10000 ))
 fi
 
+# The bots image first: the quiz's window starts when the seed creates it.
+echo "Building the bots image..."
+docker compose --progress quiet build bots
 docker compose --profile full up -d --wait --wait-timeout 120
 seeded="$(docker compose --progress quiet run --rm -T seed)"
 quiz_id="$(sed -n 's/^Quiz ID: *\([A-Z0-9-]*\).*/\1/p' <<<"$seeded")"
@@ -33,8 +37,8 @@ if [[ -z "$quiz_id" ]]; then
   echo "the seed printed no quiz ID: $seeded" >&2
   exit 1
 fi
-echo "Building the bots image and starting $bots bots..."
-DEMO_QUIZ_ID="$quiz_id" DEMO_BOTS="$bots" docker compose --progress quiet up -d --build bots
+echo "Starting $bots bots..."
+DEMO_QUIZ_ID="$quiz_id" DEMO_BOTS="$bots" docker compose --progress quiet up -d --no-build bots
 
 echo
 echo "$seeded"

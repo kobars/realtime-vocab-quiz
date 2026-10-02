@@ -23,7 +23,9 @@ case "$*" in
   *" run --rm -T seed") printf '%b' "${SEED_OUTPUT-Quiz ID: VOCAB-42-TEST (open for 60 min)\\n}" ;;
 esac
 """
-BOTS_UP = "compose --progress quiet up -d --build bots | cap={cap} quiz=VOCAB-42-TEST bots={bots}"
+BOTS_UP = (
+    "compose --progress quiet up -d --no-build bots | cap={cap} quiz=VOCAB-42-TEST bots={bots}"
+)
 
 
 def _demo(
@@ -63,17 +65,23 @@ def test_a_fresh_clone_gets_secrets_the_stack_a_fresh_quiz_and_its_bots(tmp_path
     assert set(secrets) == {"ADMIN_TOKEN", "REDIS_PASSWORD"}
     assert all(re.fullmatch(r"[0-9a-f]{48}", value) for value in secrets.values())
     assert secrets["ADMIN_TOKEN"] != secrets["REDIS_PASSWORD"]
+    assert (repo / ".env").stat().st_mode & 0o077 == 0  # the secrets are the owner's alone
+    # The bots image is built before the seed starts the quiz's window.
     assert calls == [
-        "compose --profile full up -d --wait --wait-timeout 120 | cap=1000 quiz= bots=",
-        "compose --progress quiet run --rm -T seed | cap=1000 quiz= bots=",
-        BOTS_UP.format(cap=1000, bots=20),
+        "compose --progress quiet build bots | cap=10000 quiz= bots=",
+        "compose --profile full up -d --wait --wait-timeout 120 | cap=10000 quiz= bots=",
+        "compose --progress quiet run --rm -T seed | cap=10000 quiz= bots=",
+        BOTS_UP.format(cap=10000, bots=20),
     ]
     assert "Quiz ID: VOCAB-42-TEST (open for 60 min)" in out
     assert "20 playing VOCAB-42-TEST" in out
 
 
-@pytest.mark.parametrize(("bots", "cap"), [("199", "1000"), ("200", "2000"), ("1000", "6000")])
+@pytest.mark.parametrize(
+    ("bots", "cap"), [("20", "10000"), ("200", "10000"), ("1799", "10000"), ("2000", "11000")]
+)
 def test_the_connection_cap_stays_far_above_the_bots(tmp_path: Path, bots: str, cap: str) -> None:
+    """A changed cap recreates the API nodes, so the usual bot counts share one."""
     code, calls, out, _ = _demo(tmp_path, bots, env_file="ADMIN_TOKEN=a\nREDIS_PASSWORD=b\n")
     assert code == 0, out
     assert calls[-1] == BOTS_UP.format(cap=cap, bots=bots)
@@ -104,7 +112,7 @@ def test_no_bots_start_when_the_seed_prints_no_quiz_id(tmp_path: Path) -> None:
     code, calls, out, _ = _demo(tmp_path, SEED_OUTPUT="")
     assert code == 1
     assert "the seed printed no quiz ID" in out
-    assert not [call for call in calls if " bots |" in call]
+    assert not [call for call in calls if " up " in call and " bots |" in call]
 
 
 def test_the_seed_runs_from_the_api_image_on_the_stack_network() -> None:
@@ -122,6 +130,7 @@ def test_the_bots_are_the_bot_swarm_on_the_demo_quiz_with_an_allowed_origin() ->
     bots, load = SERVICES["bots"], SERVICES["load"]
     assert bots["profiles"] == ["demo"]
     assert (bots["build"], bots["networks"]) == (load["build"], load["networks"])
+    assert bots["image"] == load["image"]  # one image of the bot swarm, not one per service
     assert bots["environment"] == load["environment"]  # through nginx on the stack network
     assert bots["volumes"] == []  # the result file stays in a tmpfs: no host folder to own
     assert "/app/results" in bots["tmpfs"]

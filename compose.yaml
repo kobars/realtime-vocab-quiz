@@ -105,6 +105,7 @@ services:
   load: &load
     <<: *hardened # its nofile limit gives one descriptor per bot socket
     profiles: [load]
+    image: elsaquiz-load # one image for this service and the demo's bots
     build:
       context: .
       dockerfile: load/Dockerfile
