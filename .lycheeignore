@@ -1,0 +1,2 @@
+# Video sites answer CI runners with bot walls and 429s; the link is checked by hand.
+^https://www\.youtube\.com/
