@@ -1,5 +1,6 @@
-<!-- AI-ASSISTED: one labelled field of the join form, with its hint and its message linked by aria-describedby, keeping the caret when the parent rewrites the value. -->
+<!-- AI-ASSISTED: one labelled field of the join form, with its hint and its message (with a decorative alert icon) linked by aria-describedby, keeping the caret when the parent rewrites the value. -->
 <script setup lang="ts">
+import { CircleAlert } from '@lucide/vue'
 import { computed, useTemplateRef, watch } from 'vue'
 import { Input } from '@/components/ui/input'
 
@@ -34,10 +35,10 @@ watch(model, () => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-1.5">
+  <div class="flex flex-col gap-2">
     <label
       :for="id"
-      class="text-sm font-medium"
+      class="font-semibold"
     >{{ label }}</label>
     <Input
       :id
@@ -57,8 +58,12 @@ watch(model, () => {
     <p
       v-if="error !== null"
       :id="`${id}-error`"
-      class="text-sm text-destructive"
+      class="flex items-center gap-1.5 text-sm text-destructive"
     >
+      <CircleAlert
+        class="size-4 shrink-0"
+        aria-hidden="true"
+      />
       {{ error }}
     </p>
   </div>

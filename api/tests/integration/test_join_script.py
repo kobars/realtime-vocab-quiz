@@ -9,10 +9,11 @@ from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
 
 from quiz.adapters.redis import RedisStore
-from quiz.adapters.redis.keys import QUIZ_TTL_MS, QuizKeys, quiz_keys
+from quiz.adapters.redis.keys import QuizKeys, quiz_keys
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.session import Question
 from quiz.domain.standings import decode_sort_score
+from quiz.ports.store import QUIZ_TTL_MS
 
 QUESTIONS = (Question("q0", 1), Question("q1", 3))
 

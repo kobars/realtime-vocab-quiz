@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the finished and results screens: a provisional rank and the live board until the end, with my score and rank in live regions, then the podium, my final rank and the top 50 (UI spec §3.6, §6.3). -->
+<!-- AI-ASSISTED: the finished and results screens: a provisional rank and the live board until the end, with my score and rank in live regions, then the podium, my final rank in a highlighted clay card and the top 50 under a gradient heading (UI spec §3.6, §6.3). -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import AllPlayers from '@/components/leaderboard/AllPlayers.vue'
@@ -7,6 +7,7 @@ import LeaderboardRows from '@/components/leaderboard/LeaderboardRows.vue'
 import ResultsPodium from '@/components/leaderboard/ResultsPodium.vue'
 import { TOP_N } from '@/components/leaderboard/limits'
 import { Badge } from '@/components/ui/badge'
+import { Card } from '@/components/ui/card'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 
@@ -53,23 +54,23 @@ const timeLeft = computed(() => {
     <h2
       ref="heading"
       tabindex="-1"
-      class="text-2xl font-semibold"
+      class="text-gradient text-title sm:text-display"
     >
       {{ strings.results.title }}
     </h2>
     <ResultsPodium :entries="podium" />
-    <div
+    <Card
       v-if="store.myRank !== null"
       data-test="my-result"
-      class="rounded-lg bg-card p-4 shadow-card"
+      class="gap-2 bg-highlight"
     >
-      <p class="font-semibold">
+      <p class="text-2xl font-extrabold tabular-nums sm:text-display">
         {{ strings.results.placed(store.myRank, store.playerCount) }}
       </p>
-      <p class="tabular-nums text-muted-foreground">
+      <p class="text-xl font-bold tabular-nums">
         {{ strings.results.points(store.myScore) }}
       </p>
-    </div>
+    </Card>
     <LeaderboardRows
       :entries="rest"
       :my-user-id="store.quiz?.userId"
@@ -80,14 +81,14 @@ const timeLeft = computed(() => {
     v-else
     class="flex flex-col gap-6"
   >
-    <div
+    <Card
       data-test="my-result"
-      class="flex flex-col gap-1 rounded-lg bg-card p-4 shadow-card"
+      class="gap-2"
     >
       <h2
         ref="heading"
         tabindex="-1"
-        class="text-2xl font-semibold"
+        class="text-title"
       >
         {{ strings.results.finished }}
       </h2>
@@ -117,7 +118,7 @@ const timeLeft = computed(() => {
       <p class="text-sm text-muted-foreground">
         {{ strings.results.canChange(timeLeft) }}
       </p>
-    </div>
+    </Card>
     <LeaderboardPanel />
   </section>
 </template>

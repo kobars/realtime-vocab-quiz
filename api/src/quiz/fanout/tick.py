@@ -54,6 +54,15 @@ class Ticker:
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _run(self, quiz_id: str) -> None:
+        # The cached standings and pages are this node's only while it follows the quiz: a quiz
+        # id can be created again once its quiz expired, and a cached page outlives an end.
+        self._service.drop_cache(quiz_id)
+        try:
+            await self._follow(quiz_id)
+        finally:
+            self._service.drop_cache(quiz_id)
+
+    async def _follow(self, quiz_id: str) -> None:
         relay = Relay(quiz_id, self._store, self._sockets, self._store.limits)
         progress = asyncio.Event()  # set by a relayed broadcast or a tick that went through
         attempt, failed = 0, False
@@ -125,10 +134,17 @@ class Ticker:
                     if result.status == "ended":
                         if result.seq is not None:
                             return result.seq
-                        # a host mark not yet announced: retry until the deadline (redis.md §3.1)
                         end = await self._store.end_quiz(quiz_id, "deadline")
                         if end.status == "ended":
                             return end.seq
+                        # not_due: a host mark not announced, or whose announcement a Redis
+                        # restart lost; announce it once it is durable (redis.md §3.1)
+                        try:
+                            return await self._store.end_by_host(quiz_id)
+                        except DomainError as error:
+                            if error.code is not ErrorCode.UNAVAILABLE:
+                                raise
+                            log.warning("tick of quiz %s: the end mark is not durable yet", quiz_id)
                     if result.status == "busy":
                         wait_s = (result.retry_ms + 1) / 1000
                     if clock() >= shift_at:

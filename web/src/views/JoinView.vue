@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link, the quiz preview and the join (UI spec §3.1). -->
+<!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link, the quiz preview and the join, in a clay card over the hero decoration (UI spec §3.1). -->
 <script setup lang="ts">
 import { LoaderCircle } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
@@ -8,6 +8,7 @@ import QuizPreviewCard from '@/components/join/QuizPreviewCard.vue'
 import { fetchQuizPreview, type PreviewResult } from '@/components/join/preview'
 import { displayNameError, normalizeQuizId, QUIZ_ID_MAX, quizIdError, readName, saveName } from '@/components/join/validation'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 
@@ -150,79 +151,85 @@ watch(
 </script>
 
 <template>
-  <section class="mx-auto flex w-full max-w-md flex-col gap-6">
-    <h1 class="text-2xl font-semibold">
+  <section
+    data-test="hero"
+    class="hero-blobs mx-auto flex w-full max-w-110 flex-col gap-6"
+  >
+    <h1 class="text-title sm:text-display">
       {{ strings.join.title }}
     </h1>
-    <form
-      class="flex flex-col gap-5"
-      novalidate
-      @submit.prevent="submit"
-    >
-      <JoinField
-        id="quiz-id"
-        ref="idField"
-        :model-value="quizId"
-        :label="strings.join.quizIdLabel"
-        :hint="strings.join.quizIdHint"
-        :error="idError"
-        :maxlength="QUIZ_ID_MAX"
-        :readonly="joining"
-        autocomplete="off"
-        autocapitalize="characters"
-        spellcheck="false"
-        @update:model-value="onIdInput"
-        @blur="onIdBlur"
-      />
-
-      <div
-        aria-live="polite"
-        class="empty:hidden"
+    <Card>
+      <form
+        class="flex flex-col gap-5"
+        novalidate
+        @submit.prevent="submit"
       >
-        <p
-          v-if="shown !== null && shown.result === null"
-          class="text-sm text-muted-foreground"
+        <JoinField
+          id="quiz-id"
+          ref="idField"
+          :model-value="quizId"
+          :label="strings.join.quizIdLabel"
+          :hint="strings.join.quizIdHint"
+          :error="idError"
+          :maxlength="QUIZ_ID_MAX"
+          :readonly="joining"
+          autocomplete="off"
+          autocapitalize="characters"
+          spellcheck="false"
+          @update:model-value="onIdInput"
+          @blur="onIdBlur"
+        />
+
+        <div
+          aria-live="polite"
+          class="empty:hidden"
         >
-          {{ strings.join.checking }}
+          <p
+            v-if="shown !== null && shown.result === null"
+            class="text-sm text-muted-foreground"
+          >
+            {{ strings.join.checking }}
+          </p>
+          <QuizPreviewCard
+            v-else-if="shown?.result?.kind === 'found'"
+            :quiz="shown.result.quiz"
+          />
+        </div>
+
+        <JoinField
+          id="display-name"
+          ref="nameField"
+          v-model="name"
+          :label="strings.join.nameLabel"
+          :error="nameError"
+          :readonly="joining"
+          autocomplete="nickname"
+          @update:model-value="onNameInput"
+          @blur="onNameBlur"
+        />
+
+        <p
+          v-if="joinFailed"
+          role="alert"
+          class="text-sm text-destructive"
+        >
+          {{ strings.join.failed }}
         </p>
-        <QuizPreviewCard
-          v-else-if="shown?.result?.kind === 'found'"
-          :quiz="shown.result.quiz"
-        />
-      </div>
 
-      <JoinField
-        id="display-name"
-        ref="nameField"
-        v-model="name"
-        :label="strings.join.nameLabel"
-        :error="nameError"
-        :readonly="joining"
-        autocomplete="nickname"
-        @update:model-value="onNameInput"
-        @blur="onNameBlur"
-      />
-
-      <p
-        v-if="joinFailed"
-        role="alert"
-        class="text-sm text-destructive"
-      >
-        {{ strings.join.failed }}
-      </p>
-
-      <Button
-        type="submit"
-        class="h-11"
-        :disabled="joining"
-      >
-        <LoaderCircle
-          v-if="joining"
-          class="animate-spin"
-          aria-hidden="true"
-        />
-        {{ joining ? strings.join.joining : ended ? strings.join.submitEnded : strings.join.submit }}
-      </Button>
-    </form>
+        <Button
+          type="submit"
+          size="lg"
+          class="w-full sm:w-auto sm:self-start"
+          :disabled="joining"
+        >
+          <LoaderCircle
+            v-if="joining"
+            class="motion-safe:animate-spin"
+            aria-hidden="true"
+          />
+          {{ joining ? strings.join.joining : ended ? strings.join.submitEnded : strings.join.submit }}
+        </Button>
+      </form>
+    </Card>
   </section>
 </template>

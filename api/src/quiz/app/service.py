@@ -8,15 +8,17 @@ import asyncio
 import logging
 import unicodedata
 import uuid
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass
+from functools import partial
+from typing import Any
 
 from quiz.contracts import messages as m
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.obs import metrics
 from quiz.ports.clock import Clock
 from quiz.ports.questions import QuestionBank
-from quiz.ports.store import Finished, Joined, Place, Ranks, Store
+from quiz.ports.store import Finished, Joined, Limits, Place, Ranks, Store
 from quiz.ports.store import Snapshot as Shared
 
 log = logging.getLogger(__name__)
@@ -80,6 +82,23 @@ def _standing(snap: m.Snapshot) -> Standing:
     return (snap, m.RankUpdate(atSeq=snap.atSeq, rank=you.rank, score=you.score, playerCount=count))
 
 
+async def _share[K, T](
+    reads: dict[K, asyncio.Task[T]], key: K, read: Callable[[], Coroutine[Any, Any, T]]
+) -> T:
+    """Run ``read`` once for all concurrent callers with ``key``; a cancelled caller leaves it."""
+    if (task := reads.get(key)) is None:
+        task = reads[key] = asyncio.create_task(read())
+
+        def forget(done: asyncio.Task[T]) -> None:
+            if reads.get(key) is done:
+                del reads[key]
+            if not done.cancelled():
+                done.exception()  # retrieved even when every waiter was cancelled
+
+        task.add_done_callback(forget)
+    return await asyncio.shield(task)
+
+
 def _bound(conn: Connection, *, write: bool = False) -> str:
     if conn.quiz_id is None:
         raise Refused(m.ErrorCode.NOT_JOINED, "send join first")
@@ -88,15 +107,22 @@ def _bound(conn: Connection, *, write: bool = False) -> str:
     return conn.quiz_id
 
 
+type PageKey = tuple[str, int, int]  # quiz id, offset, limit
+
+
 class QuizService:
-    def __init__(self, store: Store, bank: QuestionBank, clock: Clock) -> None:
-        self._store, self._bank, self._clock = store, bank, clock
+    def __init__(
+        self, store: Store, bank: QuestionBank, clock: Clock, *, tick_ms: int = Limits().tick_ms
+    ) -> None:
+        self._store, self._bank, self._clock, self._tick_ms = store, bank, clock, tick_ms
         self._shared: dict[str, Shared] = {}  # per quiz: the standings at its latest seq
         self._refills: dict[str, asyncio.Task[Shared]] = {}  # per quiz: the read in flight
         self._outage_logged_ms: int | None = None
+        self._pages: dict[PageKey, tuple[int, m.LeaderboardPage]] = {}  # (expires at ms, page)
+        self._page_reads: dict[PageKey, asyncio.Task[m.LeaderboardPage]] = {}
 
     def drop_cache(self, quiz_id: str | None = None) -> None:
-        """Forget the cached standings of one quiz, or of all quizzes, and the reads in flight.
+        """Forget the cached standings and pages of one quiz, or of all, and the reads in flight.
 
         A store restart can lose writes without moving ``seq``, so the reconnect and
         resubscribe path calls this before it sends its repair snapshots (redis.md §5).
@@ -107,14 +133,29 @@ class QuizService:
         else:
             self._shared.pop(quiz_id, None)
             self._refills.pop(quiz_id, None)
+        self._drop_pages(quiz_id)
+
+    def _drop_pages(self, quiz_id: str | None) -> None:
+        for cache in (self._pages, self._page_reads):
+            for key in [key for key in cache if quiz_id in {None, key[0]}]:
+                del cache[key]
 
     async def _write[T](self, quiz_id: str, call: Awaitable[T]) -> T:
-        """Run a store write; its refusal at the deadline announces the end (redis.md §3.1)."""
+        """Run a store write; its refusal at the deadline announces the end (redis.md §3.1).
+
+        Before the deadline the refusal comes from a host mark that may not be durable yet,
+        so it is ``UNAVAILABLE``, which clients retry, never the final ``QUIZ_ENDED``."""
         try:
             return await call
         except DomainError as error:
-            if error.code is ErrorCode.QUIZ_ENDED and error.end_seq is None:
-                await self._store.end_quiz(quiz_id, "deadline")  # not_due: a host mark only
+            if error.code is not ErrorCode.QUIZ_ENDED:
+                raise
+            if error.end_seq is None:
+                end = await self._store.end_quiz(quiz_id, "deadline")
+                if end.status == "not_due":
+                    text = "the end is being confirmed"
+                    raise DomainError(ErrorCode.UNAVAILABLE, text) from error
+            self._drop_pages(quiz_id)  # the cached pages are not final: read them again
             raise
 
     async def handle(self, conn: Connection, msg: m.ClientMessage) -> Outcome:
@@ -252,54 +293,65 @@ class QuizService:
         self, quiz_id: str, user_ids: Sequence[str]
     ) -> tuple[Ranks, dict[str, Standing]]:
         """The ``standing`` of each user, all at the seq of one rank read for all of them."""
+        if (read := await self._at_one_key(quiz_id, user_ids)) is None:
+            msg = "the standings moved during every read"
+            raise ConnectionError(msg)
+        ranks, shared = read
+        return ranks, {user: _standing(_message(shared, row)) for user, row in ranks.rows.items()}
+
+    async def _at_one_key(
+        self, quiz_id: str, user_ids: Sequence[str]
+    ) -> tuple[Ranks, Shared] | None:
+        """A row-less rank read of ``user_ids`` and the cached standings at its key.
+
+        The rank read gives the key; a miss refills the standings, shared by concurrent
+        misses. A tick or a join between the two reads makes them differ: then both are
+        read again, up to ``STANDINGS_TRIES`` times, else None."""
         for _ in range(STANDINGS_TRIES):
             ranks = await self._store.ranks_of(quiz_id, user_ids)
             shared = self._shared.get(quiz_id)
             if shared is None or _key(shared) != _key(ranks):
                 shared = await self._refill(quiz_id)
             if _key(shared) == _key(ranks):
-                return ranks, {
-                    user: _standing(_message(shared, row)) for user, row in ranks.rows.items()
-                }
-        msg = "the standings moved during every read"
-        raise ConnectionError(msg)
+                return ranks, shared
+        return None
 
     async def _on_get_leaderboard(self, conn: Connection, msg: m.GetLeaderboard) -> m.ServerMessage:
-        page = await self._store.standings_page(_bound(conn), msg.offset, msg.limit)
-        return m.LeaderboardPage(
+        """One page per (quiz, offset, limit) for one tick, shared by every viewer of it."""
+        key, now = (_bound(conn), msg.offset, msg.limit), self._clock()
+        if (cached := self._pages.get(key)) is not None and now < cached[0]:
+            return cached[1]
+        return await _share(self._page_reads, key, partial(self._read_page, key, now))
+
+    async def _read_page(self, key: PageKey, now: int) -> m.LeaderboardPage:
+        """Read the page and cache it, unless the quiz's pages were dropped during the read."""
+        read = asyncio.current_task()
+        page = await self._store.standings_page(*key)
+        reply = m.LeaderboardPage(
             atSeq=page.at_seq,
-            offset=msg.offset,
+            offset=key[1],
             playerCount=page.player_count,
             final=page.final,
             entries=[row.entry() for row in page.rows],
         )
+        if self._page_reads.get(key) is read:
+            for stale in [k for k, (expires_ms, _) in self._pages.items() if expires_ms <= now]:
+                del self._pages[stale]
+            self._pages[key] = (now + self._tick_ms, reply)
+        return reply
 
     async def _refill(self, quiz_id: str) -> Shared:
         """Read the cached standings again; concurrent misses of one quiz share one read."""
-        if (read := self._refills.get(quiz_id)) is None:
-            read = self._refills[quiz_id] = asyncio.create_task(self._store.snapshot(quiz_id, None))
-
-            def forget(done: asyncio.Task[Shared]) -> None:
-                if self._refills.get(quiz_id) is done:
-                    del self._refills[quiz_id]
-                if not done.cancelled():
-                    done.exception()  # retrieved even when every waiter was cancelled
-
-            read.add_done_callback(forget)
-        shared = self._shared[quiz_id] = await asyncio.shield(read)
+        read = partial(self._store.snapshot, quiz_id, None)
+        shared = self._shared[quiz_id] = await _share(self._refills, quiz_id, read)
         return shared
 
     async def snapshot(self, quiz_id: str, user_id: str | None) -> m.Snapshot:
         """The standings cached per (quiz, seq, status, player count); the own row read fresh.
 
-        The own row's read gives the key. If the standings read for a miss lands at another
-        key, both parts are read again together.
-        """
-        ranks = await self._store.ranks_of(quiz_id, () if user_id is None else (user_id,))
-        you, shared = next(iter(ranks.rows.values()), None), self._shared.get(quiz_id)
-        if shared is None or _key(shared) != _key(ranks):
-            shared = await self._refill(quiz_id)
-            if _key(shared) != _key(ranks):
-                shared = self._shared[quiz_id] = await self._store.snapshot(quiz_id, user_id)
-                you = shared.you
-        return _message(shared, you)
+        When the two never meet at one key, one full read with the user returns both."""
+        if (read := await self._at_one_key(quiz_id, () if user_id is None else (user_id,))) is None:
+            full = self._shared[quiz_id] = await self._store.snapshot(quiz_id, user_id)
+            return _message(full, full.you)
+        ranks, shared = read
+        return _message(shared, next(iter(ranks.rows.values()), None))

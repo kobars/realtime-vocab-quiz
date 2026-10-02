@@ -1,11 +1,14 @@
-<!-- AI-ASSISTED: the live leaderboard panel: player counts, the top 50, my row pinned below it when I am further down, and the full list (UI spec §3.5). -->
+<!-- AI-ASSISTED: the live leaderboard panel: player counts, the top 50, my row pinned below it when I am further down, and the full list, in a clay card (UI spec §3.5). -->
 <script setup lang="ts">
 import { computed } from 'vue'
+import { Badge } from '@/components/ui/badge'
+import { Card } from '@/components/ui/card'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 import AllPlayers from './AllPlayers.vue'
 import LeaderboardRows from './LeaderboardRows.vue'
 import { TOP_N } from './limits'
+import { MY_ROW, placeFill, RANK_CHIP } from './places'
 
 const store = useQuizStore()
 const me = computed(() => store.quiz?.userId ?? null)
@@ -14,12 +17,13 @@ const pinned = computed(() => store.myRank !== null && !store.entries.some((row)
 </script>
 
 <template>
-  <section
-    class="flex flex-col gap-3"
+  <Card
+    as="section"
+    class="gap-4"
     :aria-label="strings.leaderboard.title"
   >
-    <header class="flex items-baseline justify-between gap-2">
-      <h2 class="text-lg font-semibold">
+    <header class="flex flex-wrap items-center justify-between gap-2">
+      <h2 class="text-xl">
         {{ strings.leaderboard.title }}
       </h2>
       <span
@@ -27,10 +31,13 @@ const pinned = computed(() => store.myRank !== null && !store.entries.some((row)
         role="status"
         class="text-sm text-muted-foreground"
       >{{ strings.leaderboard.updating }}</span>
-      <span
+      <Badge
         data-test="counts"
-        class="text-sm text-muted-foreground tabular-nums"
-      >{{ strings.leaderboard.counts(store.playerCount, store.onlineCount) }}</span>
+        variant="cyan"
+        class="tabular-nums"
+      >
+        {{ strings.leaderboard.counts(store.playerCount, store.onlineCount) }}
+      </Badge>
     </header>
     <LeaderboardRows
       :entries="store.entries"
@@ -40,12 +47,13 @@ const pinned = computed(() => store.myRank !== null && !store.entries.some((row)
     <p
       v-if="pinned"
       data-test="pinned"
-      class="flex items-center gap-3 rounded-md border-t bg-highlight px-3 py-2 font-semibold"
+      class="flex min-h-12 items-center gap-3 rounded-lg px-3 py-1.5"
+      :class="MY_ROW"
     >
-      <span class="w-10 tabular-nums">#{{ store.myRank }}</span>
+      <span :class="[RANK_CHIP, placeFill(store.myRank ?? 0)]">#{{ store.myRank }}</span>
       <span class="min-w-0 flex-1 truncate">{{ store.quiz?.displayName }} {{ strings.leaderboard.you }}</span>
       <span class="tabular-nums">{{ store.myScore }}</span>
     </p>
     <AllPlayers />
-  </section>
+  </Card>
 </template>
