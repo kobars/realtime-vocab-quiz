@@ -43,3 +43,5 @@ These rules apply to every change, whether a person or a coding agent makes it.
 - Every PR has an AI-LOG entry `docs/ai-log/PR-<n>.md`, where `<n>` is the GitHub PR number.
   Write it by hand from `docs/ai-log/TEMPLATE.md` right after `gh pr create`, commit it and push
   again. Record real mistakes only, and name a test file that exists under **Verification**.
+- A commit authored by Dependabot needs no trailer, and a PR made only of Dependabot's commits
+  needs no AI-LOG entry; a commit anyone else adds to such a PR follows the rules above.

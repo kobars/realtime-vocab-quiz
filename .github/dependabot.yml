@@ -28,6 +28,10 @@ updates:
     groups:
       npm:
         update-types: [minor, patch]
+    # The runtime is pinned to Node 24 (.nvmrc, the Dockerfiles, CI), so Node majors are not offered.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
   # Updates the base image digests in the Dockerfiles.
   - package-ecosystem: docker
     directories: [/api, /web, /load, /infra/dev]
@@ -38,6 +42,10 @@ updates:
     groups:
       docker:
         update-types: [minor, patch]
+    # The runtime is pinned to Node 24 (.nvmrc, the Dockerfiles, CI), so Node majors are not offered.
+    ignore:
+      - dependency-name: node
+        update-types: [version-update:semver-major]
   # compose.yaml's Redis; ci.yml and api/tests/conftest.py must follow (scripts/tests/test_images.py).
   - package-ecosystem: docker-compose
     directory: /
