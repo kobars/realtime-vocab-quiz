@@ -30,6 +30,7 @@ FAKE_FLYCTL = """printf '%q ' "$@" >> "$LOG"; echo >> "$LOG"
 case "$*" in
   "auth whoami") [[ -z ${SIGNED_OUT:-} ]] ;;
   "apps list "*) printf '%s' "${APPS:-}" ;;
+  "apps create "*) [[ -z ${TAKEN:-} ]] ;;
   "volumes list "*) printf '%s' "${VOLUMES:-[]}" ;;
   "ips list --app myquiz-api "*) printf '%s' "${API_IPS:-[]}" ;;
   "ips list --app myquiz-web "*) printf '%s' "${WEB_IPS:-[]}" ;;
@@ -78,10 +79,10 @@ def test_launch_dry_run_prints_every_create_and_runs_no_flyctl(tmp_path: Path) -
     code, calls, out = _run(tmp_path, "launch", "--dry-run", FLY_APP="myquiz")
     assert (code, calls) == (0, []), out
     assert _skipped(out) == [
-        f"write {tmp_path / '.env.fly'} (mode 600) with a new ADMIN_TOKEN and REDIS_PASSWORD",
         "flyctl apps create myquiz-redis --org personal",
         "flyctl apps create myquiz-api --org personal",
         "flyctl apps create myquiz-web --org personal",
+        f"write {tmp_path / '.env.fly'} (mode 600) with a new ADMIN_TOKEN and REDIS_PASSWORD",
         "flyctl volumes create redis_data --app myquiz-redis --region sin --size 1 --yes",
         "flyctl ips allocate-v6 --private --app myquiz-api",
         "flyctl ips allocate-v4 --shared --app myquiz-web --yes",
@@ -190,6 +191,16 @@ def test_launch_creates_everything_once_and_keeps_the_secrets(tmp_path: Path) ->
     assert ["volumes", "list", "--app", "myquiz-redis", "--json"] in calls
     assert _env(env_file) == env
     assert (tmp_path / "flyctl.log.stdin").read_text(encoding="utf-8") == stdin
+
+
+def test_a_prefix_taken_elsewhere_leaves_no_secrets_file(tmp_path: Path) -> None:
+    code, calls, out = _run(tmp_path, "launch", FLY_APP="myquiz", TAKEN="1")
+    assert code != 0, out
+    assert ["apps", "create", "myquiz-redis", "--org", "personal"] in calls
+    assert not (tmp_path / ".env.fly").exists()
+    # So another prefix is not refused for the first one's secrets.
+    code, _, out = _run(tmp_path, "launch", "--dry-run", FLY_APP="otherquiz")
+    assert code == 0, out
 
 
 @pytest.mark.parametrize(

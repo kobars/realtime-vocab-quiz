@@ -268,11 +268,12 @@ make fly-demo
 
 - **`make fly-launch`** creates the three apps (`FLY_APP` is a prefix of your choice: Fly app
   names are global), the Redis volume, the API's Flycast address and the web app's shared IPv4
-  and IPv6 addresses, and generates `ADMIN_TOKEN` and `REDIS_PASSWORD` with openssl. It sets them
-  as Fly secrets through stdin, never on a command line, and keeps them with the prefix, region
+  and IPv6 addresses, and generates `ADMIN_TOKEN` and `REDIS_PASSWORD` locally. It sets them as
+  Fly secrets through stdin, never on a command line, and keeps them with the prefix, region
   and organization in `.env.fly` (mode 600, ignored by git and the image builds): Fly secrets
-  cannot be read back, and the other targets read the prefix from it. Running it again creates
-  only what is missing and keeps the secrets.
+  cannot be read back, and the other targets read the prefix from it. It writes that file once
+  the three apps exist, so a prefix that is already taken leaves nothing behind. Running it again
+  creates only what is missing and keeps the secrets.
 - **`make fly-deploy`** deploys Redis, then the API (rolling, one node at a time, then scaled to
   two Machines), then the web edge, each waiting for its health checks, then waits for
   `https://<prefix>-web.fly.dev/api/readyz` and prints the URL. It deploys the published images

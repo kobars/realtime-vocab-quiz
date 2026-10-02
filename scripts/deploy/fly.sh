@@ -95,7 +95,7 @@ app_names() {
 }
 
 launch() {
-  local apps app volumes ips admin_token redis_password
+  local apps app volumes ips admin_token redis_password new_secrets=0
   load_settings
   need_flyctl
   if [[ -f $ENV_FILE ]]; then
@@ -104,24 +104,27 @@ launch() {
     [[ -n $admin_token && -n $redis_password ]] || die "$ENV_FILE lacks ADMIN_TOKEN or REDIS_PASSWORD"
     [[ $DRY_RUN == 1 ]] || chmod 600 "$ENV_FILE"
   else
-    admin_token=$(openssl rand -hex 24)
-    redis_password=$(openssl rand -hex 24)
-    if [[ $DRY_RUN == 1 ]]; then
-      printf 'dry run, skipped: write %s (mode 600) with a new ADMIN_TOKEN and REDIS_PASSWORD\n' "$ENV_FILE"
-    else
-      (
-        umask 077
-        printf 'FLY_APP=%s\nFLY_REGION=%s\nFLY_ORG=%s\nADMIN_TOKEN=%s\nREDIS_PASSWORD=%s\n' \
-          "$APP" "$REGION" "$ORG" "$admin_token" "$redis_password" >"$ENV_FILE"
-      )
-      log "Wrote $ENV_FILE (mode 600): the secrets of $APP; keep it private"
-    fi
+    admin_token=$(new_secret)
+    redis_password=$(new_secret)
+    new_secrets=1
   fi
 
   apps=$(app_names)
   for app in "$REDIS" "$API" "$WEB"; do
     grep -qx "$app" <<<"$apps" || run flyctl apps create "$app" --org "$ORG"
   done
+  # Written once the apps are ours: a prefix that another account holds leaves no file behind
+  # that ties the next try to it.
+  if [[ $new_secrets == 1 && $DRY_RUN == 1 ]]; then
+    printf 'dry run, skipped: write %s (mode 600) with a new ADMIN_TOKEN and REDIS_PASSWORD\n' "$ENV_FILE"
+  elif [[ $new_secrets == 1 ]]; then
+    (
+      umask 077
+      printf 'FLY_APP=%s\nFLY_REGION=%s\nFLY_ORG=%s\nADMIN_TOKEN=%s\nREDIS_PASSWORD=%s\n' \
+        "$APP" "$REGION" "$ORG" "$admin_token" "$redis_password" >"$ENV_FILE"
+    )
+    log "Wrote $ENV_FILE (mode 600): the secrets of $APP; keep it private"
+  fi
   volumes=$(lookup flyctl volumes list --app "$REDIS" --json)
   grep -Eiq "\"name\": *\"$VOLUME\"" <<<"$volumes" ||
     run flyctl volumes create "$VOLUME" --app "$REDIS" --region "$REGION" --size 1 --yes
