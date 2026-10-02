@@ -1,9 +1,11 @@
 # AI-ASSISTED: OpenSSF Scorecard: supply-chain checks of the repository, published and sent to code scanning.
 name: scorecard
 
-# Publishing the results limits this workflow to the steps and keys that Scorecard verifies:
-# no top-level env, defaults or write permission; only the analysis job may write id-token, and
-# that job may use only the actions Scorecard lists. Other jobs, like scheduled-failure, may run.
+# Publishing the results limits this workflow to what Scorecard verifies: no top-level env,
+# defaults or write permission, and only the analysis job may write id-token. That job also takes
+# no env, defaults, container or services, runs on a GitHub-hosted Ubuntu runner and uses only the
+# actions Scorecard lists (https://github.com/ossf/scorecard-action#workflow-restrictions). Other
+# jobs, like scheduled-failure, may run.
 on:
   push:
     branches: [main]
