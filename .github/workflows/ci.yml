@@ -1,6 +1,6 @@
-# AI-ASSISTED: CI: make check, the Redis integration tests, the acceptance tests on both stores
-# and the combined coverage gate, on pull requests, on main and weekly; the PR guards and the
-# review budget on pull requests.
+# AI-ASSISTED: CI: make check, the Redis integration tests, the acceptance tests on both stores,
+# the visual and accessibility specs and the combined coverage gate, on pull requests, on main and
+# weekly; the PR guards and the review budget on pull requests.
 name: ci
 
 on:
@@ -90,6 +90,25 @@ jobs:
         uses: ./.github/actions/upload-test-results
         with:
           name: integration
+
+  # The visual and accessibility specs (web/e2e/visual.spec.ts, web/e2e/a11y.spec.ts) in the pinned Playwright
+  # image that renders the baselines; the report and the screenshot diffs are kept when they fail.
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: make ui-check
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-report
+          path: |
+            web/playwright-report/
+            web/test-results/
+          if-no-files-found: ignore
 
   # Combines the coverage-* artifacts; a job that uploads one joins the report by being listed in
   # needs. On a PR it also gates the changed lines.
@@ -182,7 +201,7 @@ jobs:
   # The ruleset requires this job only; a job joins the gate by being listed in needs.
   ci-required:
     if: always()
-    needs: [check, integration, coverage, guards, review-budget]
+    needs: [check, integration, ui, coverage, guards, review-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

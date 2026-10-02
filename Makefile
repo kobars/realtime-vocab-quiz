@@ -46,8 +46,16 @@ DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
 # compose reads the whole file in every command, so the full stack's required secrets must be set
 # even to start the development Redis or to stop anything. Placeholders: never start the stack with it.
 COMPOSE_NO_SECRETS = ADMIN_TOKEN="$${ADMIN_TOKEN:-unused}" REDIS_PASSWORD="$${REDIS_PASSWORD:-unused}" docker compose
+# The visual and accessibility specs run in the pinned Playwright image (its version matches @playwright/test in
+# web/pnpm-lock.yaml), always as linux/amd64 like CI, so the baselines and every check render alike. The Linux
+# node_modules live in a volume, which leaves the host's web/node_modules alone. UI_ARGS adds Playwright arguments,
+# for example UI_ARGS='--project=320-light a11y'.
+PLAYWRIGHT_IMAGE = mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+ui_run = docker run --rm --platform linux/amd64 --ipc=host -e CI -e E2E_SUITE=ui -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+	-v "$(CURDIR)":/repo -v elsaquiz-ui-node-modules:/repo/web/node_modules -w /repo/web $(PLAYWRIGHT_IMAGE) \
+	sh -c 'corepack enable && pnpm install --frozen-lockfile --store-dir /tmp/pnpm-store && pnpm exec playwright test $(1)'
 
-.PHONY: help build up down smoke-full dev-api test test-integration test-system test-browser check acceptance load contracts audit audit-python audit-web audit-secrets review-budget
+.PHONY: help build up down smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -75,6 +83,10 @@ test-system: ## Run the system tests against a running full stack at STACK_URL
 	$(call step,pytest system,$(STACK_ENV); $(PYTEST) tests/system -m system)
 test-browser: ## Run the browser specs in Chromium against a running full stack at STACK_URL
 	$(call step,playwright,$(STACK_ENV); pnpm -C web exec playwright test)
+ui-check: ## Run the visual and accessibility specs in the pinned Playwright image (Docker; make check needs no browser)
+	$(call step,ui specs,$(call ui_run,$(UI_ARGS)))
+ui-baselines: ## Regenerate the screenshot baselines that differ or are missing, in the pinned Playwright image
+	$(call step,ui baselines,$(call ui_run,--update-snapshots $(UI_ARGS)))
 check: export ACCEPTANCE_STORE = memory
 check: ## Run every check a change must pass
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
