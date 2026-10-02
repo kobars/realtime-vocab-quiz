@@ -51,7 +51,7 @@ our choice: they make the scale-out claims of §10 real.
 
 | Target | Value | How it is measured |
 |---|---|---|
-| Latency (C5) | p99 below 500 ms from "answer accepted" to "leaderboard delivered"; frames come from a 200 ms coalescing tick, so the tick spends up to 200 ms of it | The bot swarm (`load/bots.py`) times each answer → leaderboard pair on the client side; the measured runs go in §9 |
+| Latency (C5) | p99 below 500 ms from "answer accepted" to "leaderboard delivered"; frames come from a 200 ms coalescing tick, so the tick spends up to 200 ms of it | The bot swarm (`load/bots.py`) times each pair on the client side: the interval starts when the client receives the `answer_result` with points (the client's proof that the server accepted the answer) and ends at the first frame that shows the new total. A missing or timed-out sample counts as a miss, and a run that misses the target exits with status 1; the measured runs go in §9 |
 | Throughput | Thousands of concurrent sockets over **two API nodes** behind nginx (a cap of 10,000 per process), and 1,000 answers per second in one quiz of 5,000 players (§9) | Bot swarm runs on one and on two nodes: sockets, messages per second, CPU and memory (§9) |
 | Availability | The service keeps running when one API node stops: its clients reconnect to the other node and resync. Retries follow a full-jitter backoff (protocol §7): a client that had stayed joined for 10 s makes its first retry within 250 ms, and each later retry waits at most 10 s (5 s more after an overload close, 1013); a socket that dies silently is detected after 50 s with no inbound message, then the same retries follow. Redis is the single point of failure: while it is down, requests get `UNAVAILABLE` | `make smoke-full` (`load/smoke_full.py`) stops the node that holds a protocol client's socket and requires the client back through nginx, resynced, within 10 s; that client retries every 250 ms on its own, so the browser client's backoff bounds are checked by `web/src/protocol/backoff.test.ts`; `/readyz` on each node (503 while Redis is unreachable); the failure table of §11 |
 
@@ -714,7 +714,8 @@ client address before the ticket lookup (protocol §8).
 
 **SLO.** 99% of leaderboard updates reach the client within 500 ms of "answer accepted" (C5),
 over a quiz; `/readyz` answers 200 while Redis is reachable. The load bots measure the first
-(`load/bots.py`, §9).
+(`load/bots.py`, §9): from the client's receipt of `answer_result` to the first frame with the new
+total, with missing and timed-out samples counted as misses.
 
 **What each node exposes.**
 
@@ -723,14 +724,32 @@ over a quiz; `/readyz` answers 200 while Redis is reachable. The load bots measu
   unreachable.
 - `/metrics` (Prometheus text format, `obs/metrics.py`): `ws_connections` (open sockets),
   `answers_total{result}` (correct, wrong, late), `leaderboard_frames_total` (frames this node
-  published), `tick_duration_seconds` (histogram of one tick) and `redis_clock_step_total`
-  (answers scored at elapsed 0 after a Redis clock step back).
+  published), `leaderboard_publish_lag_seconds` (histogram, observed by the tick on each frame
+  it publishes: the time from the first change the frame carries, an answer that scored, a join
+  or a leave, to its publication, on the Redis clock), `leaderboard_frames_conflated_total`
+  (frames a slow socket's send queue dropped for a newer one), `resyncs_total` (resync requests
+  answered with a snapshot), `tick_duration_seconds` (histogram of one tick) and
+  `redis_clock_step_total` (answers scored at elapsed 0 after a Redis clock step back).
 - JSON logs (`obs/logs.py`, structlog): one `http_request` line per request with the path,
   status and duration; a line when a socket closes, with its code; each line carries the
   `request_id` (a socket's connection ID) and the `quiz_id`. No API log line holds a ticket.
 
-**Alerts a production setup would add.** `/readyz` failing on any node; the answer → leaderboard
-p99 above 500 ms (from client-side timings, which this build does not export); the p99 of
+**The server's part of the SLO.** `leaderboard_publish_lag_seconds` covers the store part of C5:
+from "answer accepted" to the frame leaving Redis. Its p99 over all nodes:
+
+```promql
+histogram_quantile(0.99, sum by (le) (rate(leaderboard_publish_lag_seconds_bucket[5m])))
+```
+
+It is per frame, not per answer: a frame's lag is that of its oldest change, so every answer it
+carries waited at most that long. It stays near the 200 ms tick on a healthy stack. It cannot see
+the relay to each node, the socket writes or the network, so true client delivery still needs
+client-side timings, which this build does not export; the bot swarm measures them in load runs.
+
+**Alerts a production setup would add.** `/readyz` failing on any node; the p99 of
+`leaderboard_publish_lag_seconds` above 300 ms (the store part leaves 200 ms of the 500 ms budget
+for delivery), and the client-observed answer → leaderboard p99 above 500 ms once clients report
+timings; the p99 of
 `tick_duration_seconds` above 50 ms; `sum(rate(leaderboard_frames_total))` over all nodes at 0
 while `sum(rate(answers_total{result="correct"}))` grows (only a correct answer on time scores
 and sets `dirty`, so wrong and late answers alone publish nothing; and only the node that wins a
@@ -746,10 +765,12 @@ tick publishes, so one node's counter can stay flat on a healthy stack); `ws_con
    in the logs.
 3. Check the tick time: a high `tick_duration_seconds` points at Redis (`SLOWLOG GET`,
    `INFO commandstats` for the scripts; a quiz above 200 players ranks every scorer in the tick).
-4. Check the sockets: many 1013 closes, or conflated frames, mean slow clients or a saturated
-   node (CPU of the node's one event loop; `ws_connections`).
-5. Check the client: a client that keeps resyncing (gaps) points at lost frames, for example
-   repeated pub/sub drops on its node (§11).
+4. Check the sockets: a growing `leaderboard_frames_conflated_total`, or many 1013 closes, means
+   slow clients or a saturated node (CPU of the node's one event loop; `ws_connections`). A
+   `leaderboard_publish_lag_seconds` p99 near 200 ms with slow clients puts the delay here, after
+   the publish.
+5. Check the clients: a growing `resyncs_total` means clients that see gaps, which points at lost
+   frames, for example repeated pub/sub drops on their node (§11).
 6. Reproduce with the bot swarm against the stack and compare its answer → leaderboard
    percentiles with §9.
 
