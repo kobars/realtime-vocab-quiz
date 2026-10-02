@@ -206,7 +206,7 @@ class RedisStore:
         value = reply[1] if len(reply) > 1 else None
         match reply[0]:
             case "published":
-                return port.Publish("published", int(reply[1]), lag_ms=int(reply[2]))
+                return port.Publish("published", int(value or 0), lag_ms=int(reply[2] or 0))
             case "ended":
                 return port.Publish("ended", None if value is None else int(value))
             case "busy":
