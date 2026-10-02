@@ -102,8 +102,8 @@ Every pull request and every push to `main` runs these GitHub Actions workflows:
 - `links.yml` runs weekly and also checks the external links.
 
 The CI, security and container workflows also run weekly on `main`, where the CI run tries ten
-times as many Hypothesis examples; a failed scheduled run opens, or comments on, the one open
-issue labelled `ci-scheduled` (`.github/workflows/scheduled-failure.yml`).
+times as many Hypothesis examples. A failed scheduled run of any workflow opens, or comments on,
+the one open issue labelled `ci-scheduled` (`.github/workflows/scheduled-failure.yml`).
 
 The CI, security, container and stack workflows each end in one gate job (`ci-required`,
 `security-required`, `containers-required`, `stack-required`) that fails when a job it needs fails or is
