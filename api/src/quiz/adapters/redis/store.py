@@ -1,4 +1,5 @@
-# AI-ASSISTED: the Redis store: one Lua script per port method; the feed is events plus control.
+# AI-ASSISTED: the Redis store: one Lua script per port method; the feed is events plus control;
+# a sorted set of the open self-hosted quizzes, shared by every node.
 """The store port on Redis. Scripts read the Redis clock; Python passes no time or points.
 
 The client must decode responses (``decode_responses=True``). An unreachable store, or one
@@ -29,6 +30,7 @@ from quiz.ports.store import Created, Joined, Limits
 WAITAOF_TIMEOUT_MS = 2000  # the host end waits this long for the mark's fsync (redis.md §3.1)
 SUBSCRIBE_TIMEOUT_S = 5  # subscribe() waits this long for Redis to confirm the subscription
 RANKS_ONLY = -1  # read_standings' limit for the asked users' rows alone
+HOSTED_KEY = "quiz:hosted"  # the open self-hosted quizzes, each scored by when it stops counting
 
 
 def _ok(name: str, reply: Reply) -> Reply:
@@ -78,7 +80,7 @@ class RedisStore:
             reply = await self._scripts.call(name, keys, *args, on=on)
         return _ok(name, reply)
 
-    async def create_quiz(
+    async def create_quiz(  # noqa: PLR0913 - the port's signature
         self,
         quiz_id: str,
         questions: tuple[Question, ...],
@@ -86,10 +88,12 @@ class RedisStore:
         window_ms: int,
         time_limit_ms: int,
         bank_quiz_id: str | None = None,
+        host_token_hash: str | None = None,
     ) -> Created:
         ids = json.dumps([q.question_id for q in questions])
         answers = json.dumps([q.correct_choice for q in questions])
-        args = (ids, answers, time_limit_ms, window_ms, bank_quiz_id or quiz_id)
+        bank = bank_quiz_id or quiz_id
+        args = (ids, answers, time_limit_ms, window_ms, bank, host_token_hash or "")
         reply = await self._run("create_quiz", quiz_id, *args)
         start_ms, deadline_ms = (int(v or 0) for v in reply[1:3])
         return Created(start_ms, deadline_ms)
@@ -174,6 +178,21 @@ class RedisStore:
         with reachable():
             bank = await self._client.hget(quiz_keys(quiz_id, self._prefix).meta, "bankQuizId")
         return quiz_id if bank is None else str(bank)
+
+    async def host_token_hash(self, quiz_id: str) -> str | None:
+        with reachable():
+            digest = await self._client.hget(quiz_keys(quiz_id, self._prefix).meta, "hostHash")
+        return None if digest is None else str(digest)
+
+    async def hold_hosted(self, quiz_id: str, window_ms: int, cap: int) -> bool:
+        keys = (f"{self._prefix}{HOSTED_KEY}",)
+        with reachable():
+            reply = await self._scripts.call("hold_hosted", keys, quiz_id, window_ms, cap)
+        return reply[0] == "ok"
+
+    async def release_hosted(self, quiz_id: str) -> None:
+        with reachable():
+            await self._client.zrem(f"{self._prefix}{HOSTED_KEY}", quiz_id)
 
     async def read_seq(self, quiz_id: str) -> int | None:
         with reachable():

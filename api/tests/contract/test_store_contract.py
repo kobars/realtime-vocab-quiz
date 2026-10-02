@@ -1,4 +1,5 @@
 # AI-ASSISTED: the shared store contract (docs/spec/redis.md §3); every store must pass it.
+# Also the host token hash of a self-hosted quiz and the cap on open self-hosted quizzes.
 # Time moves only through the harness and no exact points are asserted: real clocks pass too.
 # ``advance(-ms)`` steps the clock back; a real clock cannot, and its harness ignores it.
 # Expiries that a slow step could beat move only after the setup: ``pass_deadline``, ``hold_tick``.
@@ -21,6 +22,7 @@ QUESTIONS = tuple(Question(f"q{i}", i % 4) for i in range(3))
 WINDOW_MS, LIMIT_MS = 600_000, 20_000
 SWEEP_MS = 100  # the presence sweep window: shorter than every wait between two renews
 SHORT_WINDOW_MS = 5_000  # far below LIMIT_MS, and far above any setup step on a real clock
+HOSTED_MS = 800  # a self-hosted quiz's count lapses within one advance, after a few setup steps
 
 
 async def refused(call: Awaitable[object]) -> ErrorCode:
@@ -68,6 +70,39 @@ async def test_a_quiz_keeps_the_bank_quiz_it_plays(store: Store, quiz_id: str) -
     assert await store.bank_quiz_id(quiz_id) == "VOCAB-42"
     await started(store, other := f"{quiz_id}-B")
     assert await store.bank_quiz_id(other) == other
+
+
+async def test_a_host_token_hash_is_kept_with_its_quiz(store: Store, quiz_id: str) -> None:
+    assert await store.host_token_hash(quiz_id) is None  # unknown
+    await store.create_quiz(
+        quiz_id, QUESTIONS, window_ms=WINDOW_MS, time_limit_ms=LIMIT_MS, host_token_hash="ab12"
+    )
+    assert await store.host_token_hash(quiz_id) == "ab12"
+    await started(store, other := f"{quiz_id}-B")
+    assert await store.host_token_hash(other) is None  # created without one
+
+
+async def test_hosted_quizzes_count_up_to_the_cap_until_released(
+    store: Store, quiz_id: str
+) -> None:
+    first, second, third = (f"{quiz_id}-{n}" for n in "ABC")
+    assert await store.hold_hosted(first, WINDOW_MS, 2)
+    assert await store.hold_hosted(second, WINDOW_MS, 2)
+    assert await store.hold_hosted(second, WINDOW_MS, 2)  # held already: counted once
+    assert not await store.hold_hosted(third, WINDOW_MS, 2)
+    await store.release_hosted(first)
+    await store.release_hosted(first)  # a second release changes nothing
+    assert await store.hold_hosted(third, WINDOW_MS, 2)
+    assert not await store.hold_hosted(first, WINDOW_MS, 2)
+
+
+async def test_a_hosted_quiz_stops_counting_after_its_window(
+    store: Store, advance: Advance, quiz_id: str
+) -> None:
+    assert await store.hold_hosted(quiz_id, HOSTED_MS, 1)
+    assert not await store.hold_hosted(f"{quiz_id}-B", HOSTED_MS, 1)
+    await advance(HOSTED_MS)
+    assert await store.hold_hosted(f"{quiz_id}-B", HOSTED_MS, 1)
 
 
 async def test_read_seq_is_the_counter_or_none(store: Store, quiz_id: str) -> None:

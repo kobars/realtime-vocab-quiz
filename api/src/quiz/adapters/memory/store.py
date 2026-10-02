@@ -40,6 +40,7 @@ class _Quiz:
     state: s.QuizState
     deadline_ms: int  # as created; a host mark moves only state.deadline_ms
     bank_quiz_id: str
+    host_token_hash: str | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     names: dict[str, str] = field(default_factory=dict)
     present: dict[str, str] = field(default_factory=dict)  # user id -> connection id
@@ -101,6 +102,7 @@ class MemoryStore:
         self.limits = limits or Limits()
         self._quizzes: dict[str, _Quiz] = {}
         self._feeds: dict[str, set[asyncio.Queue[str]]] = {}  # per quiz id, one per subscriber
+        self._hosted: dict[str, int] = {}  # open self-hosted quiz id -> when it stops counting
 
     def _idle(self, quiz_id: str, quiz: _Quiz, now: int) -> bool:
         return quiz.last_write_ms + QUIZ_TTL_MS <= now and quiz_id not in self._feeds
@@ -133,7 +135,7 @@ class MemoryStore:
         for feed in self._feeds.get(quiz_id, ()):
             feed.put_nowait(message)
 
-    async def create_quiz(
+    async def create_quiz(  # noqa: PLR0913 - the port's signature
         self,
         quiz_id: str,
         questions: tuple[s.Question, ...],
@@ -141,6 +143,7 @@ class MemoryStore:
         window_ms: int,
         time_limit_ms: int,
         bank_quiz_id: str | None = None,
+        host_token_hash: str | None = None,
     ) -> Created:
         now = self._clock()
         for idle in [q for q, quiz in self._quizzes.items() if self._idle(q, quiz, now)]:
@@ -163,12 +166,29 @@ class MemoryStore:
         except ValueError as error:
             raise DomainError(ErrorCode.INVALID_MESSAGE, str(error)) from error
         bank = bank_quiz_id or quiz_id
-        self._quizzes[quiz_id] = _Quiz(state, state.deadline_ms, bank, last_write_ms=now)
+        self._quizzes[quiz_id] = _Quiz(
+            state, state.deadline_ms, bank, host_token_hash, last_write_ms=now
+        )
         return Created(state.start_ms, state.deadline_ms)
 
     async def bank_quiz_id(self, quiz_id: str) -> str:
         quiz = self._held(quiz_id)
         return quiz_id if quiz is None else quiz.bank_quiz_id
+
+    async def host_token_hash(self, quiz_id: str) -> str | None:
+        quiz = self._held(quiz_id)
+        return None if quiz is None else quiz.host_token_hash
+
+    async def hold_hosted(self, quiz_id: str, window_ms: int, cap: int) -> bool:
+        now = self._clock()
+        self._hosted = {q: until for q, until in self._hosted.items() if until > now}
+        if quiz_id not in self._hosted and len(self._hosted) >= cap:
+            return False
+        self._hosted[quiz_id] = now + window_ms
+        return True
+
+    async def release_hosted(self, quiz_id: str) -> None:
+        self._hosted.pop(quiz_id, None)
 
     async def join(self, quiz_id: str, user_id: str, display_name: str, conn_id: str) -> Joined:
         quiz = self._quiz(quiz_id)
