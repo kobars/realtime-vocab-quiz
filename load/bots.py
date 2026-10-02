@@ -282,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     result = run(opts)
     print(report(result))  # before the save: a failed write keeps the report
     print(f"written: {save(result, opts.label)}")
-    return 0 if result["valid"] else 1
+    return 0 if result["valid"] and result["slo_met"] else 1
 
 
 if __name__ == "__main__":

@@ -257,6 +257,16 @@ def test_the_report_is_printed_before_the_result_is_saved(
     assert "INVALID: no answer samples" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(("slo_met", "status"), [(True, 0), (False, 1)])
+def test_a_valid_run_that_misses_the_slo_exits_with_status_1(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, slo_met: bool, status: int  # noqa: FBT001
+) -> None:
+    result = summary(Recorder(answer_ms=[10.0]), [], 1) | {"slo_met": slo_met}
+    monkeypatch.setattr(bots, "run", lambda _: result)
+    monkeypatch.setattr(bots, "RESULTS", tmp_path)
+    assert main([]) == status
+
+
 async def test_quizzes_are_created_or_found_open(app_url: str) -> None:
     opts = parse(["--quizzes", "2", "--admin-token", "load-token", "--url", app_url])
     await create_quizzes(opts)
@@ -278,9 +288,10 @@ def test_a_swarm_over_two_processes_writes_its_result(
 ) -> None:
     monkeypatch.setattr(bots, "RESULTS", tmp_path)
     flags = "--quizzes 2 --bots 3 --procs 2 --think-ms 20 --duration 1 --ramp 0 --timeout-ms 500"
-    assert main([*flags.split(), "--admin-token", "load-token", "--url", app_url]) == 0
+    status = main([*flags.split(), "--admin-token", "load-token", "--url", app_url])
     [path] = tmp_path.iterdir()
     result = json.loads(path.read_text())
+    assert status == (0 if result["slo_met"] else 1)  # a slow CI runner may miss the target
     counts = result["counts"]
     assert counts["cohorts"] >= 3
     assert counts["answers"] >= 30  # the first cohort of each slot answers all ten

@@ -25,8 +25,10 @@ def test_the_summary_marks_a_run_with_a_busy_swarm_invalid() -> None:
         "max": 30.0,
         "missing": 1,
         "timed_out": 0,
+        "completion": 0.75,
     }
     assert ok["leaderboard"]["timed_out"] == 2
+    assert ok["leaderboard"]["completion"] == round(1 / 3, 4)
     assert ok["msgs_in_per_s"] == 10
     busy = summary(rec, [{"cpu_pct": 40.0, "rss_mb": 1}, {"cpu_pct": 81.0, "rss_mb": 1}], 60)
     assert busy["problems"] == ["a swarm process above 80% CPU"]
@@ -43,3 +45,25 @@ def test_a_quiz_that_ends_before_the_deadline_makes_the_run_invalid() -> None:
     rec.counts["slots_ended_early"] = 2
     early = summary(rec, [{"cpu_pct": 10.0, "rss_mb": 1}], 60)
     assert early["problems"] == ["2 bot slots stopped at a quiz end before the deadline"]
+
+
+def test_timed_out_leaderboard_samples_miss_the_slo_of_a_valid_run() -> None:
+    rec = Recorder(answer_ms=[10.0] * 10, board_ms=[120.0] * 7)
+    rec.counts["board_timeout"] = 3  # 30% of the updates never arrived within the timeout
+    missed = summary(rec, [{"cpu_pct": 10.0, "rss_mb": 1}], 60)
+    assert missed["valid"]  # the swarm measured correctly; the server missed the target
+    assert (missed["slo_met"], missed["slo_within"]) == (False, 0.7)
+    assert missed["leaderboard"]["p99"] == 120  # the delivered samples alone look fast
+    assert "SLO MISSED" in report(missed)
+
+
+def test_the_slo_needs_99_percent_of_updates_below_500_ms() -> None:
+    on_time = Recorder(answer_ms=[10.0], board_ms=[499.0] * 99 + [500.0])
+    met = summary(on_time, [{"cpu_pct": 10.0, "rss_mb": 1}], 60)
+    assert (met["slo_met"], met["slo_within"]) == (True, 0.99)
+    assert "SLO met" in report(met)
+    on_time.counts["board_missing"] = 1  # a dropped socket counts against it too
+    assert not summary(on_time, [{"cpu_pct": 10.0, "rss_mb": 1}], 60)["slo_met"]
+    unmeasured = summary(Recorder(answer_ms=[10.0]), [{"cpu_pct": 10.0, "rss_mb": 1}], 60)
+    assert (unmeasured["slo_met"], unmeasured["slo_within"]) == (False, None)
+    assert unmeasured["leaderboard"]["completion"] is None
