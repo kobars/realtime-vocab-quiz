@@ -8,5 +8,8 @@ if not redis.call('ZSCORE', KEYS[1], ARGV[1]) and redis.call('ZCARD', KEYS[1]) >
   return {'full'}
 end
 redis.call('ZADD', KEYS[1], now + window, ARGV[1])
-redis.call('PEXPIRE', KEYS[1], window) -- the newest member stops counting last
+-- The key lives until its last member stops counting: a shorter window, after a change of the
+-- setting, must not cut the longer ones short.
+local last = redis.call('ZRANGE', KEYS[1], -1, -1, 'WITHSCORES')
+redis.call('PEXPIREAT', KEYS[1], last[2])
 return {'ok'}

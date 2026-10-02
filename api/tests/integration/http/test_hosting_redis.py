@@ -10,7 +10,7 @@ from redis.asyncio import Redis
 from quiz.adapters.redis.keys import quiz_keys
 from quiz.adapters.redis.store import HOSTED_KEY
 from quiz.config import Settings
-from quiz.main import create_app
+from quiz.main import create_app, services_of
 
 
 def node(redis_url: str, node_id: str) -> FastAPI:
@@ -51,3 +51,14 @@ async def test_two_nodes_share_the_cap_and_either_ends_the_quiz(
         assert (ended.status_code, ended.json()["status"]) == (200, "ended")
         assert (await a.get(f"/quizzes/{quiz_id}")).json()["status"] == "ended"
         assert (await b.post("/quizzes", json={"bankQuizId": "VOCAB-42"})).status_code == 201
+
+
+async def test_a_shorter_window_keeps_the_count_of_longer_ones(
+    redis_url: str, redis: Redis
+) -> None:
+    app = node(redis_url, "n1")
+    async with app.router.lifespan_context(app):
+        store = services_of(app).store
+        assert await store.hold_hosted("LONG-AAAA", 3_600_000, 2)
+        assert await store.hold_hosted("SHORT-AAAA", 60_000, 2)  # HOSTING_WINDOW_MS lowered
+        assert await redis.pttl(HOSTED_KEY) > 3_500_000  # the key outlives the long one's window
