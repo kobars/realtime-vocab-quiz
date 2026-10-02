@@ -44,10 +44,11 @@ def create_quiz(api_url: str, token: str, bank_id: str, code: Callable[[], str] 
             with urllib.request.urlopen(request, timeout=10):  # noqa: S310
                 return quiz_id
         except urllib.error.HTTPError as error:
-            if error.code != 409:  # noqa: PLR2004 - the run ID exists
-                detail = error.read().decode(errors="replace")
-                msg = f"POST /admin/quizzes {quiz_id}: HTTP {error.code} {detail}"
-                raise RuntimeError(msg) from None
+            with error:  # the reply body is a file to close
+                if error.code != 409:  # noqa: PLR2004 - the run ID exists
+                    detail = error.read().decode(errors="replace")
+                    msg = f"POST /admin/quizzes {quiz_id}: HTTP {error.code} {detail}"
+                    raise RuntimeError(msg) from None
     msg = f"no free run code for {bank_id} after {ATTEMPTS} attempts"
     raise RuntimeError(msg)
 
