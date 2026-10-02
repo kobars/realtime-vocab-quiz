@@ -133,7 +133,29 @@ def test_test_steps_write_junit_reports_only_when_reports_is_set(tmp_path: Path)
     assert f"--junitxml={reports}/unit.xml" in commands
     assert f"--junitxml={reports}/integration.xml" in commands
     assert f"--reporter=junit --outputFile.junit={reports}/vitest.xml" in commands
-    assert "junit" not in _make_dry_run("check") + _make_dry_run("test-integration")
+    assert f"--junitxml={reports}/acceptance-memory.xml" in commands
+    unset = (_make_dry_run("check") + _make_dry_run("test-integration")).splitlines()
+    assert not [line for line in unset if "junit" in line and "acceptance" not in line]
+
+
+@pytest.mark.parametrize(
+    ("target", "variables", "store", "skips"),
+    [
+        ("check", (), "memory", 0),
+        ("test-integration", (), "redis", 2),
+        ("acceptance", ("ACCEPTANCE_STORE=redis",), "redis", 2),
+    ],
+)
+def test_each_acceptance_run_checks_its_report_for_the_skips_of_its_store(
+    target: str, variables: tuple[str, ...], store: str, skips: int
+) -> None:
+    report = ROOT / "reports" / f"acceptance-{store}.xml"
+    commands = _make_dry_run(target, *variables)
+    # The Redis harness flushes its database, so it never gets the Redis that REDIS_URL names.
+    run = f"unset REDIS_URL; cd api && uv run --locked pytest tests/acceptance --junitxml={report}"
+    assert f"{run} ||" in commands
+    check = f"scripts/check_junit_skips.py {report} --expect {skips} --reason 'exact-time check'"
+    assert check in commands
 
 
 @pytest.mark.parametrize(
@@ -269,15 +291,17 @@ def test_dependency_check_fails_when_a_direct_import_is_undeclared(tmp_path: Pat
 
 
 def _phony_and_targets(makefile: str) -> tuple[list[str], list[str]]:
-    """Return the sorted ``.PHONY`` names and the sorted names of the defined targets."""
+    """Return the sorted ``.PHONY`` names and the sorted names of the defined targets; a target
+    with a target-specific variable has two rule lines and counts once."""
     phony = re.search(r"^\.PHONY:(.*)$", makefile, re.MULTILINE)
     assert phony is not None
     targets = re.findall(r"^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?!=)", makefile, re.MULTILINE)
-    return sorted(phony.group(1).split()), sorted(targets)
+    return sorted(phony.group(1).split()), sorted(set(targets))
 
 
 def test_target_names_with_digits_underscores_and_dots_are_found() -> None:
-    makefile = ".PHONY: e2e\nVAR := 1\nV2:=2\ne2e: ## a\n\techo\nlint_py.v2: ## b\n\techo\n"
+    makefile = ".PHONY: e2e\nVAR := 1\nV2:=2\ne2e: export X = 1\ne2e: ## a\n\techo\n"
+    makefile += "lint_py.v2: ## b\n\techo\n"
     assert _phony_and_targets(makefile) == (["e2e"], ["e2e", "lint_py.v2"])
 
 
