@@ -105,19 +105,29 @@ pnpm 11.
 
 - `make test`: the server unit, property and contract tests, and the client tests (no
   Redis needed).
-- `make test-integration`: the tests that need Redis. Each run starts its own Redis
-  container (Docker), or uses `REDIS_URL` when it is set.
-- `make acceptance`: the black-box acceptance tests over HTTP and the WebSocket;
+- `make test-integration`: the tests that need Redis, then the acceptance tests on Redis. The
+  integration tests use `REDIS_URL` when it is set, else a Redis container of their own; the
+  acceptance tests always start their own (Docker).
+- `make acceptance`: the black-box acceptance tests over HTTP and the WebSocket alone;
   `ACCEPTANCE_STORE=redis` runs them on Redis.
-- `make smoke-full`: against the running Docker stack, checks `/healthz` and `/readyz` on each
-  node, plays one question through nginx, stops the API node that holds the socket, and checks
-  that the player is back on the other node within 10 s with its score (`load/smoke_full.py`).
-- The bot swarm (`load/bots.py`) plays quizzes against the running Docker stack and reports
-  the answer → leaderboard latency, for example 10 bots for 30 seconds:
-  `uv run --project api python load/bots.py --admin-token "$ADMIN_TOKEN" --bots 10 --duration 30`.
-  Without `--admin-token` it plays quizzes that already exist.
-- `make check`: every check a change must pass (lint, types, tests with coverage, the
-  client build, the link check). Run it before you open a pull request; it needs Docker.
+- The tests below need the running Docker stack. The system tests and the browser specs start
+  their own quizzes, so a second run needs fresh stack data
+  (`docker compose --profile full down -v`, then `up` again); run the browser specs before
+  `make smoke-full`, which reuses their quiz.
+  - `make test-system`: system tests through nginx (`api/tests/system/`): a score on one node
+    reaches a socket on the other, the origin check, the connection cap, the security headers.
+  - `make test-browser`: browser specs in Chromium with an accessibility scan (`web/e2e/`,
+    Playwright); once before the first run: `pnpm -C web exec playwright install chromium`.
+  - `make smoke-full`: checks `/healthz` and `/readyz` on each node, plays one question through
+    nginx, stops the API node that holds the socket, and checks that the player is back on the
+    other node within 10 s with its score (`load/smoke_full.py`).
+  - The bot swarm (`load/bots.py`) plays quizzes and reports the answer → leaderboard latency,
+    for example 10 bots for 30 seconds:
+    `uv run --project api python load/bots.py --admin-token "$ADMIN_TOKEN" --bots 10 --duration 30`.
+    Without `--admin-token` it plays quizzes that already exist.
+- `make check`: every check a change must pass (lint, types, unit and acceptance tests with
+  coverage, the client build, the link check). Run it before you open a pull request; it needs
+  Docker.
 
 ## How it works
 
