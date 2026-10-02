@@ -13,7 +13,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from quiz.adapters.redis.store import WAITAOF_TIMEOUT_MS
 from quiz.contracts.codec import MAX_FRAME_BYTES
-from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
+from quiz.contracts.messages import FULL_LIST_MAX, TOP_N, QuizId
 from quiz.domain.session import MAX_WINDOW_MS
 
 KIB = 1024
@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     hosting_max_open: PositiveInt = 50  # open self-hosted quizzes, all nodes; above it HTTP 503
     hosting_per_ip: PositiveInt = 5  # creations per client address in each window below: HTTP 429
     hosting_per_ip_window_s: PositiveInt = 600
-    hosting_banks: Annotated[tuple[str, ...], NoDecode] = ("VOCAB-42", "BIZ-20", "ACAD-10")
+    hosting_banks: Annotated[tuple[QuizId, ...], NoDecode] = ("VOCAB-42", "BIZ-20", "ACAD-10")
 
     @field_validator("allowed_origins", "trusted_proxies", "hosting_banks", mode="before")
     @classmethod

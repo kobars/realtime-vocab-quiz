@@ -74,3 +74,11 @@ def test_admin_mock_refuses_an_empty_token_from_the_environment(
     monkeypatch.setenv("ADMIN_TOKEN", token)
     with pytest.raises(ValidationError, match="ADMIN_TOKEN"):
         Settings()
+
+
+def test_hosting_banks_are_split_and_must_be_quiz_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOSTING_BANKS", "VOCAB-42, BIZ-20")
+    assert Settings().hosting_banks == ("VOCAB-42", "BIZ-20")
+    monkeypatch.setenv("HOSTING_BANKS", "VOCAB-42,vocab-42")  # never hostable: POST refuses it
+    with pytest.raises(ValidationError, match="hosting_banks"):
+        Settings()

@@ -43,6 +43,7 @@ x-api-env: &api-env
   HOSTING_MAX_OPEN:
   HOSTING_PER_IP:
   HOSTING_PER_IP_WINDOW_S:
+  HOSTING_BANKS:
   # From .env when set: how long a node waits for a free pooled connection, a Redis reply, and
   # a connect.
   REDIS_POOL_TIMEOUT_MS:

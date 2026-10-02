@@ -48,8 +48,8 @@ its default, and [`.env.example`](../.env.example) shows the common ones.
 | `PUBLIC_HOSTING` | on | Any visitor may host a quiz (`POST /api/quizzes`) and end it with its host token; `0` removes the hosting routes (404). On in the source, the images and both `.env` examples |
 | `HOSTING_WINDOW_MS` | `1800000` | Every self-hosted quiz's window: 1 to 60 min |
 | `HOSTING_MAX_OPEN` | `50` | Open self-hosted quizzes, all nodes together; above it `POST /api/quizzes` answers 503 `HOSTING_FULL` |
-| `HOSTING_PER_IP`, `HOSTING_PER_IP_WINDOW_S` | `5`, `600` | Quizzes one client address may host per window; above it 429 `RATE_LIMITED` with `Retry-After` |
-| `HOSTING_BANKS` | `VOCAB-42,BIZ-20,ACAD-10` | The bank quizzes a visitor may host (`GET /api/banks`) |
+| `HOSTING_PER_IP`, `HOSTING_PER_IP_WINDOW_S` | `5`, `600` | Quizzes one client address may host per window on each node (nginx spreads requests over both, so up to twice this on the full stack); above it 429 `RATE_LIMITED` with `Retry-After` |
+| `HOSTING_BANKS` | `VOCAB-42,BIZ-20,ACAD-10` | The bank quizzes a visitor may host (`GET /api/banks`), comma-separated quiz IDs |
 
 `make dev-api` takes `DEV_API_PORT` (8001) and `DEV_ORIGINS`; the client dev server takes
 `QUIZ_API_URL` to proxy to another API node.
