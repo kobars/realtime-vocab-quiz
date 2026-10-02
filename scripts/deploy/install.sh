@@ -12,6 +12,8 @@ INSTALL_DIR=/opt/realtime-vocab-quiz
 # The VM's public IPv4: DigitalOcean's metadata service first, then a public echo service.
 METADATA_URL=http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address
 ECHO_URL=https://checkip.amazonaws.com
+# The DNS check's resolver: Google Public DNS's JSON API.
+DOH_URL=https://dns.google/resolve
 # How long to wait for https://$DOMAIN/api/readyz after the stack starts, in seconds.
 READY_TIMEOUT=${READY_TIMEOUT:-180}
 DRY_RUN=0
@@ -107,9 +109,17 @@ check_ports() {
   [[ -z $busy ]] || die "port(s)$busy already in use; stop the service that listens there (see: ss -tlnp), then run again"
 }
 
-# Every address the name's A records give, space-separated; empty when it does not resolve.
+# Every address the name's public A records give, space-separated; empty when it has none. It asks
+# a public DNS-over-HTTPS resolver, as Let's Encrypt looks the name up in public DNS, while
+# /etc/hosts may map the VM's own host name to 127.0.1.1; when that resolver cannot be reached, it
+# asks the system's resolver.
 resolve_ipv4() {
-  { getent ahostsv4 "$1" 2>/dev/null || true; } | awk '{print $1}' | sort -u | paste -s -d ' ' -
+  local answer
+  if answer=$(curl -fsS --max-time 5 "$DOH_URL?name=$1&type=A" 2>/dev/null); then
+    { grep -o '"data": *"[0-9.]*"' <<<"$answer" || true; } | sed 's/.*"\([0-9.]*\)"$/\1/'
+  else
+    { getent ahostsv4 "$1" 2>/dev/null || true; } | awk '{print $1}'
+  fi | sort -u | paste -s -d ' ' -
 }
 
 # Checked before Caddy asks Let's Encrypt for a certificate: each failed validation counts against
@@ -130,7 +140,7 @@ check_dns() {
 }
 
 install_packages() {
-  local cmd missing=""
+  local cmd missing="" get_docker
   # On a first boot, unattended-upgrades may hold the dpkg lock: every apt-get below, the Docker
   # script's included, waits for it instead of failing.
   APT_CONFIG=$(mktemp)
@@ -147,7 +157,13 @@ install_packages() {
   fi
   if ! docker compose version >/dev/null 2>&1; then
     log "Installing Docker Engine and the Compose plugin"
-    run sh -c 'curl -fsSL https://get.docker.com | sh'
+    # Downloaded whole first: piped, a failed download would run an empty script that succeeds.
+    get_docker=$(mktemp)
+    run curl -fsSL --retry 5 -o "$get_docker" https://get.docker.com ||
+      die "could not download Docker's install script from https://get.docker.com"
+    run sh "$get_docker"
+    [[ $DRY_RUN == 1 ]] || docker compose version >/dev/null 2>&1 ||
+      die "Docker's install script ran, but docker compose does not work"
   fi
   run systemctl enable --now docker
 }
@@ -156,10 +172,11 @@ checkout() {
   local dir=$1 repo=$2 ref=$3
   if [[ -d $dir/.git ]]; then
     log "Updating $dir to $ref"
-    run git -C "$dir" fetch --quiet --tags origin
-    run git -C "$dir" checkout --quiet "$ref"
+    # Each step returns on failure, as ops.sh calls this where set -e does not apply.
+    run git -C "$dir" fetch --quiet --tags origin || return 1
+    run git -C "$dir" checkout --quiet "$ref" || return 1
     if git -C "$dir" symbolic-ref -q HEAD >/dev/null; then
-      run git -C "$dir" merge --quiet --ff-only "@{upstream}"
+      run git -C "$dir" merge --quiet --ff-only "@{upstream}" || return 1
     fi
   elif [[ $DRY_RUN != 1 && -d $dir && -n $(ls -A "$dir") ]]; then
     die "$dir exists and is not a git checkout; move it away or pass --dir"
