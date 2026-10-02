@@ -1,26 +1,19 @@
-<!-- AI-ASSISTED: project overview: what it does, how to try it, run the tests, how it works, configuration and layout. -->
+<!-- AI-ASSISTED: project overview: what it does, how to try it, run the tests, how it works and where the documents are. -->
 # Real-time vocabulary quiz
 
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/kobars/realtime-vocab-quiz/badge)](https://scorecard.dev/viewer/?uri=github.com/kobars/realtime-vocab-quiz)
+Players join a vocabulary quiz by its ID, answer timed questions, and watch one shared
+leaderboard move live as anyone scores, across two server nodes.
 
-Players join a quiz by its ID, answer timed vocabulary questions, and see a shared
-leaderboard that updates live as anyone scores. The real-time server is Python (FastAPI over
-WebSockets, with Redis for scores and fan-out across nodes); a Vue 3 single-page app is its
-demo client.
+[![ci](https://github.com/kobars/realtime-vocab-quiz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kobars/realtime-vocab-quiz/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/kobars/realtime-vocab-quiz/badge)](https://scorecard.dev/viewer/?uri=github.com/kobars/realtime-vocab-quiz)
 
 **Video walkthrough:** placeholder, the link is added here once the video is published.
 
-**How AI was used.** Claude Code wrote the design, the code and the tests. Pull requests are
-reviewed by two AI reviewers, Claude Code `/code-review` and Codex, whose findings are checked
-against the code before anything is fixed, and every change runs the checks of
-[CONTRIBUTING.md](CONTRIBUTING.md). Each pull request has an entry in
-[docs/ai-log/](docs/ai-log/README.md) that says what the AI did, what was wrong in its output,
-which test now checks the fix and which review ran.
-[DESIGN.md §15](DESIGN.md#15-ai-collaboration-in-design) tells the story of the design phase.
+![Two players in one quiz: each window shows its question and the same live leaderboard](docs/images/demo.png)
 
-## Try it with Docker
+## Quick start
 
-**One command.** With Docker (Compose v2) and `make`:
+You need Docker (Compose v2) and `make`.
 
 ```bash
 git clone https://github.com/kobars/realtime-vocab-quiz.git
@@ -28,266 +21,75 @@ cd realtime-vocab-quiz
 make demo
 ```
 
-`make demo` writes `.env` with new secrets if there is none, builds the images, starts the full
-stack, starts a fresh 60-minute quiz with 20 bots that each play it once, and prints the quiz ID, the
-player URL and the command that ends the quiz. Open that URL in two browser windows and join to
-play next to the bots; `make demo-end ID=<id>` then ends the quiz as the host, and both windows
-show the final podium. `make demo BOTS=200` starts more bots, `make demo-stop` removes them,
-`make new-quiz` starts another quiz on the running stack, and `make down` stops everything.
+`make demo` writes `.env` with new secrets on the first run, builds the images, starts the stack,
+starts a fresh 60-minute quiz with 20 bots playing it, and prints its ID, its player URL and the
+command that ends it:
 
-**Step by step.** This runs the same full stack: two API nodes on one Redis behind nginx. You
-need Docker with Compose v2, `make`, `curl` and `openssl`.
+```text
+Quiz ID:    VOCAB-42-7K3Q (open for 60 min)
+Player URL: http://localhost:8080/q/VOCAB-42-7K3Q
+End it:     make demo-end ID=VOCAB-42-7K3Q
+```
 
-1. Clone the repository and write the two secrets the stack needs into `.env` (the mock
-   admin token and the stack Redis password; [`.env.example`](.env.example) lists the other
-   settings):
+Open the player URL in two browser windows, join with a different name in each, choose
+**Start** and answer: both leaderboards update within a fraction of a second. Run the printed
+end command and both windows show the final podium. `make new-quiz` starts another quiz on the
+running stack, and `make down` stops everything.
 
-   ```bash
-   git clone https://github.com/kobars/realtime-vocab-quiz.git
-   cd realtime-vocab-quiz
-   printf 'ADMIN_TOKEN=%s\nREDIS_PASSWORD=%s\n' "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" > .env
-   ```
+## What it does
 
-2. Build the images and start the stack. The second command returns once every service is
-   healthy:
+- **Join by quiz ID:** any number of players join the same quiz from their own browser tab.
+- **Real-time scoring:** the server scores each answer exactly once, on its own clock, and the
+  player's score updates the moment the answer is accepted.
+- **Live leaderboard:** every player sees the same standings, refreshed about five times a
+  second while anyone is scoring, whichever node their socket is on.
 
-   ```bash
-   make build
-   docker compose --profile full up -d --wait
-   ```
-
-3. Check that nginx reaches the API nodes. Both print HTTP 200:
-
-   ```bash
-   curl -s -w ' %{http_code}\n' http://localhost:8080/api/healthz   # {"status":"ok"} 200
-   curl -s -w ' %{http_code}\n' http://localhost:8080/api/readyz    # {"status":"ready"} 200
-   ```
-
-4. Create a quiz. `VOCAB-42` is one of the seeded quizzes (`BIZ-20` and `ACAD-10` are the
-   others); it stays open for 10 minutes, with 20 seconds per question:
-
-   ```bash
-   ADMIN_TOKEN=$(sed -n 's/^ADMIN_TOKEN=//p' .env)
-   curl -X POST http://localhost:8080/api/admin/quizzes \
-     -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' \
-     -d '{"quizId": "VOCAB-42"}'
-   ```
-
-5. Open <http://localhost:8080/q/VOCAB-42>, enter a name and choose **Join**. Open the same
-   link in a second browser window and join with another name: each tab is its own player.
-   Choose **Start** in one of them and answer a question: the leaderboard in the other window
-   moves within a fraction of a second.
-6. To stop: `make down`. It stops the stack and keeps the Redis data.
-
-## Try it for development
-
-This runs one API node with an in-memory store and the client's dev server, with hot reload.
-You need Python 3.14 with [uv](https://docs.astral.sh/uv/) 0.10 or later, and Node 24 with
-pnpm 11.
-
-1. Install the dependencies:
-
-   ```bash
-   uv sync --project api
-   pnpm -C web install
-   ```
-
-2. Start the API on `127.0.0.1:8001`, with the mock admin API turned on so you can create
-   a quiz (pick any token):
-
-   ```bash
-   ADMIN_MOCK=1 ADMIN_TOKEN=dev-token make dev-api
-   ```
-
-3. In a second terminal, start the client on port 5173:
-
-   ```bash
-   pnpm -C web dev
-   ```
-
-4. In a third terminal, create a quiz with the same token:
-
-   ```bash
-   ADMIN_TOKEN=dev-token
-   curl -X POST http://127.0.0.1:8001/admin/quizzes \
-     -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' \
-     -d '{"quizId": "VOCAB-42"}'
-   ```
-
-5. Open <http://localhost:5173/q/VOCAB-42> in two browser windows and play as in the Docker
-   steps above.
-6. To stop, press Ctrl+C in the API and client terminals.
-
-## Run the tests
-
-- `make test`: the server unit, property and contract tests, and the client tests (no
-  Redis needed).
-- `make test-integration`: the tests that need Redis, then the acceptance tests on Redis. The
-  integration tests use `REDIS_URL` when it is set, else a Redis container of their own; the
-  acceptance tests always start their own (Docker).
-- `make acceptance`: the black-box acceptance tests over HTTP and the WebSocket alone;
-  `ACCEPTANCE_STORE=redis` runs them on Redis.
-- `make ui-check`: the visual and accessibility specs (`web/e2e/visual.spec.ts`,
-  `web/e2e/a11y.spec.ts`) on the production build, with no backend: `web/e2e/fixtures/` mocks the
-  HTTP calls and the quiz socket and pauses the page clock. Eleven screens, from the join form to
-  the final results, run at 320, 768 and 1280 px wide in light and dark with reduced motion (the
-  Leaderboard tab only below 1024 px; wider, the leaderboard sits beside every play screen). Each
-  must match its screenshot baseline in `web/e2e/__screenshots__/` (at most 50 pixels differ) and
-  pass axe for WCAG 2.2 A and AA, with no sideways scroll (also at 640 px, a 1280 px window at
-  200% zoom), controls of at least 44 × 44 px and a visible focus ring at every Tab stop. It runs
-  in the Playwright image pinned in the `Makefile`, always as `linux/amd64`, so every machine
-  renders like CI; it needs Docker, and `make check` needs no browser. `make ui-baselines`
-  regenerates the baselines that changed, in the same image; `UI_ARGS` passes Playwright arguments
-  to both, for example `make ui-check UI_ARGS="--project=320-light -g 'join-error'"`. The CI job
-  `ui` runs it and keeps the report and the screenshot diffs when it fails.
-- The tests below need the running Docker stack, and they create the seeded quizzes themselves:
-  the system tests `BIZ-20`, the browser specs `VOCAB-42` and `ACAD-10`. A quiz ID can be
-  created only once on the same stack data, so a quiz left by the Docker steps above, the bot
-  swarm or an earlier run makes them fail with HTTP 409. Start from fresh stack data first:
-
-  ```bash
-  docker compose --profile full down -v
-  docker compose --profile full up -d --wait
-  ```
-
-  Then run the system tests, the browser specs and `make smoke-full`, in that order.
-  `make smoke-full` reuses the browser specs' `VOCAB-42` while it is open (10 minutes); after
-  that, start from fresh stack data again.
-  - `make test-system`: system tests through nginx (`api/tests/system/`): a score on one node
-    reaches a socket on the other, the origin check, the connection cap, the security headers.
-  - `make test-browser`: browser specs in Chromium with an accessibility scan (`web/e2e/`,
-    Playwright); once before the first run: `pnpm -C web exec playwright install chromium`.
-  - `make smoke-full`: checks `/healthz` and `/readyz` on each node, plays one question through
-    nginx, stops the API node that holds the socket, and checks that the player is back on the
-    other node within 10 s with its score (`load/smoke_full.py`).
-  - The bot swarm (`load/bots.py`) plays quizzes and reports the answer → leaderboard latency,
-    for example 10 bots for 30 seconds:
-    `uv run --project api python load/bots.py --admin-token "$ADMIN_TOKEN" --bots 10 --duration 30`.
-    Without `--admin-token` it plays quizzes that already exist. `make load` runs it as a
-    container on the stack network, with its options in `LOAD_ARGS`;
-    [load/README.md](load/README.md) explains them and holds the measured load runs.
-- `docker compose --profile test run --rm test`: `make test` and the acceptance tests on the
-  memory store in a container, with no uv or pnpm on the host. It needs `.env` (step 1 above,
-  or `make demo` writes it), as every Compose command does.
-- `make check`: every check a change must pass (lint, types, unit and acceptance tests with
-  coverage, the client build, the link check). Run it before you open a pull request; it needs
-  Docker.
+The real-time server is built for real, and the Vue client is its working demo interface.
+Identity, the question bank and quiz admin are mocks ([DESIGN.md §14](DESIGN.md#14-implemented-and-mocked)).
 
 ## How it works
 
-- The Vue client gets a mock session, then a single-use ticket, and opens one WebSocket per
-  tab (`/ws`, subprotocol `quiz.v1`).
-- Each API node (FastAPI on uvicorn) checks the origin, the ticket and the connection limits,
-  then turns every `join`, `next` and `answer` into one Lua script in Redis.
-- The scripts read the clock from Redis `TIME`, score the answer once, and keep the
-  standings in a sorted set, so every node sees the same order.
-- A scoring answer marks the quiz dirty. About every 200 ms one node wins a tick token and
-  publishes one `leaderboard` frame on Redis pub/sub; every node relays it to its own sockets.
-- nginx serves the built client and spreads `/api` and `/ws` over the two API nodes.
-
-[DESIGN.md](DESIGN.md) has the architecture, the data flow, the consistency guarantees, the
-capacity estimate and the failure modes.
-
-## What is real and what is mocked
-
-The real-time quiz server is the one component built for real; the Vue client is its working
-demo interface.
-
-| Part | In this build |
-|---|---|
-| WebSocket gateway, scoring, standings, fan-out across nodes | Real |
-| Redis store (Lua scripts, sorted sets, pub/sub) | Real; an in-memory store with the same contract runs one node without Redis |
-| Vue client | Real, as the demo interface of the server |
-| Identity | Mock: anonymous sessions and single-use tickets, no login |
-| Question bank | Mock: seeded quizzes read from JSON files |
-| Quiz admin | Mock: `POST /admin/quizzes`, off unless `ADMIN_MOCK=1`, guarded by one shared token |
-| Observability | The `/healthz`, `/readyz` and `/metrics` endpoints of each node and JSON logs; no metrics or dashboard containers ([DESIGN.md §13](DESIGN.md#13-observability)) |
-
-[DESIGN.md §14](DESIGN.md#14-implemented-and-mocked) says what production would use instead.
-
-## Ports and endpoints
-
-| What | Where |
-|---|---|
-| nginx, the stack's only published port | `127.0.0.1:8080` (`QUIZ_PORT`): `/` the client, `/api/*` (prefix dropped) and `/ws` the API nodes |
-| API nodes `api-1`, `api-2` | port 8000 inside the Compose network only |
-| Stack Redis | port 6379 inside the Compose network only, with a password |
-| Development API (`make dev-api`) | `127.0.0.1:8001` |
-| Client dev server (`pnpm -C web dev`) | `localhost:5173` |
-| Development Redis (`make up`) | `127.0.0.1:6381`, no password |
-
-Each API node serves `/healthz` (liveness: the process answers), `/readyz` (readiness: 503
-when Redis is unreachable) and `/metrics` (Prometheus text format). nginx passes the first two
-on as `/api/healthz` and `/api/readyz` and answers 404 for `/api/metrics`; read the metrics
-from inside a node:
-
-```bash
-docker compose exec api-1 python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8000/metrics').read().decode())"
+```mermaid
+flowchart LR
+  B[Browser: Vue client] -->|HTTP + WebSocket| N[nginx]
+  N --> A1[API node 1]
+  N --> A2[API node 2]
+  A1 <-->|Lua scripts, pub/sub| R[(Redis)]
+  A2 <-->|Lua scripts, pub/sub| R
 ```
 
-## Configuration
+Each answer runs as one Lua script in Redis, which scores it once and updates the quiz's sorted
+set. A 200 ms tick on one node publishes the standings over Redis pub/sub, and every node relays
+them to its own sockets. [DESIGN.md](DESIGN.md) has the full design.
 
-The API reads environment variables only (it never loads a `.env` file; Compose reads `.env`
-for the stack). [`api/src/quiz/config.py`](api/src/quiz/config.py) lists every setting with
-its default, and [`.env.example`](.env.example) shows the common ones.
+## Run the tests
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `STORE` | `memory`; `redis` in the API image | `memory` for one process, `redis` for several nodes |
-| `REDIS_URL` | `redis://127.0.0.1:6381/0` | The Redis that `make up` starts (`make down` stops it) |
-| `ALLOWED_ORIGINS` | `http://localhost:8080`, `http://127.0.0.1:8080` | Comma-separated origins allowed to open the WebSocket; others get HTTP 403. `make dev-api` sets the client dev server's origins |
-| `QUIZ_PORT` | `8080` | The public port; the default allowed origins use it |
-| `ADMIN_MOCK`, `ADMIN_TOKEN` | off, none | Turn on the mock admin API; it needs a non-blank token |
-| `REDIS_PASSWORD` | none | The stack Redis password (Docker stack only) |
-| `PER_IP_CONN_CAP` | `50` | WebSocket connections per client address |
+The host tests need Docker, Python 3.14 with uv and Node 24 with pnpm:
+`uv sync --project api && pnpm -C web install` ([CONTRIBUTING.md](CONTRIBUTING.md#set-up)).
 
-`make dev-api` takes `DEV_API_PORT` (8001) and `DEV_ORIGINS`; the client dev server takes
-`QUIZ_API_URL` to proxy to another API node.
+- `make check`: lint, types, the unit, property, contract and acceptance tests, the client tests
+  and build; every change passes it.
+- `make test-integration`: the tests that need Redis (in a container of their own, or at
+  `REDIS_URL` when it is set), then the acceptance tests on Redis.
+- `make test-system`: the system tests through nginx against the running stack: a score on one
+  node reaches a socket on the other. They need fresh stack data, not the `make demo` stack
+  ([CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests) has the steps).
 
-To run the development API on Redis instead of memory:
+`make help` lists the rest; [CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests) explains each layer.
 
-```bash
-make up
-STORE=redis ADMIN_MOCK=1 ADMIN_TOKEN=dev-token make dev-api
-make down
-```
+## AI collaboration
 
-## Troubleshooting
-
-- **Port already in use** (`bind: address already in use`): another program holds 8080, 8001,
-  5173 or 6381. Stop it, or set `QUIZ_PORT` in `.env` (the stack). To move the development
-  API, start it with `DEV_API_PORT` and point the client dev server at it, for example
-  `DEV_API_PORT=8002 ADMIN_MOCK=1 ADMIN_TOKEN=dev-token make dev-api` and
-  `QUIZ_API_URL=http://127.0.0.1:8002 pnpm -C web dev`.
-- **Docker is not running** (`Cannot connect to the Docker daemon`): start Docker Desktop or
-  the Docker service; `make build`, the stack, `make test-integration` and `make check` need it.
-- **`set ADMIN_TOKEN in .env`**: Compose refuses to start the stack until `.env` holds both
-  secrets (step 1 of the Docker path).
-- **The quiz has ended**: a quiz closes when its window ends, and its ID stays taken (HTTP 409)
-  while its data lives (24 hours). On the stack, `make new-quiz` starts a fresh 60-minute run
-  of `VOCAB-42` under a new ID. Or create another seeded quiz (`BIZ-20` or `ACAD-10`; the test suites
-  then need fresh stack data, see **Run the tests**), pass a
-  longer window (`"windowMs": 3600000`, the 60-minute maximum), or start with empty data:
-  restart `make dev-api` (memory store), or run `docker compose --profile full down -v` (stack).
-
-## Project layout
-
-```text
-api/        the server: FastAPI app, Lua scripts, tests (unit, property, contract, integration, acceptance)
-web/        the Vue 3 client and its tests
-contracts/  the JSON Schema of the wire protocol, generated from the server's models
-infra/      the nginx and Caddy configuration of the full stack
-load/       the bot swarm for load runs
-scripts/    repository checks and generators
-docs/       specs, decisions and the AI log
-```
+Claude Code wrote the design, the code and the tests; every source file it wrote carries an
+`AI-ASSISTED` marker. Each pull request has an entry in [docs/ai-log/](docs/ai-log/README.md): the
+tool, the task, the interaction, how it was verified and the mistakes caught in review by
+Claude Code `/code-review` and Codex. [DESIGN.md §15](DESIGN.md#15-ai-collaboration-in-design)
+tells how the design was made.
 
 ## Documentation
 
-- [DESIGN.md](DESIGN.md): the system design
-- [docs/DECISIONS.md](docs/DECISIONS.md): architecture decision records
+- [DESIGN.md](DESIGN.md): the system design, from the architecture to the failure modes
 - [docs/spec/](docs/spec/): the domain, protocol, Redis and UI specs
-- [docs/ai-log/](docs/ai-log/README.md): how AI was used in each change, and how it was checked
-- [docs/operations.md](docs/operations.md): deploying the stack to a public VM behind HTTPS
-- [CONTRIBUTING.md](CONTRIBUTING.md): the make targets, the checks and the pull request workflow
+- [docs/DECISIONS.md](docs/DECISIONS.md): the architecture decision records
+- [CONTRIBUTING.md](CONTRIBUTING.md): running the stack, development, the make targets, troubleshooting
+- [docs/operations.md](docs/operations.md): ports, endpoints, configuration, metrics and deploying to a VM
 - [SECURITY.md](SECURITY.md): how to report a vulnerability
