@@ -85,6 +85,16 @@
 @utility ease-standard { transition-timing-function: var(--ease-standard); }
 @utility ease-spring { transition-timing-function: var(--ease-spring); }
 
+/* One-shot entrances (UI spec §5.5); components use them behind motion-safe:, and reduced motion zeroes their durations. */
+@keyframes pop { from { opacity: 0; transform: scale(0.85); } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(1rem); } }
+@utility animate-pop { animation: pop var(--motion-pop) var(--ease-spring); }
+@utility animate-fade-in { animation: fade-in var(--motion-base) var(--ease-standard); }
+@utility animate-rise { animation: rise var(--motion-pop) var(--ease-spring) backwards; }
+/* rise-delay-N starts a podium step N stagger steps late. */
+@utility rise-delay-* { animation-delay: calc(var(--stagger) * --value(integer)); }
+
 /* Text clipped to the text gradient; a solid primary where background-clip: text is missing, and the system text color in forced colors. */
 @utility text-gradient {
   color: var(--primary);

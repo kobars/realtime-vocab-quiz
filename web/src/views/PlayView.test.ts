@@ -1,4 +1,4 @@
-// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement), the phone tabs, the connection pill and the error messages, driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the intro, question and feedback screens (countdown, keys, locking, count-up, announcement, one-shot motion behind motion-safe), the phone tabs, the connection pill and the error messages, driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -283,6 +283,43 @@ it('feedback: a wrong answer is marked Wrong, the correct choice reads Correct a
   expect(choice(w, 2).text()).toContain('Correct answer')
   expect(choice(w, 1).text()).toBe('dim')
   expect(w.get('[data-test="announce"]').text()).toBe('Wrong, the answer was “shining”. Score 0.')
+})
+
+it.each([
+  ['correct', 2, 'motion-safe:animate-pop', 'Correct'],
+  ['wrong', 0, 'motion-safe:animate-fade-in', 'Wrong'],
+])('feedback: a %s answer enters once, only behind motion-safe, and its result has an icon and a word', async (_, picked, entrance, word) => {
+  const w = await playing()
+  press(String(picked + 1))
+  await receive(result(picked, picked === 2 ? 133 : 0))
+  const card = w.get('[data-test="feedback"]').classes()
+  expect(card).toContain(entrance)
+  expect(card.filter((c) => c.includes('animate-'))).toEqual([entrance])
+  const heading = w.get('h2')
+  expect(heading.text()).toBe(word)
+  expect(heading.find('svg').exists()).toBe(true)
+  for (const i of [picked, 2]) expect(choice(w, i).find('svg').exists()).toBe(true)
+})
+
+it('the choices lift and press only behind motion-safe and never while locked; the pending one is highlighted', async () => {
+  const w = await playing()
+  const moves = choice(w, 0).classes().filter((c) => c.includes('translate-'))
+  expect(moves.length).toBeGreaterThan(0)
+  for (const c of moves) expect(c).toMatch(/^motion-safe:not-aria-disabled:/)
+  press('2')
+  await nextTick()
+  expect(choice(w, 1).classes()).toEqual(expect.arrayContaining(['border-primary', 'bg-highlight']))
+  expect(choice(w, 0).classes()).toContain('border-input')
+  expect(choice(w, 1).get('svg').classes()).toContain('motion-safe:animate-spin')
+})
+
+it('the ring turns to the warning stroke and track at 5 s left, not before', async () => {
+  const w = await playing(question(0, 5_100))
+  const ring = () => [w.get('[data-test="ring-stroke"]').classes(), w.get('[data-test="ring-track"]').classes()]
+  expect(ring()).toEqual([expect.arrayContaining(['stroke-primary']), expect.arrayContaining(['stroke-muted'])])
+  clock += 100
+  await frames(100)
+  expect(ring()).toEqual([expect.arrayContaining(['stroke-warning']), expect.arrayContaining(['stroke-warning-soft'])])
 })
 
 it('feedback: a late answer reads Too late: 0 points; the last question offers See my result', async () => {

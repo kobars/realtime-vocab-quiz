@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the question screen: the countdown, the prompt and four choices (click or keys 1–4 while shown), locked while an answer is pending or the socket is down, and Skip, locked while the socket is down (UI spec §3.3, §4.1, §6.1, §6.2). -->
+<!-- AI-ASSISTED: the question screen: the countdown, the prompt and four choices (click or keys 1–4 while shown), locked while an answer is pending or the socket is down, and Skip, locked while the socket is down; clay choice tiles that lift and press behind motion-safe (UI spec §3.3, §4.1, §5.5, §6.1, §6.2). -->
 <script setup lang="ts">
 import { LoaderCircle } from '@lucide/vue'
 import { useEventListener } from '@vueuse/core'
@@ -11,6 +11,8 @@ import CountdownRing from './CountdownRing.vue'
 import { useCountdown } from './motion'
 
 const props = defineProps<{ question: CurrentQuestion }>()
+/** The key hint chips cycle the role fills; the number stays the cue, the color only tells the keys apart. */
+const KEY_FILLS = ['bg-input', 'bg-mint', 'bg-cyan', 'bg-sun'] as const
 const store = useQuizStore()
 const heading = useTemplateRef<HTMLElement>('heading')
 const msLeft = useCountdown(() => store.msLeft(), () => props.question.deadlineAt)
@@ -50,7 +52,7 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
       <h2
         ref="heading"
         tabindex="-1"
-        class="flex-1 text-2xl font-semibold"
+        class="flex-1 text-2xl sm:text-title"
       >
         {{ question.prompt }}
       </h2>
@@ -66,17 +68,21 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
         type="button"
         :data-choice="i"
         :aria-disabled="locked"
-        class="flex min-h-11 items-center gap-3 rounded-lg border border-input bg-card px-4 py-3 text-left text-xl transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+        class="flex min-h-14 items-center gap-3 rounded-lg border-clay bg-card px-4 py-3 text-left text-xl font-semibold shadow-press transition-[background-color,border-color,box-shadow,transform] duration-fast ease-spring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none not-aria-disabled:hover:shadow-press-hover not-aria-disabled:active:shadow-press-active motion-safe:not-aria-disabled:hover:-translate-y-0.5 motion-safe:not-aria-disabled:active:translate-y-0.5 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+        :class="store.pending?.choiceIndex === i ? 'border-primary bg-highlight' : 'border-input'"
         @click="choose(i)"
       >
-        <kbd class="rounded border px-2 text-sm text-muted-foreground">{{ i + 1 }}</kbd>
+        <kbd
+          class="flex size-8 shrink-0 items-center justify-center rounded-xl border-2 border-night/10 font-sans text-base font-extrabold text-night"
+          :class="KEY_FILLS[i % KEY_FILLS.length]"
+        >{{ i + 1 }}</kbd>
         <span class="flex-1">{{ choice }}</span>
         <span
           v-if="store.pending?.choiceIndex === i"
           class="flex items-center gap-1 text-sm text-muted-foreground"
         >
           <LoaderCircle
-            class="size-4 animate-spin"
+            class="size-4 motion-safe:animate-spin"
             aria-hidden="true"
           />{{ strings.quiz.checking }}
         </span>
@@ -98,7 +104,7 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
       </p>
       <Button
         v-if="store.pending === null"
-        variant="secondary"
+        variant="outline"
         :aria-disabled="!online"
         class="aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         @click="skip"

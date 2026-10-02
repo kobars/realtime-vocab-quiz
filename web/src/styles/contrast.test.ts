@@ -31,7 +31,7 @@ const PAIRS: [string, string, number][] = [
   ['--primary-foreground', '--primary', TEXT],
   ['--primary-foreground', '--primary-bright', TEXT],
   ['--primary-foreground', '--primary-hover', TEXT],
-  ...['--mint', '--cyan', '--sun'].map((bg): [string, string, number] => ['--night', bg, TEXT]),
+  ...['--mint', '--cyan', '--sun', '--input'].map((bg): [string, string, number] => ['--night', bg, TEXT]),
   ...['success', 'destructive', 'warning'].flatMap((state) =>
     ['--background', '--card', `--${state}-soft`].map((bg): [string, string, number] => [`--${state}`, bg, TEXT])),
   ['--destructive-foreground', '--destructive', TEXT],
