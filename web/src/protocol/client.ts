@@ -315,9 +315,9 @@ export class QuizClient {
     this.inFlight.push(submissionId)
     this.send(answer)
     this.cancelAnswerDeadline(submissionId)
+    // The first send keeps its place in `inFlight`: a slow reply to it still arrives first.
     const deadline = this.after(REPLY_TIMEOUT_MS, () => {
       this.answerDeadlines.delete(submissionId)
-      this.inFlight = this.inFlight.filter((id) => id !== submissionId)
       this.sendAnswer(submissionId)
     })
     this.answerDeadlines.set(submissionId, deadline)
@@ -402,7 +402,8 @@ export class QuizClient {
   private dropRequests(): void {
     this.cancelNextRetry()
     this.pendingNext = null
-    for (const submissionId of this.unsettled.keys()) this.cancelAnswerDeadline(submissionId)
+    for (const deadline of this.answerDeadlines.values()) this.cancel(deadline)
+    this.answerDeadlines.clear()
     this.unsettled.clear()
     this.unavailable.clear()
     this.inFlight = []

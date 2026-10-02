@@ -833,3 +833,20 @@ it('cancels the reply deadlines on a disconnect, so the answer goes out once on 
   await quietFor(second, REPLY_TIMEOUT_MS - 1_000)
   expect([nexts(first), answers(first).length, nexts(second), answers(second)]).toEqual([[3], 1, [], [answerMsg('s-1')]])
 })
+
+it('matches a late error to the first send of an answer that its reply deadline sent again, so a newer answer stays unsettled', async () => {
+  uuids('s-1', 's-2')
+  const client = start()
+  const socket = await joinedSocket()
+  client.answer(0, 2)
+  await quietFor(socket, 1_000)
+  client.answer(1, 3)
+  await quietFor(socket, REPLY_TIMEOUT_MS - 1_000)
+  expect(answers(socket).map((message) => message.submissionId)).toEqual(['s-1', 's-2', 's-1'])
+  // The slow reply to the first s-1 arrives after its deadline.
+  socket.receive(answerError('ALREADY_ANSWERED'))
+  socket.drop()
+  const next = await connected()
+  next.receive(joined())
+  expect(answers(next)).toEqual([answerMsg('s-2', 1, 3)])
+})
