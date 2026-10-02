@@ -120,6 +120,7 @@ class QuizService:
         self._refills: dict[str, asyncio.Task[Shared]] = {}  # per quiz: the read in flight
         self._outage_logged_ms: int | None = None
         self._pages: dict[PageKey, tuple[int, m.LeaderboardPage]] = {}  # (expires at ms, page)
+        self._pages_swept_ms = 0  # every page expires a tick after it is cached
         self._page_reads: dict[PageKey, asyncio.Task[m.LeaderboardPage]] = {}
 
     def drop_cache(self, quiz_id: str | None = None) -> None:
@@ -340,8 +341,10 @@ class QuizService:
             entries=[row.entry() for row in page.rows],
         )
         if self._page_reads.get(key) is read:
-            for stale in [k for k, (expires_ms, _) in self._pages.items() if expires_ms <= now]:
-                del self._pages[stale]
+            if now >= self._pages_swept_ms + self._tick_ms:
+                self._pages_swept_ms = now
+                for stale in [k for k, (expires_ms, _) in self._pages.items() if expires_ms <= now]:
+                    del self._pages[stale]
             self._pages[key] = (now + self._tick_ms, reply)
         return reply
 
