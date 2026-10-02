@@ -9,7 +9,7 @@
 
 ## Context
 
-With a self-paced quiz ([ADR-002](002-self-paced-quiz-and-integer-scoring.md)), questions and results are per player, but the leaderboard is shared. If every answer, join or leave sent the leaderboard to everyone, cost would grow with the square of the players: 5,000 joins alone would mean about 12.5 million sends. Clients on several nodes must still converge on the same standings (C4), and a lost or dropped frame must be detectable.
+With a self-paced quiz ([ADR-002](002-self-paced-quiz-and-integer-scoring.md)), questions and results are per player, but the leaderboard is shared. If every answer, join or leave sent the leaderboard to everyone, cost would grow with the square of the players: 5,000 joins alone would mean about 12.5 million sends. Clients on several nodes must still converge on the same standings ([C4](../../DESIGN.md#7-consistency-contract)), and a lost or dropped frame must be detectable.
 
 ## Decision
 
@@ -27,7 +27,7 @@ With a self-paced quiz ([ADR-002](002-self-paced-quiz-and-integer-scoring.md)), 
 ## Consequences
 
 - Fan-out cost per tick is bounded per connection, whatever the number of events in that tick: one `leaderboard` frame and, above 200 players, at most one `rank_update` for a player outside the top 50 (after a tick in which they scored, else at most once per second when their rank shifted). That is at most two messages per connection per tick, 10 per second.
-- A score shows on other screens up to 200 ms late, by design; the load runs measure the answer → leaderboard latency against C5.
+- A score shows on other screens up to 200 ms late, by design; the load runs measure the answer → leaderboard latency against [C5](../../DESIGN.md#7-consistency-contract).
 - Clients must buffer broadcasts while a `resync` is pending and handle `rebase`; the bots and the Vue client share these rules from the protocol spec.
 - `pong.seq` is read from Redis for every `ping` (one `GET`; about 400 per second for 10,000 sockets on a node), so a node that relayed nothing yet, or missed a frame on its pub/sub link, still reports the quiz's counter.
 
