@@ -689,23 +689,14 @@ and each node would hold one `SSUBSCRIBE` connection per shard.
 
 ## 12. Security
 
-**Authentication.** Identity is a mock with the real shape. `POST /sessions` gives a tab an
-anonymous user ID and a session token (kept in `sessionStorage`); before every connect,
-`POST /tickets` with that token as a bearer gives a ticket (32 random bytes, base64url, single
-use, 30 s). The client opens `GET /ws?ticket=…` with the subprotocol `quiz.v1`. Before the
-upgrade the node checks the `Origin` against `ALLOWED_ORIGINS` (403), the subprotocol (400),
-the ticket (401) and the connection caps (503, 429). The user ID comes from the ticket only;
-nothing the client sends later can change it. The API's logs and nginx's access log record the
-path, never the query string that holds the ticket (`adapters/ws/endpoint.py`, nginx's `edge`
-log format). nginx's error log (level `warn`, on its stderr) is the exception: when an upgrade
-fails at a node (a refused connect or a timeout), its line quotes the request line, ticket
-included. The node that failed may not have redeemed that ticket, so single use does not protect it
-by itself: nginx passes the upgrade on to the other node, which normally redeems it, but if that
-node fails too the ticket stays valid until it expires. That is low risk: the ticket lives 30 s
-and gives only an anonymous mock identity. The log goes to whoever runs the containers, and a
-failed run of the `stack` CI workflow uploads the stack's logs as an artifact; that stack
-listens only on the CI runner, so its tickets cannot be used from outside, and it is gone when
-the job ends.
+**Authentication.** Identity is a mock with the real shape; [§5](#join) gives the join path.
+Before the upgrade the node checks the `Origin` against `ALLOWED_ORIGINS` and redeems the ticket,
+which is single use and lives 30 s. The user ID comes from the ticket only: nothing the client
+sends later can change it. Nothing logs the query string that holds the ticket: the API's
+logs and nginx's access log record the path only (`adapters/ws/endpoint.py`, nginx's `edge` log
+format). nginx's error log is the exception: when an upgrade fails at a node, its line quotes the
+request line, ticket included. That is a known limit of low risk, since the ticket lives 30 s and
+gives only an anonymous mock identity ([SECURITY.md](SECURITY.md#known-limits)).
 
 **Abuse limits.**
 
@@ -721,6 +712,19 @@ the job ends.
 | Resync | at most one per second per connection | `app/service.py` |
 | Send buffer | 64 KiB soft, 256 KiB hard (close 1013) | `adapters/ws/sender.py` |
 | Display name | at most 128 characters raw, 1–32 after trim and NFC, at least one visible, no control character | `contracts/messages.py`, `adapters/mock_auth/tokens.py`, `domain/names.py` |
+
+<!-- AI-ASSISTED-BEGIN: drafted with Claude Code from api/src/quiz/adapters/ws/heartbeat.py and the gateway's upgrade checks. -->
+
+**Transport limits before the app.** API nodes sit behind nginx and are never published directly:
+uvicorn runs with no connection limit of its own and times no request body (nginx buffers each
+body first), and the gateway's caps count only accepted sockets. So the server config bounds
+what comes before: a request head is cut at 16 KiB (400) and closed
+when it is not complete `HEADER_TIMEOUT_MS` (10 s) after the connection opened or the request
+began; a WebSocket message of more than 64 fragments, empty ones included, is closed with 1009;
+on shutdown, requests still open after 5 s are cancelled. Upgrade attempts are throttled per
+client address before the ticket lookup (protocol §8).
+
+<!-- AI-ASSISTED-END -->
 
 The client address comes from `X-Forwarded-For` only when the peer is a trusted proxy (nginx,
 `TRUSTED_PROXIES`). On a public host (`compose.prod.yaml`), Caddy terminates HTTPS, sends HSTS
@@ -759,19 +763,6 @@ this build (§2).
 they leave (about 2 KB once they answered 10 questions): the session bucket bounds how fast new
 identities arrive, and the stack Redis runs with `maxmemory` (`REDIS_MAXMEMORY`, 256 MB by default)
 and `noeviction`, so a full store refuses writes rather than evicting a quiz's state.
-
-<!-- AI-ASSISTED-BEGIN: drafted with Claude Code from api/src/quiz/adapters/ws/heartbeat.py and the gateway's upgrade checks. -->
-
-Transport limits before the app. API nodes sit behind nginx and are never published directly:
-uvicorn runs with no connection limit of its own and times no request body (nginx buffers each
-body first), and the gateway's caps count only accepted sockets. So the server config bounds
-what comes before: a request head is cut at 16 KiB (400) and closed
-when it is not complete `HEADER_TIMEOUT_MS` (10 s) after the connection opened or the request
-began; a WebSocket message of more than 64 fragments, empty ones included, is closed with 1009;
-on shutdown, requests still open after 5 s are cancelled. Upgrade attempts are throttled per
-client address before the ticket lookup (protocol §8).
-
-<!-- AI-ASSISTED-END -->
 
 ## 13. Observability
 
