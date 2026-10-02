@@ -17,7 +17,7 @@ self-hosted quizzes, and one address can start only a few in a short time.
 **Test plan:** <https://claude.ai/artifact/3i4p3bdSeFWfEen9UehCJi>: the manual and automated test
 cases, each mapped to the requirement it proves, with the result of the latest verification run.
 
-![Two players in one quiz: each window shows its question and the same live leaderboard](docs/images/demo.png)
+![Two of 14 players in one quiz. Ana, ranked 4th, sees a correct answer and her row highlighted in the live top 10. Ben, ranked 13th, sees a wrong answer and the same top 10 with his own row pinned under it, above a "Show all players" button](docs/images/demo.png)
 
 ## What it does
 
