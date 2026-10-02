@@ -29,9 +29,13 @@ def snapshot(
     p.handle({"type": "snapshot", "atSeq": at, "status": status, "you": you}, now, Backoff(), 0)
 
 
-def frame(p: Player, seq: int, now: float, *, rebase: bool = False) -> None:
+def frame(
+    p: Player, seq: int, now: float, *, rebase: bool = False, score: int | None = None
+) -> None:
+    """A leaderboard frame; ``score`` puts the bot's own row in it."""
+    entries = [] if score is None else [{"userId": p.user_id, "score": score}]
     p.handle(
-        {"type": "leaderboard", "seq": seq, "rebase": rebase, "entries": []}, now, Backoff(), 0
+        {"type": "leaderboard", "seq": seq, "rebase": rebase, "entries": entries}, now, Backoff(), 0
     )
 
 
@@ -149,6 +153,21 @@ def test_broadcasts_during_a_resync_are_applied_after_the_snapshot() -> None:
     snapshot(p, 5, 0.2)
     frame(p, 7, 0.3)
     assert (p.last_seq, p.rec.counts["seq_gaps"]) == (7, 0)
+
+
+def test_a_frame_held_for_a_resync_times_the_board_when_the_snapshot_applies_it() -> None:
+    p = player()
+    p.user_id = "u1"
+    snapshot(p, 3, 0)
+    p.board.accepted(100, 1.0)
+    frame(p, 5, 1.1, score=100)  # a gap: the frame waits for the snapshot
+    p.due(1.4)
+    assert sent(p) == [("resync", 3)]
+    frame(p, 6, 1.5, score=100)
+    assert p.rec.board_ms == []  # held, as the web client holds it
+    snapshot(p, 4, 3.0)
+    assert p.rec.board_ms == [pytest.approx(2000)]
+    assert p.last_seq == 6
 
 
 def test_a_rejoin_keeps_the_resync_limit_and_a_refused_resync_is_retried() -> None:

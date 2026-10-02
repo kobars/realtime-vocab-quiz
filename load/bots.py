@@ -94,7 +94,7 @@ async def converse(
             skim = not p.board.pending and p.sent_at is None
             head = BOARD_HEAD.match(raw) if isinstance(raw, str) and skim else None
             if head:
-                p.on_seq(int(head[1]), head[2] == "true", now)
+                p.on_seq(int(head[1]), head[2] == "true", None, now)
             else:
                 p.handle(json.loads(raw), now, backoff, think_s)
         elif now - last_in > LIVENESS_S:

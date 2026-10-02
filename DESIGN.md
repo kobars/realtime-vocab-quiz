@@ -510,7 +510,9 @@ latency is the client-observed round trip from `answer` to `answer_result`. Msg/
 frames the bots received; CPU % is the mean over the answering window, in percent of one core
 (two values: one per node); RSS is the node's peak memory in MiB as `docker stats` reports it.
 No run had a missing, timed-out or reconnecting sample; the many-quizzes run counted 4 `seq`
-gaps, each closed by a resync.
+gaps, each closed by a resync. These runs timed a frame when it arrived, also while a resync
+held it; the bots now time it when they apply it, as the web client shows it, which changes only
+the samples taken during a gap.
 
 | Scenario | Connections | Msg/s | p50 ms | p95 ms | p99 ms | CPU % | RSS MB | Answer p99 ms | Missing samples | Bots' CPU % (procs) | Result files in `load/results/` |
 |---|---|---|---|---|---|---|---|---|---|---|---|
