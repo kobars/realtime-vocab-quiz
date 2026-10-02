@@ -32,26 +32,45 @@ Short on time: read §1, then §3 to §6 for the design, §9 for the measured re
 watch one shared leaderboard that changes as anyone scores. Scores must be accurate and
 consistent even when many players answer at once through several server nodes.
 
-**The solution.** The quiz is **self-paced**: every player gets the same questions in the same
-order, one at a time, at their own pace, and all players share one live leaderboard (ADR-002).
-A Vue 3 client keeps one WebSocket open to a FastAPI server. Two API nodes run behind nginx;
-**Redis is the primary database** (AOF `everysec`). Every write with more than one step is one
-Lua script that reads the time from Redis `TIME`, so any node can score any answer atomically
-and a (player, question) scores at most once. Score changes only mark the quiz dirty; a 200 ms
-coalescing tick publishes one full leaderboard frame per quiz over Redis pub/sub, numbered by a
-per-quiz `seq`, and a client that sees a gap asks for a snapshot. Identity and the question bank
-are mocks behind ports. Any visitor can host a quiz from the host page (`/host`), which calls the
-self-service hosting API, and end it with the host token it gets; a token-gated mock admin API
-serves the make targets (§14).
+**The solution.**
 
-**Headline numbers.** The load runs and §9 fill in the measured column.
+- **A self-paced quiz:** every player gets the same questions in the same order, one at a time,
+  at their own pace, and all players share one live leaderboard (ADR-002).
+- **One socket, two nodes:** a Vue 3 client keeps one WebSocket open to a FastAPI server; two API
+  nodes run behind nginx.
+- **Redis as the primary store** (AOF `everysec`): every write with more than one step is one Lua
+  script on Redis `TIME`, so any node can score any answer atomically, and a (player, question)
+  scores at most once.
+- **A coalescing tick:** a score change only sets the quiz's dirty flag; a 200 ms tick publishes
+  one full leaderboard frame per quiz over Redis pub/sub, numbered by a per-quiz `seq`, and a
+  client that sees a gap asks for a snapshot.
+- **Mocks behind ports:** identity and the question bank; a token-gated mock admin API serves
+  the make targets (§14).
+- **Self-service hosting:** any visitor can host a quiz from the host page (`/host`) and end it
+  with the host token it gets.
+
+**Headline numbers.**
 
 | Measure | Target (ours) | Measured |
 |---|---|---|
-| Concurrent sockets, two API nodes | thousands | 5,000 in one quiz (about 2,500 per node) and 5,000 over 500 quizzes, all within C5 (§9) |
+| Concurrent sockets, two API nodes | thousands | 5,000 in one quiz (about 2,500 per node) and 5,000 over 500 quizzes, all within the latency target (C5, §7), measured in §9 |
 | Answer accepted → leaderboard delivered, p99 (C5) | below 500 ms | 205 to 409 ms in four runs; worst 409 ms, one quiz of 5,000 players on two nodes (§9) |
 | Leaderboard frames per quiz | at most 5 per second | by design: one per 200 ms tick, only after a change |
 | Scoring rule | wrong or late 0; correct `100 + (50 * (T - e)) // T` | exact integers; one formula in Lua and Python |
+
+**Terms.**
+
+| Term | Meaning |
+|---|---|
+| Node | One API process (FastAPI on uvicorn); the stack runs two behind nginx |
+| Ticket | A single-use, 30 s token from the mock identity that opens one WebSocket |
+| Host token | A secret returned once to whoever hosts a quiz; it ends that quiz early |
+| `seq` | The per-quiz counter that numbers the broadcasts; it grows by exactly 1 per broadcast |
+| Dirty flag | A per-quiz flag that a join, a leave or a scoring answer sets, so the tick knows there is a change |
+| Tick and tick token | Every 200 ms, each node that serves a quiz calls the tick script; the node that takes the 200 ms tick token publishes the frame |
+| Snapshot and resync | A client that sees a gap in `seq` sends `resync` and gets a `snapshot`: the full standings at one `seq` |
+| Ports and adapters | Ports are the interfaces the core depends on (`Store`, `Clock`, `QuestionBank`, `TicketStore`); adapters implement them (Redis, memory, the mocks) |
+| C1–C6 | The consistency contract of §7: scored once, no gaps, one total, convergence, latency, one clock |
 
 ## 2. Assumptions and non-goals
 
