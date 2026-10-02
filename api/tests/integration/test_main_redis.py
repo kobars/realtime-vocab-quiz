@@ -1,6 +1,7 @@
 # AI-ASSISTED: the composition root on Redis: the start hook loads every Lua script; a join burst
 # above the connection pool's size waits for a connection instead of failing; quiz subscriptions
-# never take the command pool's connections; readiness needs a write that Redis accepts.
+# never take the command pool's connections; readiness needs a write that Redis accepts; a ticket
+# renews its session's expiry.
 import asyncio
 import hashlib
 import uuid
@@ -9,6 +10,8 @@ from contextlib import AsyncExitStack
 import httpx
 from redis.asyncio import Redis
 
+from quiz.adapters.mock_auth import tokens
+from quiz.adapters.mock_auth.redis_store import SESSION_KEY
 from quiz.adapters.redis.scripts import SCRIPTS, source
 from quiz.app.service import Connection
 from quiz.config import Settings
@@ -79,3 +82,14 @@ async def test_open_subscriptions_leave_the_command_pool_free(redis_url: str) ->
             assert await services.tickets.redeem(ticket) is not None
         async with asyncio.timeout(bound_s):
             assert await services.ready()
+
+
+async def test_a_ticket_renews_its_session_for_the_full_lifetime(redis_url: str) -> None:
+    app = create_app(Settings(store="redis", redis_url=redis_url))
+    tickets = services_of(app).tickets
+    async with Redis.from_url(redis_url) as admin, app.router.lifespan_context(app):
+        _, token = await tickets.create_session("Ana")
+        key = SESSION_KEY + tokens.digest(token)
+        await admin.expire(key, 60)  # 1 h 59 min old
+        assert await tickets.issue_ticket(token) is not None
+        assert await admin.ttl(key) == tokens.SESSION_TTL_S

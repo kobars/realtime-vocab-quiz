@@ -21,7 +21,7 @@ class RedisCommands(Protocol):
 
     def set(self, name: str, value: str, *, ex: int) -> Awaitable[object]: ...
 
-    def get(self, name: str) -> Awaitable[bytes | str | None]: ...
+    def getex(self, name: str, *, ex: int) -> Awaitable[bytes | str | None]: ...
 
     def getdel(self, name: str) -> Awaitable[bytes | str | None]: ...
 
@@ -39,8 +39,9 @@ class RedisTicketStore:
         return identity, token
 
     async def issue_ticket(self, session_token: str) -> str | None:
-        with reachable():
-            raw = await self._redis.get(SESSION_KEY + tokens.digest(session_token))
+        key = SESSION_KEY + tokens.digest(session_token)
+        with reachable():  # each ticket renews the session: a reused identity stays the same
+            raw = await self._redis.getex(key, ex=tokens.SESSION_TTL_S)
         identity = _identity(raw, session_token)
         if identity is None:
             return None
