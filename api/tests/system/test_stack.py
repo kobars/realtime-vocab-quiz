@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 REPO = Path(__file__).resolve().parents[3]
 CROSS_NODE_S = 0.5  # answer accepted on one node -> leaderboard frame on the other
 NODE_TRIES = 6  # nginx alternates the nodes, but HTTP requests share its round-robin
+CAP_SOCKETS_MAX = 201  # sockets the cap test may hold at once: under a 256 open-file limit
 
 
 async def correct_choice(quiz_id: str, index: int) -> int:
@@ -73,10 +74,11 @@ async def test_a_score_on_one_node_reaches_a_socket_on_the_other(
         assert isinstance(rows, list)
         return any(row["userId"] == scorer.user_id and row["score"] > 0 for row in rows)
 
-    seen = asyncio.create_task(watcher.receive("leaderboard", shows_score))
-    await answer_first(scorer, quiz_id)
-    accepted = time.monotonic()
-    await seen
+    async with asyncio.TaskGroup() as tasks:  # a failed answer cancels the wait
+        seen = tasks.create_task(watcher.receive("leaderboard", shows_score))
+        await answer_first(scorer, quiz_id)
+        accepted = time.monotonic()
+        await seen
     assert time.monotonic() - accepted < CROSS_NODE_S
 
 
@@ -92,11 +94,10 @@ async def test_a_spoofed_x_forwarded_for_does_not_lift_the_per_ip_cap(
     socket: Socket,
 ) -> None:
     """nginx replaces the client's X-Forwarded-For, so every socket counts against one address
-    on its node: with both nodes full, the next upgrade gets 429.
-
-    Its tickets spend about half of each node's per-address identity burst, so a second run within
-    a minute may get 429 from POST /api/tickets."""
-    attempts = 2 * Settings().per_ip_conn_cap + 1
+    on its node: with both nodes full, the next upgrade gets 429."""
+    cap = Settings().per_ip_conn_cap  # the stack's too: make test-system exports .env
+    if (attempts := 2 * cap + 1) > CAP_SOCKETS_MAX:
+        pytest.skip(f"PER_IP_CONN_CAP={cap} needs {attempts} sockets to fill both nodes")
     user = await session("Dee")
     tickets = [await ticket(user) for _ in range(attempts)]  # before the sockets: no 429 between
     status = None
