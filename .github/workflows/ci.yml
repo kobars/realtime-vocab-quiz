@@ -1,5 +1,6 @@
-# AI-ASSISTED: CI: make check, the Redis integration tests and the combined coverage gate, on pull
-# requests and on main; the PR guards and the review budget on pull requests.
+# AI-ASSISTED: CI: make check, the Redis integration tests, the acceptance tests on both stores
+# and the combined coverage gate, on pull requests and on main; the PR guards and the review
+# budget on pull requests.
 name: ci
 
 on:
@@ -43,7 +44,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      # make check includes the contract drift step.
+      # make check includes the contract drift step and the acceptance tests on the memory store.
       - run: make check
       - if: always()
         uses: ./.github/actions/upload-test-results
@@ -66,14 +67,16 @@ jobs:
     env:
       REDIS_URL: redis://localhost:6379/0
       COVERAGE_FILE: ${{ github.workspace }}/reports/.coverage.integration
-      # The combined report holds the floor, so this partial run has none.
-      PYTEST_ADDOPTS: --cov --cov-report= --cov-fail-under=0
+      # The combined report holds the floor, so these partial runs have none; the acceptance run
+      # appends to the integration run's data.
+      PYTEST_ADDOPTS: --cov --cov-report= --cov-fail-under=0 --cov-append
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
           cache-dependency-glob: api/uv.lock
+      # The integration tests, then the acceptance tests on Redis.
       - run: make test-integration
       - if: always()
         uses: ./.github/actions/upload-test-results

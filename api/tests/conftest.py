@@ -121,12 +121,31 @@ def redis_url() -> Iterator[str]:
         _docker("rm", "-f", container, check=False)
 
 
+ACCEPTANCE_DB = 15  # the Redis acceptance harness flushes it before each test
+
+
+@pytest.fixture
+def acceptance_redis_url(redis_url: str) -> Iterator[str]:
+    """Database 15 of this session's Redis: refused unless empty, and emptied after the test."""
+    url = urlparse(redis_url)._replace(path=f"/{ACCEPTANCE_DB}").geturl()
+    with SyncRedis.from_url(url) as client:
+        if keys := client.dbsize():
+            pytest.fail(
+                f"database {ACCEPTANCE_DB} of the test Redis holds {keys} keys;"
+                " the acceptance tests flush it, so they need it empty"
+            )
+    yield url
+    with SyncRedis.from_url(url) as client:
+        client.flushdb()
+
+
 @pytest.fixture(autouse=True)
 def acceptance_redis(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The Redis acceptance harness flushes REDIS_URL: hand it this session's Redis instead."""
+    """The Redis acceptance harness flushes REDIS_URL: hand it an empty database of this
+    session's Redis instead, never the database that REDIS_URL names."""
     redis_mode = os.environ.get("ACCEPTANCE_STORE") == "redis"
     if redis_mode and request.node.get_closest_marker("acceptance"):
-        monkeypatch.setenv("REDIS_URL", request.getfixturevalue("redis_url"))
+        monkeypatch.setenv("REDIS_URL", request.getfixturevalue("acceptance_redis_url"))
 
 
 @pytest.fixture

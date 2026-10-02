@@ -25,10 +25,10 @@ make help                    # list every make target
 uv run --project api pre-commit install  # run the hooks on staged files at each commit
 make check                   # every check a change must pass; stops at the first failing step
 make test                    # the server and client unit tests
-make test-integration        # the tests that need Redis (set REDIS_URL to use your own)
+make test-integration        # the tests that need Redis, then the acceptance tests on Redis (REDIS_URL: see below)
 make audit                   # the dependency audits and the secret scan (needs the network and gitleaks 8.25+)
 make review-budget           # the branch's review input in tokens (diff plus changed files, against origin/main)
-make acceptance              # the acceptance tests; ACCEPTANCE_STORE=redis runs them on a Redis of their own
+make acceptance              # the acceptance tests alone; ACCEPTANCE_STORE=redis runs them on Redis
 make build                   # the API and web images, elsaquiz-api and elsaquiz-web (IMAGE_TAG=dev)
 make dev-api                 # one API node on 127.0.0.1:8001 (memory store) that allows the :5173 origins
 pnpm -C web dev              # client on :5173; /api/* (prefix dropped) and /ws go to 127.0.0.1:8001 or QUIZ_API_URL
@@ -40,6 +40,15 @@ The API refuses a WebSocket upgrade from an origin it does not allow (HTTP 403).
 `make dev-api` sets it to the Vite dev server's origins; `DEV_API_PORT` and
 `DEV_ORIGINS` change the port and the list.
 
+The tests that need Redis use `REDIS_URL` when it is set, else a Redis container of
+their own. The integration tests write only keys under a prefix of their own and delete
+them. The acceptance tests on Redis flush their database before each test, so they use
+database 15 of that Redis, refuse to start unless it is empty, and empty it when they
+finish. Each acceptance run writes a JUnit report (into `REPORTS`, else `reports/`) and
+`scripts/check_junit_skips.py` fails it when a test skips that should run: none on the
+memory store, only the two exact-time checks on Redis, which need the memory store's
+injected clock.
+
 `make check` runs, in order: the client install from the lock file
 (`pnpm install --frozen-lockfile`); every pre-commit hook on every file (ruff
 lint and format, ESLint, typos, and lychee in Docker on the relative links and
@@ -47,10 +56,10 @@ anchors of the tracked Markdown); mypy (strict); import-linter; deptry (every
 import in `api/src` is a declared dependency and every runtime dependency is
 used; `api/tests`, `scripts/` and `load/` import only declared packages); pytest
 (without the `integration` and `acceptance` markers) with a unit branch-coverage
-floor (`UNIT_COVERAGE_FLOOR` in the `Makefile`); the contract drift check; vue-tsc; Vitest with coverage thresholds
+floor (`UNIT_COVERAGE_FLOOR` in the `Makefile`); the acceptance tests on the memory store; the contract drift check; vue-tsc; Vitest with coverage thresholds
 (`web/vitest.config.ts`); and the client build (`pnpm -C web build`). Every pull
 request and every push to `main` runs the same gate in GitHub Actions
-(`.github/workflows/ci.yml`), plus the Redis integration tests. Its `coverage` job
+(`.github/workflows/ci.yml`), plus the Redis integration tests and the acceptance tests on Redis. Its `coverage` job
 combines the coverage data of the test jobs and fails below the combined floor
 (`fail_under` in `api/pyproject.toml`) and, on a pull request, when less than 90% of the
 changed lines are covered (diff-cover). Each run keeps the JUnit reports (`reports-*`)

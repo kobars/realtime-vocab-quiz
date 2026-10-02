@@ -9,6 +9,17 @@ VITEST = pnpm -C web exec vitest run
 # With REPORTS set to a folder (CI sets it), each test step also writes a JUnit report there.
 pytest_junit = $(if $(REPORTS),--junitxml=$(abspath $(REPORTS))/$(1).xml)
 vitest_junit = $(if $(REPORTS),--reporter=default --reporter=junit --outputFile.junit=$(abspath $(REPORTS))/vitest.xml)
+# The acceptance tests run on the memory store or on Redis. A skipped test passes pytest, so their
+# step always writes a JUnit report (into REPORTS, else reports/) and fails on a skip the store does
+# not expect: on Redis, the two exact-time checks, which need the memory store's injected clock.
+export ACCEPTANCE_STORE ?= memory
+ACCEPTANCE_SKIPS_memory = 0
+ACCEPTANCE_SKIPS_redis = 2
+ACCEPTANCE_REPORT = $(abspath $(or $(REPORTS),reports))/acceptance-$(ACCEPTANCE_STORE).xml
+define acceptance_steps
+$(call step,pytest acceptance,$(PYTEST) tests/acceptance --junitxml=$(ACCEPTANCE_REPORT))
+$(call step,acceptance skips,uv run --project api --locked python scripts/check_junit_skips.py $(ACCEPTANCE_REPORT) --expect $(ACCEPTANCE_SKIPS_$(ACCEPTANCE_STORE)) --reason 'exact-time check')
+endef
 # make check's floor for the unit run alone; CI gates the combined coverage of its test jobs on
 # pyproject's fail_under.
 UNIT_COVERAGE_FLOOR = 84
@@ -46,8 +57,11 @@ dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)
 test: ## Run unit, property and contract tests (no Redis)
 	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance")
 	$(call step,vitest,$(VITEST))
-test-integration: ## Run the tests that need Redis (REDIS_URL or a container per run)
+test-integration: export ACCEPTANCE_STORE = redis
+test-integration: ## Run the tests that need Redis, the acceptance tests included (REDIS_URL or a container per run)
 	$(call step,pytest integration,$(PYTEST) tests/integration tests/contract -m integration $(call pytest_junit,integration))
+	$(acceptance_steps)
+check: export ACCEPTANCE_STORE = memory
 check: ## Run every check a change must pass
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,pre-commit hooks,uv run --project api --locked pre-commit run --all-files)
@@ -56,6 +70,7 @@ check: ## Run every check a change must pass
 	$(call step,dependencies,cd api && uv run --locked deptry src)
 	$(call step,tool dependencies,$(DEPTRY_TOOLS))
 	$(call step,pytest,$(PYTEST) -m "not integration and not acceptance" --cov --cov-fail-under=$(UNIT_COVERAGE_FLOOR) $(call pytest_junit,unit))
+	$(acceptance_steps)
 	$(call step,contracts drift,uv run --project api --locked python scripts/gen_contracts.py --check)
 	$(call step,vue-tsc,pnpm -C web exec vue-tsc --noEmit)
 	$(call step,vitest,$(VITEST) --coverage $(vitest_junit))
@@ -70,8 +85,8 @@ audit-secrets: ## Scan the git history of HEAD for secrets with gitleaks 8.25 or
 	$(call step,secret scan,gitleaks git --redact --verbose --no-banner --log-opts='--full-history HEAD' .)
 review-budget: ## Count the branch's review input in tokens, against BASE_SHA or origin/main
 	uv run --project api --locked python scripts/review_budget.py
-acceptance: ## Run the acceptance tests (ACCEPTANCE_STORE=redis: on a Redis of their own)
-	$(call step,pytest acceptance,$(PYTEST) tests/acceptance)
+acceptance: ## Run the acceptance tests alone (ACCEPTANCE_STORE=redis: on Redis)
+	$(acceptance_steps)
 contracts: ## Regenerate the JSON Schema and TypeScript types
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,contracts,uv run --project api --locked python scripts/gen_contracts.py)
