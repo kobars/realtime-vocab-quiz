@@ -71,6 +71,11 @@ def test_the_upgrade_checks_origin_then_subprotocol_then_ticket() -> None:
             assert refused(client, bad) == 401
 
 
+def test_an_accepted_socket_names_the_node_that_serves_it() -> None:
+    with client_of(node_id="api-7") as client, connect(client, ticket(client)) as ws:
+        assert ws.extra_headers == [(b"x-node-id", b"api-7")]
+
+
 def test_the_caps_refuse_with_429_per_ip_and_503_per_process() -> None:
     with client_of(max_connections=3, per_ip_conn_cap=2) as one:
         other = TestClient(one.app, client=("10.0.0.9", 1))

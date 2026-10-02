@@ -505,6 +505,17 @@ async def test_replacing_a_socket_whose_writer_failed_does_not_raise() -> None:
     assert sender.close_code == 4001
 
 
+async def test_a_closing_socket_alone_in_its_quiz_is_forgotten_on_drop() -> None:
+    registry = Registry(cast("Store", None), 10_000)
+    conn, sender = Connection("c0", "u0", "VOCAB-42"), sender_of(Socket())
+    sender.close(4001)  # replaced before its own join reply arrived
+    registry.bind(conn, sender)
+    assert list(registry.players("VOCAB-42")) == []
+    registry.drop(conn)
+    assert registry.senders("VOCAB-42") == []
+    await asyncio.wait_for(sender.task, 1)
+
+
 async def test_a_failed_write_leaves_only_the_queue_in_the_buffer() -> None:
     sender = sender_of(BrokenSocket())
     sender.send(page())
@@ -609,6 +620,10 @@ async def test_a_replaced_socket_whose_join_reply_comes_last_is_closed_with_4001
         assert (older.result(), [f["type"] for f in new.frames]) == (4001, ["joined"])
         registry.drop(conns[old])  # as the endpoint does once serve returns
         assert registry.senders("VOCAB-42") == [senders[new]]
+        assert list(registry.players("VOCAB-42")) == ["u0"]  # the newer socket keeps the player
+        registry.send_to("VOCAB-42", "u0", b'{"type":"rank_update"}')
+        await asyncio.sleep(0.01)
+        assert [f["type"] for f in new.frames] == ["joined", "rank_update"]
     finally:
         older.cancel()
         newer.cancel()

@@ -1,7 +1,7 @@
 # AI-ASSISTED: memory-store behavior that needs a clock that steps back, which Redis cannot fake.
 from quiz.adapters.memory import MemoryStore
 from quiz.domain.session import Question
-from quiz.ports.store import Limits, Row
+from quiz.ports.store import Limits, Place
 
 
 async def one_question_quiz() -> tuple[MemoryStore, list[int]]:
@@ -27,7 +27,7 @@ async def test_join_after_clock_step_back_clamps_reached_time() -> None:
     await store.join("VOCAB-1", "a", "A", "c1")  # reached at 0 ms
     now[0] -= 50
     await store.join("VOCAB-1", "z", "Z", "c2")  # -50 ms is clamped to 0: a tie, so a ranks first
-    assert (await store.ranks_of("VOCAB-1", ["z"])).rows == {"z": Row(2, "z", "Z", 0)}
+    assert (await store.ranks_of("VOCAB-1", ["z"])).rows == {"z": Place(2, 0)}
 
 
 async def test_snapshot_and_tick_follow_the_configured_limits() -> None:

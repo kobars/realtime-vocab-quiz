@@ -69,8 +69,15 @@ export class SeqTracker {
     if (frame.seq === last) return nothing()
     this.hold(frame)
     // A gap waits 0–250 ms; a lower seq means the store restarted, so resync at once.
-    const delayMs = frame.seq > last ? Math.floor(this.random() * (GAP_WAIT_MAX_MS + 1)) : 0
-    return this.startResync(delayMs)
+    return this.startResync(frame.seq > last ? this.gapWait() : 0)
+  }
+
+  /**
+   * The standings may be stale although no seq is missing: one resync after the same random wait as a gap, so the
+   * clients that the same broadcast told this do not all ask at once. Nothing while a resync is already on its way.
+   */
+  refresh(): SeqStep {
+    return this.resyncing ? nothing() : this.startResync(this.gapWait())
   }
 
   /**
@@ -120,6 +127,10 @@ export class SeqTracker {
   private hold(frame: Broadcast): void {
     this.buffer.push(frame)
     if (this.buffer.length > BUFFER_MAX) this.buffer.shift()
+  }
+
+  private gapWait(): number {
+    return Math.floor(this.random() * (GAP_WAIT_MAX_MS + 1))
   }
 
   private startResync(delayMs: number): SeqStep {
