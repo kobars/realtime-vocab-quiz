@@ -117,9 +117,9 @@ jobs:
 
   # Each platform's images, built on a native runner and pushed by digest only (no tag), then
   # scanned there as pulled; publish-tags tags them once every scan has passed. Runs on main and on
-  # release tags, after the checks above.
+  # release tags of this repository (not of a fork), after the checks above.
   publish:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.repository == 'kobars/realtime-vocab-quiz'
     needs: [config, images]
     strategy:
       matrix:
@@ -204,7 +204,7 @@ jobs:
   # One multi-arch image per name from the scanned digests, tagged main and the commit's short SHA
   # on main, or the version on a release tag; then a signed provenance attestation for each.
   publish-tags:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.repository == 'kobars/realtime-vocab-quiz'
     needs: [publish]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -227,9 +227,20 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: tag the images
         id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           case $GITHUB_REF in
-            refs/heads/main) tags=(main "${GITHUB_SHA::7}") ;;
+            refs/heads/main)
+              tags=("${GITHUB_SHA::7}")
+              # Runs on main overlap: an older run that finishes after a newer one must not move
+              # main back to its images.
+              head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+              if [[ $head == "$GITHUB_SHA" ]]; then
+                tags=(main "${tags[@]}")
+              else
+                echo "main is at $head now: tagging ${GITHUB_SHA::7} only"
+              fi ;;
             refs/tags/v*)
               [[ $GITHUB_REF_NAME =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a vX.Y.Z tag: $GITHUB_REF_NAME"; exit 1; }
               tags=("$GITHUB_REF_NAME") ;;

@@ -272,9 +272,15 @@ def test_only_the_publish_jobs_can_write_packages_after_every_check_and_scan() -
         if job not in {"publish", "publish-tags"}
     )
     publish = _section(path, "publish", 2)
-    assert "if: github.event_name == 'push'" in publish
+    tags = _section(path, "publish-tags", 2)
+    # Never on a pull request or in a fork.
+    only_here = "if: github.event_name == 'push' && github.repository == 'kobars/realtime-vocab-quiz'"
+    assert only_here in publish
+    assert only_here in tags
     assert "needs: [config, images]" in publish
-    assert "needs: [publish]" in _section(path, "publish-tags", 2)
+    assert "needs: [publish]" in tags
+    # Only the run of main's newest commit moves the main tag.
+    assert any('if [[ $head == "$GITHUB_SHA" ]]; then' in line for line in tags)
     # Pushed by digest only, then scanned; only publish-tags gives the images a tag.
     assert sum("push-by-digest=true" in line for line in publish) == 2
     steps = [line for line in publish if line.startswith("- name:")]
