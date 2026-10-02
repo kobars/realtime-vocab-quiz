@@ -36,7 +36,7 @@ jobs:
         run: |
           if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
             echo stack=true >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$BASE...$HEAD" | grep -qE '^(api/|web/|infra/|compose[^/]*\.ya?ml$|(.*/)?Dockerfile$|\.dockerignore$|Makefile$|\.github/workflows/stack\.yml$)'; then
+          elif git diff --name-only "$BASE...$HEAD" | grep -qE '^(api/|web/|infra/|compose[^/]*\.ya?ml$|(.*/)?Dockerfile$|\.dockerignore$|Makefile$|\.nvmrc$|\.python-version$|\.github/workflows/stack\.yml$)'; then
             echo stack=true >> "$GITHUB_OUTPUT"
           else
             echo stack=false >> "$GITHUB_OUTPUT"
