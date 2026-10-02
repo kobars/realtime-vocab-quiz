@@ -68,7 +68,7 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
         type="button"
         :data-choice="i"
         :aria-disabled="locked"
-        class="flex min-h-14 items-center gap-3 rounded-lg border-clay px-4 py-3 text-left text-xl font-semibold shadow-press transition-[background-color,border-color,box-shadow,translate] duration-fast ease-spring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none not-aria-disabled:hover:shadow-press-hover not-aria-disabled:active:shadow-press-active motion-safe:not-aria-disabled:hover:-translate-y-0.5 motion-safe:not-aria-disabled:active:translate-y-0.5 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+        class="flex min-h-14 items-center gap-3 rounded-lg border-clay px-4 py-3 text-left text-xl font-semibold shadow-press transition-[background-color,border-color,box-shadow,translate] duration-fast ease-spring focus-hug not-aria-disabled:hover:shadow-press-hover not-aria-disabled:active:shadow-press-active motion-safe:not-aria-disabled:hover:-translate-y-0.5 motion-safe:not-aria-disabled:active:translate-y-0.5 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         :class="store.pending?.choiceIndex === i ? 'border-primary bg-highlight' : 'border-input bg-card'"
         @click="choose(i)"
       >

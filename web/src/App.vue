@@ -14,7 +14,7 @@ const main = useTemplateRef<HTMLElement>('main')
     <a
       href="#main"
       data-test="skip-link"
-      class="fixed top-2 left-4 z-20 inline-flex min-h-11 -translate-y-[calc(100%+1rem)] items-center opacity-0 rounded-lg border-clay bg-card px-4 font-bold text-primary shadow-press focus-visible:translate-y-0 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+      class="fixed top-2 left-4 z-20 inline-flex min-h-11 -translate-y-[calc(100%+1rem)] items-center opacity-0 rounded-lg border-clay bg-card px-4 font-bold text-primary shadow-press focus-hug focus-visible:translate-y-0 focus-visible:opacity-100"
       @click.prevent="main?.focus()"
     >{{ strings.skipLink }}</a>
     <header class="sticky top-0 z-10 border-b-clay bg-background supports-[backdrop-filter]:bg-background/95 supports-[backdrop-filter]:backdrop-blur-sm">
@@ -22,7 +22,7 @@ const main = useTemplateRef<HTMLElement>('main')
         <RouterLink
           to="/"
           data-test="wordmark"
-          class="-mx-2 inline-flex min-h-11 items-center gap-3 rounded-lg px-2 text-xl font-extrabold focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+          class="-mx-2 inline-flex min-h-11 items-center gap-3 rounded-lg px-2 text-xl font-extrabold"
         >
           <span
             class="flex size-10 items-center justify-center rounded-xl bg-gradient-primary text-primary-foreground"

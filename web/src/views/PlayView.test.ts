@@ -9,6 +9,7 @@ import type { AnswerResult, Joined, Question, ServerMessage, Snapshot } from '@/
 import { createAppRouter } from '@/router'
 import { configureQuizStore, type QuizClientPort, useQuizStore } from '@/stores/quiz'
 import PlayView from './PlayView.vue'
+import { stackedFocusClasses } from '@/components/ui/focus.testing'
 
 let emit: (event: ClientEvent) => void
 let clock = 0
@@ -109,9 +110,19 @@ it('a digit with Ctrl, Meta or Alt held sends no answer, so browser and system s
   expect(port.answer.mock.calls).toEqual([[0, 0]])
 })
 
-it('the focus ring of a choice is offset by the page color', async () => {
+it('a choice shows one focus indicator: the focus outline hugs its own outline, with no ring on top', async () => {
   const w = await playing()
-  expect(choice(w, 0).classes()).toEqual(expect.arrayContaining(['focus-visible:ring-offset-2', 'focus-visible:ring-offset-background']))
+  expect(choice(w, 0).classes()).toContain('focus-hug')
+  expect(stackedFocusClasses(choice(w, 0).classes())).toEqual([])
+})
+
+it('the tab track draws the one outline: the selected tab adds a fill and a shadow, never an outline of its own', async () => {
+  phone()
+  const w = await playing()
+  expect(w.get('[role="tablist"]').classes()).toEqual(expect.arrayContaining(['border-clay', 'bg-background']))
+  const selected = w.get('[role="tab"][aria-selected="true"]').classes()
+  expect(selected).toEqual(expect.arrayContaining(['aria-selected:bg-card', 'aria-selected:shadow-press']))
+  expect(selected.filter((c) => c.startsWith('aria-selected:border-'))).toEqual([])
 })
 
 it('intro: Start has the focus and asks for question 0; after a rejoin on a closed question it reads Continue', async () => {

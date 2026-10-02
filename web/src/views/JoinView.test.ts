@@ -8,6 +8,7 @@ import type { ClientEvent } from '@/protocol/client'
 import { createAppRouter } from '@/router'
 import { configureQuizStore, type QuizClientPort } from '@/stores/quiz'
 import { strings } from '@/strings'
+import { stackedFocusClasses } from '@/components/ui/focus.testing'
 
 let emit: (event: ClientEvent) => void
 let start: ReturnType<typeof vi.fn>
@@ -89,6 +90,13 @@ it('the header link is a 44 px touch target', async () => {
   expect(wrapper.get('header a').classes()).toContain('min-h-11')
 })
 
+it('the header link and the skip link use the page focus outline with no ring on top, the skip link hugging its own outline', async () => {
+  const { wrapper } = await screen()
+  const stacked = (selector: string) => stackedFocusClasses(wrapper.get(selector).classes())
+  expect([stacked('header a'), stacked('[data-test="skip-link"]')]).toEqual([[], []])
+  expect(wrapper.get('[data-test="skip-link"]').classes()).toContain('focus-hug')
+})
+
 it('keeps the app name as the wordmark text and hides its icon tile from assistive tech', async () => {
   const { wrapper } = await screen()
   const wordmark = wrapper.get('[data-test="wordmark"]')
@@ -112,6 +120,24 @@ it('hides the icons of the preview card and of a field message from assistive te
   await flushPromises()
   for (const icon of wrapper.findAll('form svg')) expect(icon.element.closest('[aria-hidden="true"]')).not.toBeNull()
   expect(wrapper.findAll('form svg').length).toBeGreaterThanOrEqual(2)
+})
+
+it('the quiz preview inside the join card casts no shadow of its own, so shadows never stack', async () => {
+  const { wrapper, id } = await screen()
+  await id.setValue('VOCAB-42')
+  await id.trigger('blur')
+  await flushPromises()
+  const card = wrapper.get('[data-slot="card"]')
+  expect(card.text()).toContain(open.title)
+  expect(card.findAll('*').filter((el) => el.classes().some((c) => c.startsWith('shadow-clay')))).toEqual([])
+})
+
+it('keeps both fields out of password managers and keeps their autocomplete hints', async () => {
+  const { id, name } = await screen()
+  for (const field of [id, name]) {
+    expect(field.attributes()).toMatchObject({ 'data-1p-ignore': '', 'data-lpignore': 'true', 'data-bwignore': '', 'data-form-type': 'other' })
+  }
+  expect([id.attributes('autocomplete'), name.attributes('autocomplete')]).toEqual(['off', 'nickname'])
 })
 
 describe('validation', () => {

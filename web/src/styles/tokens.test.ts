@@ -16,6 +16,18 @@ const pairs = (column: 1 | 2) =>
 const light = pairs(1)
 const dark = pairs(2).filter((pair): pair is [string, string] => pair[1] !== undefined)
 const reducedMotion = tokens.slice(tokens.indexOf('@media (prefers-reduced-motion: reduce)'))
+/** Splits a box-shadow on its top-level commas only: a color-mix() or var() keeps its own commas, however deep. */
+function shadowLayers(value: string): string[] {
+  const layers = ['']
+  let depth = 0
+  for (const char of value) {
+    if (char === ',' && depth === 0) layers.push('')
+    else layers[layers.length - 1] += char
+    if (char === '(') depth += 1
+    if (char === ')') depth -= 1
+  }
+  return layers.map((layer) => layer.trim()).filter(Boolean)
+}
 const MOTION = ['--motion-fast', '--motion-base', '--motion-slow', '--motion-count', '--motion-pop', '--stagger']
 
 describe('design tokens', () => {
@@ -42,6 +54,16 @@ describe('design tokens', () => {
     expect(block(tokens.indexOf(':root {'))).toContain('color-scheme: light;')
     expect(block(tokens.indexOf('@media (prefers-color-scheme: dark)'))).toContain('color-scheme: dark;')
   })
+
+  it.each(['--shadow-clay', '--shadow-clay-lift', '--shadow-press', '--shadow-press-hover', '--shadow-press-active'])(
+    'the dark theme redefines %s with no sideways offset, so no ghost box sits beside a surface on the dark page',
+    (name) => {
+      const layers = shadowLayers(darkTokens[name] ?? '')
+      expect(layers.length).toBeGreaterThan(0)
+      // The x offset comes first: 0, with or without a unit.
+      for (const layer of layers) expect(layer).toMatch(/^0(px)? /)
+    },
+  )
 
   it.each(MOTION)('reduced motion sets %s to 0ms', (name) => {
     expect(reducedMotion).toContain(`${name}: 0ms;`)

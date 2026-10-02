@@ -95,6 +95,12 @@
     --gradient-text: linear-gradient(135deg, #B197FF, #00C5FF);
     --clay-tint: 35%;
     --blob-tint: 8%;
+    /* A hard offset reads as a misplaced ghost box on the near-black page: surfaces get a soft glow below them, controls a 2 px edge straight down. */
+    --shadow-clay: 0 8px 24px -8px color-mix(in srgb, var(--primary) var(--clay-tint), transparent);
+    --shadow-clay-lift: 0 14px 32px -8px color-mix(in srgb, var(--primary) var(--clay-tint), transparent);
+    --shadow-press: 0 2px 0 color-mix(in srgb, var(--primary) 30%, transparent);
+    --shadow-press-hover: 0 2px 0 color-mix(in srgb, var(--primary) 30%, transparent), 0 6px 16px -6px color-mix(in srgb, var(--primary) var(--clay-tint), transparent);
+    --shadow-press-active: 0 1px 0 color-mix(in srgb, var(--primary) 30%, transparent);
   }
 }
 

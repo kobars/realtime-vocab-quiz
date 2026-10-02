@@ -72,13 +72,23 @@
 @utility rounded-card { border-radius: var(--radius-card); }
 @utility border-clay { border-width: var(--border-clay); }
 @utility border-b-clay { border-bottom-width: var(--border-clay); }
-/* The clay shadows fill Tailwind's shadow slot next to its ring slots, so a focus ring (ring-*) still draws on a hovered or pressed control. */
-@utility shadow-clay { --tw-shadow: var(--shadow-clay); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
-@utility shadow-clay-lift { --tw-shadow: var(--shadow-clay-lift); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
-@utility shadow-press { --tw-shadow: var(--shadow-press); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
-@utility shadow-press-hover { --tw-shadow: var(--shadow-press-hover); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
-@utility shadow-press-active { --tw-shadow: var(--shadow-press-active); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
-@utility shadow-inset { --tw-shadow: var(--shadow-inset); box-shadow: var(--tw-inset-shadow, 0 0 transparent), var(--tw-inset-ring-shadow, 0 0 transparent), var(--tw-ring-offset-shadow, 0 0 transparent), var(--tw-ring-shadow, 0 0 transparent), var(--tw-shadow); }
+/* Focus is an outline (the base layer and focus-hug), so the clay shadows need no ring slots beside them. */
+@utility shadow-clay { box-shadow: var(--shadow-clay); }
+@utility shadow-clay-lift { box-shadow: var(--shadow-clay-lift); }
+@utility shadow-press { box-shadow: var(--shadow-press); }
+@utility shadow-press-hover { box-shadow: var(--shadow-press-hover); }
+@utility shadow-press-active { box-shadow: var(--shadow-press-active); }
+@utility shadow-inset { box-shadow: var(--shadow-inset); }
+/*
+ * One focus indicator on a control that draws its own outline: the focus outline widens over that outline and 2 px
+ * past it, one band instead of an outline, a gap and a ring. The band is all outline, so a hover, selected or fading
+ * border colour under it never shows; the border turns --ring as well, which keeps anti-aliased corners in one colour.
+ * An invalid field keeps --destructive, and the band follows it.
+ */
+@utility focus-hug {
+  &:focus-visible { outline-width: calc(var(--border-clay) + 2px); outline-offset: calc(-1 * var(--border-clay)); border-color: var(--ring); }
+  &[aria-invalid='true']:focus-visible { border-color: var(--destructive); outline-color: var(--destructive); }
+}
 @utility bg-gradient-primary { background-image: var(--gradient-primary); }
 @utility duration-fast { transition-duration: var(--motion-fast); }
 @utility duration-base { transition-duration: var(--motion-base); }
@@ -129,7 +139,11 @@
 
 @layer base {
   * { @apply border-border outline-ring/50; }
-  /* The browser's own focus outline is thin and translucent here; elements with ring classes set outline-none. */
+  /*
+   * The one focus indicator of every control: a solid 2 px --ring outline 2 px off its edge. The gap is transparent, so
+   * it shows the card or the page behind, the outline reads against a filled control, and it stays in forced colors;
+   * a control that draws its own outline adds focus-hug.
+   */
   :focus-visible { @apply outline-2 outline-solid outline-offset-2 outline-ring; }
   body { @apply bg-background text-foreground font-sans font-medium leading-normal antialiased; }
   h1, h2, h3 { @apply font-extrabold leading-tight; }

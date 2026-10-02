@@ -7,10 +7,16 @@ import { displayNameError, normalizeQuizId, quizIdError, readName, saveName } fr
 describe('quiz ID', () => {
   it('upper-cases what is typed', () => expect(normalizeQuizId('vocab-42')).toBe('VOCAB-42'))
 
-  it.each(['VOCAB-42', 'ABC', 'A-B-C-1234567890'])('accepts %s', (id) => expect(quizIdError(id)).toBeNull())
+  it.each(['VOCAB-42', 'VOCAB-42-7K3Q', 'ABC', 'A-B-C-1234567890'])('accepts %s', (id) => expect(quizIdError(id)).toBeNull())
 
   it.each(['', 'AB', 'VOCAB_42', 'VOCAB 42', 'vocab-42', 'A-B-C-12345678901'])('rejects "%s"', (id) =>
     expect(quizIdError(id)).toBe(strings.join.quizIdInvalid))
+
+  it.each([strings.join.quizIdHint, strings.join.quizIdInvalid])('"%s" names a run ID, which the pattern accepts', (copy) => {
+    const example = copy.match(/[A-Z0-9]+(?:-[A-Z0-9]+){2,}/)?.[0] ?? ''
+    expect(example).toBe('VOCAB-42-7K3Q')
+    expect(quizIdError(example)).toBeNull()
+  })
 })
 
 describe('display name', () => {

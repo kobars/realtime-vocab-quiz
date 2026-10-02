@@ -201,10 +201,11 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
       v-else-if="store.blocked === null"
       class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,40rem)_22.5rem] lg:justify-between"
     >
+      <!-- The track draws the one outline; the selected tab is a raised card fill inside it, with no outline of its own. -->
       <div
         v-if="!wide"
         role="tablist"
-        class="flex gap-1 rounded-full border-clay bg-muted p-1"
+        class="flex gap-1 rounded-full border-clay bg-background p-1"
         @keydown="moveTab"
       >
         <Button
@@ -217,7 +218,7 @@ const panel = (name: Tab) => (wide.value ? {} : { role: 'tabpanel', 'aria-labell
           :aria-selected="tab === name"
           :aria-controls="`panel-${name}`"
           :tabindex="tab === name ? 0 : -1"
-          class="flex-1 rounded-full aria-selected:border-border aria-selected:bg-card aria-selected:text-primary aria-selected:shadow-press"
+          class="flex-1 rounded-full aria-selected:bg-card aria-selected:text-primary aria-selected:shadow-press"
           @click="tab = name"
         >
           {{ tabLabels[name] }}

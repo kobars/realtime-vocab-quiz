@@ -98,8 +98,8 @@ it('highlights my row, shows the counts, and pins my row from rank_update outsid
   await receive(board(4, top(50)), { type: 'rank_update', atSeq: 4, rank: 120, score: 310, playerCount: 300 })
   const pinned = w.find('[data-test="pinned"]').findAll('span').map((span) => span.text())
   expect([store.myRank, pinned]).toEqual([120, ['#120', 'Ana (you)', '310']])
-  // It stays in view at the bottom of the window below up to 50 rows.
-  expect(w.get('[data-test="pinned"]').classes()).toEqual(expect.arrayContaining(['sticky', 'bottom-0']))
+  // It stays in view at the bottom of the window below up to 50 rows, on an opaque dock that hides the rows under it.
+  expect(w.get('[data-test="pinned-dock"]').classes()).toEqual(expect.arrayContaining(['sticky', 'bottom-0', 'bg-card', 'py-2']))
   // My old row fades out (it keeps its leave class until the transition ends).
   expect(w.find('[aria-current="true"]:not(.lb-leave-active)').exists()).toBe(false)
   await receive(board(5, [me(1, 2_000), ...top(49, 2)]))
@@ -155,6 +155,12 @@ it('after a close and a reopen on the first page, Next still keeps the shown row
   expect(pageRanks(w).length).toBe(100)
   await button(w, 'Next')?.trigger('click')
   expect([pageRanks(w).length, pageRanks(w)[0], w.get('[data-test="page-range"]').text()]).toEqual([100, '#1', 'Players 1–100 of 300'])
+})
+
+it('the "Show all players" panel inside the leaderboard card casts no shadow of its own, so shadows never stack', async () => {
+  const w = await openAll()
+  expect(w.find('[tabindex="-1"]').exists()).toBe(true)
+  expect(w.findAll('[data-slot="card"] *').filter((el) => el.classes().some((c) => c.startsWith('shadow-clay')))).toEqual([])
 })
 
 it('a final page is never reloaded', async () => {

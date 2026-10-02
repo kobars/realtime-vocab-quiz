@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the live leaderboard panel: player counts, the top 50, my row pinned below it when I am further down (it sticks to the bottom of the window while the list scrolls), and the full list, in a clay card (UI spec §3.5). -->
+<!-- AI-ASSISTED: the live leaderboard panel: player counts, the top 50, my row pinned below it when I am further down (on an opaque dock that sticks to the bottom of the window while the list scrolls), and the full list, in a clay card (UI spec §3.5). -->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
@@ -44,16 +44,22 @@ const pinned = computed(() => store.myRank !== null && !store.entries.some((row)
       :my-user-id="me"
       :replacements="store.replacements"
     />
-    <p
+    <!-- The dock is opaque card colour around my row, so a row scrolling under it is hidden behind a clean edge instead of showing beside or through it. Its padding replaces the card's gap on either side. -->
+    <div
       v-if="pinned"
-      data-test="pinned"
-      class="sticky bottom-0 z-1 flex min-h-12 items-center gap-3 rounded-lg px-3 py-1.5"
-      :class="MY_ROW"
+      data-test="pinned-dock"
+      class="sticky bottom-0 z-1 -my-2 bg-card py-2"
     >
-      <span :class="[RANK_CHIP, placeFill(store.myRank ?? 0)]">#{{ store.myRank }}</span>
-      <span class="min-w-0 flex-1 truncate">{{ store.quiz?.displayName }} {{ strings.leaderboard.you }}</span>
-      <span class="tabular-nums">{{ store.myScore }}</span>
-    </p>
+      <p
+        data-test="pinned"
+        class="flex min-h-12 items-center gap-3 rounded-lg px-3 py-1.5"
+        :class="MY_ROW"
+      >
+        <span :class="[RANK_CHIP, placeFill(store.myRank ?? 0)]">#{{ store.myRank }}</span>
+        <span class="min-w-0 flex-1 truncate">{{ store.quiz?.displayName }} {{ strings.leaderboard.you }}</span>
+        <span class="tabular-nums">{{ store.myScore }}</span>
+      </p>
+    </div>
     <AllPlayers />
   </Card>
 </template>

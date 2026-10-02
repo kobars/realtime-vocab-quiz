@@ -8,6 +8,7 @@ import { buttonVariants } from './button'
 import { Card } from './card'
 import { Input } from './input'
 import { Progress } from './progress'
+import { stackedFocusClasses } from './focus.testing'
 
 const classes = (value: string) => value.split(/\s+/)
 const inputClass = () => mount(Input).get('input').classes().join(' ')
@@ -15,28 +16,29 @@ const inputClass = () => mount(Input).get('input').classes().join(' ')
 const buttonVariantNames = ['default', 'destructive', 'mint', 'outline', 'secondary', 'ghost', 'link'] as const
 const buttonSizes = ['default', 'sm', 'lg', 'icon', 'icon-lg'] as const
 const badgeVariantNames = ['default', 'secondary', 'mint', 'cyan', 'sun', 'success', 'destructive', 'warning', 'outline'] as const
-const focusables: [string, string][] = [
+const filled = ['default', 'destructive', 'mint'] as const
+const outlined: [string, string][] = [
+  ...(['outline', 'secondary', 'ghost', 'link'] as const).map((v): [string, string] => [`button ${v}`, buttonVariants({ variant: v })]),
+  ['input', inputClass()],
+]
+const styled: [string, string][] = [
   ...buttonVariantNames.map((v): [string, string] => [`button ${v}`, buttonVariants({ variant: v })]),
   ...badgeVariantNames.map((v): [string, string] => [`badge ${v}`, badgeVariants({ variant: v })]),
   ['input', inputClass()],
 ]
 
-describe('focus ring', () => {
-  it.each(focusables)('%s draws a 2 px solid ring with a 2 px page-colored offset', (_, value) => {
-    expect(classes(value)).toEqual(
-      expect.arrayContaining([
-        'focus-visible:ring-2',
-        'focus-visible:ring-ring',
-        'focus-visible:ring-offset-2',
-        'focus-visible:ring-offset-background',
-      ]),
-    )
+// The page's :focus-visible outline is the one indicator (main.test.ts checks it); a second one stacks a ring on it.
+describe('focus indicator', () => {
+  it.each(styled)('%s adds no ring and does not hide the outline', (_, value) => {
+    expect(stackedFocusClasses(classes(value))).toEqual([])
   })
 
-  it.each(focusables)('%s never makes the ring translucent or thicker', (_, value) => {
-    // A ring color with /alpha drops below 3:1 against the page.
-    expect(value).not.toMatch(/(^|\s)(\S+:)?ring-[a-z-]+\/\d+/)
-    expect(classes(value)).not.toContain('focus-visible:ring-3')
+  it.each(outlined)('%s draws its own outline, so the focus outline hugs it as one band', (_, value) => {
+    expect(classes(value)).toContain('focus-hug')
+  })
+
+  it.each(filled)('button %s keeps the 2 px gap, which separates the outline from its fill', (variant) => {
+    expect(classes(buttonVariants({ variant }))).not.toContain('focus-hug')
   })
 })
 

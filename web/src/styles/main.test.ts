@@ -11,9 +11,15 @@ describe('Tailwind entry', () => {
     expect(main).not.toContain('prefers-color-scheme')
   })
 
-  it('gives every focus-visible element without ring classes a 2 px solid outline with a 2 px offset', () => {
-    // Headings and panels focused from code have no ring classes; the controls with them set outline-none.
+  it('gives every focus-visible element a 2 px solid outline with a 2 px offset', () => {
     expect(base).toContain(':focus-visible { @apply outline-2 outline-solid outline-offset-2 outline-ring; }')
+  })
+
+  it('focus-hug paints the focus outline over the control\'s own outline and 2 px past it, in --ring or in --destructive on an invalid field', () => {
+    // All outline, so a border colour from hover, selection or a transition cannot show through the band.
+    const rule = main.slice(main.indexOf('@utility focus-hug {'), main.indexOf('\n}', main.indexOf('@utility focus-hug {')))
+    expect(rule).toContain('&:focus-visible { outline-width: calc(var(--border-clay) + 2px); outline-offset: calc(-1 * var(--border-clay)); border-color: var(--ring); }')
+    expect(rule).toContain("&[aria-invalid='true']:focus-visible { border-color: var(--destructive); outline-color: var(--destructive); }")
   })
 
   it('sets the body in --font-sans at weight 500 and headings at weight 800', () => {
@@ -46,14 +52,9 @@ describe('Tailwind entry', () => {
     expect(main).toContain(`@utility ${name} { ${body} }`)
   })
 
-  it.each(['clay', 'clay-lift', 'press', 'press-hover', 'press-active', 'inset'])(
-    'shadow-%s fills the shadow slot and keeps the ring slots, so a focus ring survives hover and press',
-    (name) => {
-      const rule = main.match(new RegExp(`@utility shadow-${name} \\{([^}]*)\\}`))?.[1] ?? ''
-      expect(rule).toContain(`--tw-shadow: var(--shadow-${name});`)
-      expect(rule).toMatch(/box-shadow: [^;]*var\(--tw-ring-offset-shadow[^;]*var\(--tw-ring-shadow[^;]*var\(--tw-shadow\);/)
-    },
-  )
+  it.each(['clay', 'clay-lift', 'press', 'press-hover', 'press-active', 'inset'])('the shadow-%s utility reads its token', (name) => {
+    expect(main).toContain(`@utility shadow-${name} { box-shadow: var(--shadow-${name}); }`)
+  })
 
   it('sets the podium delay after the animation shorthand, which would reset it', () => {
     const rise = main.match(/@utility animate-rise \{([^}]*)\}/)?.[1] ?? ''
