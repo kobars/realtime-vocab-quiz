@@ -117,10 +117,10 @@ layers need more:
   Leaderboard tab only below 1024 px; wider, the leaderboard sits beside every play screen). Each
   must match its screenshot baseline in `web/e2e/__screenshots__/` (at most 50 pixels differ) and
   pass axe for WCAG 2.2 A and AA, with no sideways scroll (also at 640 px, a 1280 px window at
-  200% zoom), controls of at least 44 × 44 px and a visible focus ring at every Tab stop. It runs
-  The gallery has one baseline per colour scheme at 1280 px, and passes axe with no sideways
-  scroll at every width. It all runs in the Playwright image pinned in the `Makefile`, always as `linux/amd64`, so every machine
-  renders like CI; it needs Docker, and `make check` needs no browser. `make ui-baselines`
+  200% zoom), controls of at least 44 × 44 px and a visible focus ring at every Tab stop. The
+  gallery has one baseline per colour scheme at 1280 px, and passes axe with no sideways scroll at
+  every width. It all runs in the Playwright image pinned in the `Makefile`, always as
+  `linux/amd64`, so every machine renders like CI; it needs Docker, and `make check` needs no browser. `make ui-baselines`
   regenerates the baselines that changed, in the same image; `UI_ARGS` passes Playwright arguments
   to both, for example `make ui-check UI_ARGS="--project=320-light -g 'join-error'"`. The CI job
   `ui` runs it and keeps the report and the screenshot diffs when it fails.
