@@ -832,7 +832,7 @@ measures them in load runs.
 
 **Alerts a production setup would add.** Each condition, its threshold and why:
 
-- `/readyz` failing on any node: Redis is unreachable from it.
+- `/readyz` failing on any node: Redis is unreachable from it or refuses writes.
 - The p99 of `leaderboard_publish_lag_seconds` above 300 ms: the store part then leaves less than
   200 ms of the 500 ms budget for delivery.
 - The client-observed answer → leaderboard p99 above 500 ms, once clients report timings: C5 is
