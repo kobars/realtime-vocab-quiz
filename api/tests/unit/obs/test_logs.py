@@ -69,3 +69,21 @@ def test_closing_the_handler_writes_every_queued_line() -> None:
     assert [json.loads(line)["event"] for line in sink.getvalue().splitlines()] == [
         f"line {i}" for i in range(500)
     ]
+
+
+def test_closing_the_handler_gives_up_on_a_stalled_sink_after_its_wait() -> None:
+    sink = BlockedStream()
+    logs.configure_logging(sink)
+    for i in range(logs.QUEUE_LINES + 10):  # the writer is stuck on the first; the queue is full
+        logging.getLogger("quiz.test").info("line %d", i)
+    [handler] = [h for h in logging.getLogger().handlers if h.name == logs.HANDLER_NAME]
+    closing = threading.Thread(target=handler.close, daemon=True)
+    start = time.monotonic()
+    try:
+        closing.start()
+        closing.join(logs.STOP_WAIT_S + 2)
+        assert not closing.is_alive()
+        assert time.monotonic() - start < logs.STOP_WAIT_S + 1
+    finally:
+        sink.open.set()  # let the writer go, whatever happened
+        closing.join()

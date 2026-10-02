@@ -5,11 +5,14 @@ when unknown), taken from structlog's context variables, which the HTTP middlewa
 A line is formatted where it is logged, then a listener thread writes it: a stalled stderr reader
 (a full pipe, a blocking log driver) never blocks the event loop. The queue between them is
 bounded; when it is full a line is dropped and counted in ``log_lines_dropped_total``. Closing the
-handler, which ``logging.shutdown`` does at exit, writes every queued line first."""
+handler, which ``logging.shutdown`` does at exit, writes the queued lines first, waiting at most
+``STOP_WAIT_S``: a stalled reader never holds the exit."""
 
 import logging
 import queue
 import sys
+import time
+from contextlib import suppress
 from logging.handlers import QueueHandler, QueueListener
 from typing import TextIO, override
 
@@ -20,6 +23,7 @@ from quiz.obs import metrics
 
 HANDLER_NAME = "quiz-json"
 QUEUE_LINES = 10_000
+STOP_WAIT_S = 2.0  # how long a stop may wait for the queued lines; below the stop grace
 
 
 def _ids(_: WrappedLogger, __: str, event: EventDict) -> EventDict:
@@ -34,8 +38,14 @@ class _Writer(QueueListener):
         self.lines = lines
 
     @override
-    def enqueue_sentinel(self) -> None:
-        self.lines.put(None)  # the stop sentinel; waits for room, as the queue may be full
+    def stop(self) -> None:
+        if self._thread is None:  # never started, or stopped already
+            return
+        give_up = time.monotonic() + STOP_WAIT_S
+        with suppress(queue.Full):  # the queue may be full: wait for room, within the limit
+            self.lines.put(None, timeout=STOP_WAIT_S)
+        self._thread.join(max(0.0, give_up - time.monotonic()))
+        self._thread = None
 
 
 class _DroppingHandler(QueueHandler):
@@ -52,14 +62,14 @@ class _DroppingHandler(QueueHandler):
 
     @override
     def close(self) -> None:
-        self.writer.stop()  # a no-op on a stopped writer
+        self.writer.stop()
         super().close()
 
 
 def configure_logging(stream: TextIO | None = None, level: int = logging.INFO) -> QueueListener:
     """Install the JSON handler on the root logger and start its writer; calling it again
     replaces the handler and stops the earlier writer. Stopping the returned listener writes
-    every queued line."""
+    the queued lines, waiting at most ``STOP_WAIT_S``."""
     shared: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
