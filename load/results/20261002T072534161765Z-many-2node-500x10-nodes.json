@@ -9,16 +9,16 @@
   "samples": 35,
   "nodes": {
     "elsaquiz-api-1-1": {
-      "cpu_pct_mean": 74.4,
-      "cpu_pct_max": 99.65,
-      "mem_mib_idle": 59.8,
-      "mem_mib_max": 243.6
+      "cpu_pct_mean": 77.1,
+      "cpu_pct_max": 98.18,
+      "mem_mib_idle": 57.5,
+      "mem_mib_max": 241.9
     },
     "elsaquiz-api-2-1": {
-      "cpu_pct_mean": 73.5,
-      "cpu_pct_max": 98.86,
-      "mem_mib_idle": 60.0,
-      "mem_mib_max": 242.4
+      "cpu_pct_mean": 75.0,
+      "cpu_pct_max": 109.01,
+      "mem_mib_idle": 58.6,
+      "mem_mib_max": 244.4
     }
   }
 }

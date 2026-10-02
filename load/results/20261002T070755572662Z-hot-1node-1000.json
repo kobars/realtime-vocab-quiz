@@ -1,0 +1,81 @@
+{
+  "run": {
+    "started_at": "2026-10-02T07:04:19+00:00",
+    "options": {
+      "url": "http://nginx:8080/api",
+      "origin": "http://localhost:8080",
+      "quiz_ids": [
+        "VOCAB-42"
+      ],
+      "bots": 1000,
+      "cohorts": 0,
+      "accuracy": 0.7,
+      "think_ms": 5000,
+      "duration": 180.0,
+      "ramp": 30.0,
+      "procs": 4,
+      "timeout_ms": 5000,
+      "label": "hot-1node-1000"
+    },
+    "wall_s": 215.6
+  },
+  "answer": {
+    "samples": 38394,
+    "p50": 0.621,
+    "p95": 20.063,
+    "p99": 41.705,
+    "max": 183.336,
+    "missing": 0,
+    "timed_out": 0,
+    "completion": 1.0
+  },
+  "leaderboard": {
+    "samples": 26559,
+    "p50": 116.482,
+    "p95": 195.907,
+    "p99": 205.423,
+    "max": 366.045,
+    "missing": 0,
+    "timed_out": 0,
+    "completion": 1.0
+  },
+  "msgs_in_per_s": 5941.8,
+  "msgs_out_per_s": 454.6,
+  "counts": {
+    "answers": 38394,
+    "board_first": 9,
+    "cohorts": 4325,
+    "msgs_in": 1247779,
+    "msgs_out": 95460,
+    "resyncs": 4325
+  },
+  "swarm": {
+    "procs": [
+      {
+        "cpu_pct": 10.9,
+        "rss_mb": 69.1,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 11.0,
+        "rss_mb": 69.4,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 10.9,
+        "rss_mb": 68.8,
+        "active_s": 210.0
+      },
+      {
+        "cpu_pct": 11.0,
+        "rss_mb": 69.3,
+        "active_s": 210.0
+      }
+    ],
+    "cpu_pct_max": 11.0
+  },
+  "problems": [],
+  "valid": true,
+  "slo_within": 1.0,
+  "slo_met": true
+}

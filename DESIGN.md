@@ -23,7 +23,7 @@ are mocks behind ports, and quiz admin is a mock host action (§14).
 | Measure | Target (ours) | Measured |
 |---|---|---|
 | Concurrent sockets, two API nodes | thousands | 5,000 in one quiz (about 2,500 per node) and 5,000 over 500 quizzes, all within C5 (§9) |
-| Answer accepted → leaderboard delivered, p99 (C5) | below 500 ms | 202 to 419 ms in four runs; worst 419 ms, one quiz of 5,000 players on two nodes (§9) |
+| Answer accepted → leaderboard delivered, p99 (C5) | below 500 ms | 205 to 409 ms in four runs; worst 409 ms, one quiz of 5,000 players on two nodes (§9) |
 | Leaderboard frames per quiz | at most 5 per second | by design: one per 200 ms tick, only after a change |
 | Scoring rule | wrong or late 0; correct `100 + (50 * (T - e)) // T` | exact integers; one formula in Lua and Python |
 
@@ -438,8 +438,8 @@ hold 20,000. In one hot quiz above 200 players, each socket gets at most 5 frame
 per tick (A7). All of it runs on one core (A12), so CPU or the network is likely to set the
 practical number below the cap: 215 MB/s is about 1.7 Gbit/s before framing, above a 1 Gbit/s
 link. Measured (the table below): one node held 2,500 sockets of one hot quiz within C5 (p99
-385 ms) at 64 % of its core on average, peaking at a full core, and each node of the two-node run
-held about 2,500 at 64 % (p99 419 ms). So the practical number per node in one hot quiz is 2,500
+364 ms) at 63 % of its core on average, peaking at 89 %, and each node of the two-node run held
+about 2,500 at 71 to 73 %, peaking just above a full core (p99 409 ms). So the practical number per node in one hot quiz is 2,500
 measured, and by extrapolating the CPU about 3,500 at most (an estimate, not measured), against
 the computed cap of 10,000: CPU, not memory, sets it. Across many quizzes the first ceiling is
 A13: with the default pool a node serves at most 100 quizzes at once, so the 500-quiz run below
@@ -502,33 +502,35 @@ clients that send faster than A11 (up to 20 messages per second per socket, A6).
 
 Copied from [load/README.md](load/README.md), which says how to repeat each run. Machine: an
 Apple M4 Pro laptop (12 cores, 24 GB) running Docker Desktop with a Linux VM of 12 CPUs and
-7.7 GiB, shared by nginx, the API nodes (built from commit `f33b6b5`), Redis and the bot swarm
-(`make load`). Every run: a 30 s
+7.7 GiB, shared by nginx, the API nodes (built from commit `cbaebd9` plus the Redis command
+timeouts), Redis and the bot swarm (`make load`). Every run: a 30 s
 ramp, then 180 s of answering, one answer per player about every 5 s (A11), 70 % correct.
 Latencies are the bots' "answer accepted → leaderboard delivered" samples (C5); the answer
 latency is the client-observed round trip from `answer` to `answer_result`. Msg/s counts the
 frames the bots received; CPU % is the mean over the answering window, in percent of one core
 (two values: one per node); RSS is the node's peak memory in MiB as `docker stats` reports it.
-No run had a missing, timed-out or reconnecting sample; the many-quizzes run counted 4 `seq`
-gaps, each closed by a resync. These runs timed a frame when it arrived, also while a resync
-held it; the bots now time it when they apply it, as the web client shows it, which changes only
-the samples taken during a gap.
+No run had a missing, timed-out or reconnecting sample, so the completion (samples over samples,
+missing and timed out) is 1 in every run; `slo_met` is the swarm's verdict on C5, with the share
+of updates delivered below 500 ms. The two-node hot quiz counted 1 `seq` gap and the
+many-quizzes run 4, each closed by a resync. The bots time a frame when they apply it, as the web
+client shows it.
 
-| Scenario | Connections | Msg/s | p50 ms | p95 ms | p99 ms | CPU % | RSS MB | Answer p99 ms | Missing samples | Bots' CPU % (procs) | Result files in `load/results/` |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| One hot quiz, 1 node | 1,000 | 5,991 | 111.7 | 195.2 | 202.1 | 26.2 | 123 | 30.6 | 0 | 9.8 (4) | `20261002T015133874705Z-hot-1node-1000.json`, `20261002T015125572903Z-hot-1node-1000-nodes.json` |
-| One hot quiz, 1 node | 2,500 | 14,025 | 126.2 | 218.5 | 385.4 | 63.8 | 197 | 254.6 | 0 | 17.2 (6) | `20261002T015548565474Z-hot-1node-2500.json`, `20261002T015539887204Z-hot-1node-2500-nodes.json` |
-| One hot quiz, 2 nodes | 5,000 | 29,327 | 121.7 | 200.8 | 418.6 | 63.8, 63.7 | 194, 205 | 320.9 | 0 | 23.4 (10) | `20261002T015941299620Z-hot-2node-5000.json`, `20261002T015933705982Z-hot-2node-5000-nodes.json` |
-| 500 quizzes × 10 players, 2 nodes | 5,000 | 8,925 | 91.7 | 191.3 | 237.5 | 74.4, 73.5 | 244, 242 | 394.6 | 0 | 10.0 (10) | `20261002T020339231432Z-many-2node-500x10.json`, `20261002T020329823078Z-many-2node-500x10-nodes.json` |
+| Scenario | Connections | Msg/s | p50 ms | p95 ms | p99 ms | CPU % | RSS MB | Answer p99 ms | Missing samples | Completion | Below 500 ms (`slo_met`) | Bots' CPU % (procs) | Result files in `load/results/` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| One hot quiz, 1 node | 1,000 | 5,942 | 116.5 | 195.9 | 205.4 | 31.2 | 121 | 41.7 | 0 | 1 | 100.00% (true) | 11.0 (4) | `20261002T070755572662Z-hot-1node-1000.json`, `20261002T070747368871Z-hot-1node-1000-nodes.json` |
+| One hot quiz, 1 node | 2,500 | 13,989 | 128.0 | 218.5 | 363.9 | 62.7 | 197 | 243.4 | 0 | 1 | 99.99% (true) | 16.7 (6) | `20261002T071712779035Z-hot-1node-2500.json`, `20261002T071702549732Z-hot-1node-2500-nodes.json` |
+| One hot quiz, 2 nodes | 5,000 | 29,463 | 119.9 | 199.4 | 408.6 | 72.8, 71.0 | 202, 208 | 345.6 | 0 | 1 | 99.94% (true) | 24.9 (10) | `20261002T072125990027Z-hot-2node-5000.json`, `20261002T072118251231Z-hot-2node-5000-nodes.json` |
+| 500 quizzes × 10 players, 2 nodes | 5,000 | 8,802 | 89.7 | 192.6 | 384.4 | 77.1, 75.0 | 242, 244 | 438.3 | 0 | 1 | 99.32% (true) | 9.9 (10) | `20261002T072542653053Z-many-2node-500x10.json`, `20261002T072534161765Z-many-2node-500x10-nodes.json` |
 
-**C5 is met**: the p99 stays below 500 ms in every run, 419 ms in the worst. The p50 of about
-120 ms in one hot quiz is the tick: a new total waits on average half of the 200 ms tick. The
-tail grows with the node's CPU, so the margin at 2,500 sockets per node in one hot quiz is small.
+**C5 is met**: the p99 stays below 500 ms in every run, 409 ms in the worst, and every run
+delivers at least 99 % of updates below 500 ms (99.32 % in the many-quizzes run, the least
+margin). The p50 of about 120 ms in one hot quiz is the tick: a new total waits on average half
+of the 200 ms tick. The tail grows with the node's CPU, so the margin at 2,500 sockets per node in one hot quiz is small.
 
 **Steady-state memory per socket** = `(peak RSS − idle RSS) / sockets on the node`, with the
 idle RSS taken before the run (in the `-nodes.json` files): 1,000 sockets
-`(123.0 − 57.0) MiB / 1,000` = 68 KiB; 2,500 sockets `(197.0 − 58.6) MiB / 2,500` = 57 KiB; the
-two-node hot quiz 55 and 59 KiB; 500 quizzes 75 KiB on each node (each served quiz adds its own
+`(121.0 − 56.5) MiB / 1,000` = 66 KiB; 2,500 sockets `(196.7 − 55.6) MiB / 2,500` = 58 KiB; the
+two-node hot quiz 60 and 61 KiB; 500 quizzes 76 KiB on each node (each served quiz adds its own
 state and a Redis subscription). The two-node figures assume an even split of 2,500 sockets per
 node: nginx balances requests round-robin and no result file counts sockets per node, but the
 nodes' near-equal CPU and memory growth agree with it. That is about a tenth of the 634 KiB per socket that the buffer bounds
