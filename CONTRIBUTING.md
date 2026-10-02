@@ -75,8 +75,11 @@ The make targets and the system and browser tests of that checkout then use its 
 read `.env`. Both checkouts build the same `elsaquiz-api:dev` and `elsaquiz-web:dev` images; to
 run different code in the second, add `IMAGE_TAG=b` to its `.env` for compose and pass it to
 `make build` and `make demo` too (`make build IMAGE_TAG=b`), which take the tag from the command
-line or the shell, not from `.env`. The development Redis of `make up` always takes
-`127.0.0.1:6381`, so only one checkout can run it at a time.
+line or the shell, not from `.env`. Two more things stay shared: the bots image of `make demo`
+(`elsaquiz-load`, which has no tag) and the two named volumes of `make ui-check` that hold its
+Linux `node_modules`, so run `make demo` or `make ui-check` in one checkout at a time. The
+development Redis of `make up` always takes `127.0.0.1:6381`, so only one checkout can run it at
+a time.
 
 ## Develop without Docker
 
