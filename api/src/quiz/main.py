@@ -158,13 +158,23 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         services.settings, services.tickets, services.service, services.store
     )
     app.add_api_websocket_route("/ws", gateway.endpoint)
-    ticker = Ticker(services.store, gateway.registry, services.service, services.settings.node_id)
+    s = services.settings
+    max_quizzes = s.redis_max_connections if s.store == "redis" else None  # one subscription each
+    ticker = Ticker(
+        services.store,
+        gateway.registry,
+        services.service,
+        s.node_id,
+        monotonic_ms,
+        max_quizzes=max_quizzes,
+    )
     gateway.registry.watcher = ticker
+    services.service.admission = ticker.admission
     services.shutdown.append(ticker.stop)  # stop hooks run in reverse: before the store closes
     renewer = PresenceRenewer(services.store, gateway.registry, services.settings.grace_ms)
     services.startup.append(renewer.start)
     services.shutdown.append(renewer.stop)
-    s, ttl_ms = services.settings, TICKET_TTL_S * 1000
+    ttl_ms = TICKET_TTL_S * 1000
     token = s.admin_token.get_secret_value() if s.admin_mock and s.admin_token else None
     limit = address_limiter(s.per_ip_conn_cap, monotonic_ms)
     deps = HttpDeps(services.store, services.tickets, services.bank, services.ready, ttl_ms, limit)

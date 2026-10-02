@@ -1,24 +1,24 @@
 # AI-ASSISTED: the Redis store: one Lua script per port method; the feed is events plus control.
 """The store port on Redis. Scripts read the Redis clock; Python passes no time or points.
 
-The client must decode responses (``decode_responses=True``). A redis-py connection or
-timeout error leaves as the built-in ``ConnectionError`` or ``TimeoutError``, so callers
-need no redis import to tell an unreachable store from a fault.
+The client must decode responses (``decode_responses=True``). An unreachable store, or one
+that refuses writes, leaves as the built-in ``ConnectionError`` or ``TimeoutError``
+(``quiz.adapters.redis_outage``), so callers need no redis import to tell it from a fault.
 """
 
 import json
-from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Sequence
-from contextlib import aclosing, asynccontextmanager, contextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import replace
 from itertools import chain
 from typing import Literal, cast
 
-from redis import exceptions as redis_errors
 from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
 
 from quiz.adapters.redis.keys import quiz_keys
 from quiz.adapters.redis.scripts import Reply, Scripts
+from quiz.adapters.redis_outage import reachable
 from quiz.contracts.messages import FULL_LIST_MAX
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.events import AnswerScored
@@ -41,19 +41,8 @@ def _ok(name: str, reply: Reply) -> Reply:
     raise DomainError(code, f"{name} refused", end_seq=None if end is None else int(end))
 
 
-@contextmanager
-def _reachable() -> Iterator[None]:
-    """Re-raise redis-py's connection and timeout errors as the built-in ones."""
-    try:
-        yield
-    except redis_errors.TimeoutError as error:
-        raise TimeoutError(str(error)) from error
-    except redis_errors.ConnectionError as error:
-        raise ConnectionError(str(error)) from error
-
-
 async def _messages(pubsub: PubSub) -> AsyncGenerator[str]:
-    with _reachable():
+    with reachable():
         async for message in pubsub.listen():
             if message["type"] == "message":
                 yield message["data"]
@@ -85,7 +74,7 @@ class RedisStore:
         self, name: str, quiz_id: str, *args: str | int, on: Redis | None = None
     ) -> Reply:
         keys = quiz_keys(quiz_id, self._prefix)
-        with _reachable():
+        with reachable():
             reply = await self._scripts.call(name, keys, *args, on=on)
         return _ok(name, reply)
 
@@ -182,12 +171,12 @@ class RedisStore:
         return port.Page(snap.at_seq, snap.player_count, snap.status == "ended", snap.rows)
 
     async def bank_quiz_id(self, quiz_id: str) -> str:
-        with _reachable():
+        with reachable():
             bank = await self._client.hget(quiz_keys(quiz_id, self._prefix).meta, "bankQuizId")
         return quiz_id if bank is None else str(bank)
 
     async def read_seq(self, quiz_id: str) -> int | None:
-        with _reachable():
+        with reachable():
             seq = await self._client.get(quiz_keys(quiz_id, self._prefix).seq)
         return None if seq is None else int(seq)
 
@@ -224,7 +213,7 @@ class RedisStore:
         keys, pubsub = quiz_keys(quiz_id, self._prefix), self._subscriber.pubsub()
         try:
             async with aclosing(_messages(pubsub)) as messages:
-                with _reachable():
+                with reachable():
                     await pubsub.subscribe(keys.events, keys.control)
                     for _ in range(2):  # one confirmation per channel
                         if await pubsub.get_message(timeout=SUBSCRIBE_TIMEOUT_S) is None:
@@ -257,7 +246,7 @@ class RedisStore:
 
     async def _fsynced(self, conn: Redis) -> int:
         """``WAITAOF 1 0 2000`` on ``conn``: 1 when the local AOF fsync covers its writes."""
-        with _reachable():
+        with reachable():
             local, _replicas = await conn.waitaof(1, 0, WAITAOF_TIMEOUT_MS)
         return int(local)
 

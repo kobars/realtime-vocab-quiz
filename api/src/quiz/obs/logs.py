@@ -62,6 +62,21 @@ def _line_writer(stream: TextIO | None) -> Write:
     return to_stream
 
 
+class Throttle:
+    """``due()`` is true at most once per ``interval_ms`` of ``clock``: one line for a burst."""
+
+    def __init__(self, clock: Callable[[], int], interval_ms: int) -> None:
+        self._clock, self._interval_ms = clock, interval_ms
+        self._last_ms: int | None = None
+
+    def due(self) -> bool:
+        now = self._clock()
+        if self._last_ms is not None and now - self._last_ms < self._interval_ms:
+            return False
+        self._last_ms = now
+        return True
+
+
 class _Writer(QueueListener):
     """Writes each queued line itself, with no ``logging.Handler`` in between: ``logging.shutdown``
     takes every handler's lock at exit, and a handler blocked on a stalled reader holds it."""

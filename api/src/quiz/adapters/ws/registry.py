@@ -10,7 +10,8 @@ connection id, so the store alone decides whether the socket still holds the pre
 or a replacing join makes the older socket's leave stale, and a read-only join (after the end)
 writes no presence, so the earlier socket's leave still removes it. A socket that joined while
 open keeps its leave even if it joins again after the end (docs/spec/redis.md §3, §3.1).
-The watcher hears when a quiz gets its first local socket and when it loses its last."""
+The watcher hears when a quiz gets its first local socket and each later writable join, which
+makes sure the quiz's loop runs, and when the quiz loses its last local socket."""
 
 import asyncio
 import logging
@@ -55,8 +56,8 @@ class Registry:
         players = self._players.setdefault(quiz_id, {})
         if sender.close_code is None:  # a replaced socket's late join must not take it back
             players[conn.user_id] = sender
-        if first and self.watcher is not None:
-            self.watcher.open(quiz_id)
+        if (first or not conn.read_only) and self.watcher is not None:
+            self.watcher.open(quiz_id)  # also restarts a loop that ended: the id was created again
 
     def senders(self, quiz_id: str) -> list[Sender]:
         return [sender for _, sender in self._quizzes.get(quiz_id, {}).values()]

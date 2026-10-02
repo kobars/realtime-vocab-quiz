@@ -1,5 +1,5 @@
-# AI-ASSISTED: the HTTP edge: an end that was not announced, an unhandled error, the identity limit,
-# public quiz info without a ranking.
+# AI-ASSISTED: the HTTP edge: an end that was not announced, an unhandled error, Redis refusing
+# writes, the identity limit, public quiz info without a ranking.
 import io
 import json
 from collections.abc import AsyncIterator
@@ -8,6 +8,7 @@ from typing import Literal
 import httpx
 import pytest
 from fastapi import FastAPI
+from redis import exceptions as redis_errors
 
 from quiz.adapters.memory import store as memory_store
 from quiz.config import Settings
@@ -67,6 +68,35 @@ async def test_an_unhandled_error_answers_500_with_the_request_id(
     assert "RuntimeError: boom" in error["exception"]
     [served] = [line for line in lines if line["event"] == "http_request"]
     assert (served["status"], served["request_id"]) == (500, "req-9")
+
+
+class RefusingRedis:  # the ticket store's commands, each refused with ``error``
+    def __init__(self, error: redis_errors.ResponseError) -> None:
+        self.error = error
+
+    async def set(self, *_: object, **__: object) -> None:
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [
+        (redis_errors.ReadOnlyError("You can't write against a read only replica."), 503),
+        (redis_errors.OutOfMemoryError("command not allowed when used memory > 'maxmemory'."), 503),
+        (redis_errors.ResponseError("MISCONF Errors writing to the AOF file"), 503),
+        (redis_errors.ResponseError("WRONGTYPE Operation against a key"), 500),
+    ],
+    ids=["READONLY", "OOM", "MISCONF", "another reply error"],
+)
+async def test_redis_write_refusals_answer_503_and_other_reply_errors_500(
+    error: redis_errors.ResponseError, status: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(Settings(store="redis", redis_url="redis://127.0.0.1:1/0"))
+    monkeypatch.setattr(services_of(app).tickets, "_redis", RefusingRedis(error))
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+        resp = await http.post("/sessions", json={"displayName": "Ana"})
+    assert resp.status_code == status
 
 
 async def test_sessions_and_tickets_share_one_limit_per_client_address() -> None:
