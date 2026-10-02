@@ -1,4 +1,5 @@
 # AI-ASSISTED: the composition root: store choice, lifespan hooks and the liveness route.
+import asyncio
 import time
 from typing import Literal
 
@@ -32,8 +33,20 @@ def test_redis_store_is_built_without_connecting() -> None:
     services = services_of(create_app(Settings(store="redis", redis_url="redis://unused:1/0")))
     assert isinstance(services.store, RedisStore)
     assert isinstance(services.tickets, RedisTicketStore)
-    assert len(services.startup) == 1  # load the scripts
-    assert len(services.shutdown) == 2  # close the client; stop the fan-out, which runs first
+    assert len(services.startup) == 2  # load the scripts, then start the presence renewal
+    assert len(services.shutdown) == 3  # close the client; stop the fan-out and the renewal first
+
+
+async def test_the_presence_renewal_runs_while_the_app_runs() -> None:
+    app = create_app(Settings())
+
+    def renewing() -> bool:
+        loops = (getattr(t.get_coro(), "__qualname__", "") for t in asyncio.all_tasks())
+        return "PresenceRenewer._run" in loops
+
+    async with app.router.lifespan_context(app):
+        assert renewing()
+    assert not renewing()
 
 
 async def test_hooks_run_in_order_and_shutdown_runs_after_a_failed_start() -> None:
