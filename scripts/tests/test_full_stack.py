@@ -64,11 +64,7 @@ def test_two_api_nodes_with_distinct_ids_share_one_redis_and_trust_only_the_stac
     assert [env["NODE_ID"] for env in nodes] == ["api-1", "api-2"]
     assert nodes[0] | {"NODE_ID": None} == nodes[1] | {"NODE_ID": None}
     assert nodes[0]["ADMIN_TOKEN"].startswith("${ADMIN_TOKEN:?")
-    redis_waits = (
-        "REDIS_POOL_TIMEOUT_MS",
-        "REDIS_SOCKET_TIMEOUT_MS",
-        "REDIS_CONNECT_TIMEOUT_MS",
-    )
+    redis_waits = ("REDIS_POOL_TIMEOUT_MS", "REDIS_SOCKET_TIMEOUT_MS", "REDIS_CONNECT_TIMEOUT_MS")
     for name in ("PER_IP_CONN_CAP", *redis_waits):
         assert nodes[0][name] is None  # passed through from .env, unset by default
     assert "${REDIS_PASSWORD:?" in nodes[0]["REDIS_URL"]
@@ -88,13 +84,7 @@ def test_the_nodes_take_the_redis_pool_size_from_env_with_the_settings_default()
 def test_the_access_log_never_records_the_query_string() -> None:
     (log_format,) = re.findall(r"log_format edge ([^;]+);", NGINX)
     assert "$uri" in log_format
-    for variable in (
-        "$request ",
-        "$request_uri",
-        "$args",
-        "$query_string",
-        "$http_referer",
-    ):
+    for variable in ("$request ", "$request_uri", "$args", "$query_string", "$http_referer"):
         assert variable not in log_format
     assert _directive("access_log") == ["/dev/stdout edge"]
 
@@ -110,10 +100,7 @@ def test_the_edge_holds_thousands_of_sockets_and_outlives_the_heartbeat() -> Non
 def test_a_refused_upgrade_is_not_replayed_and_a_503_takes_no_node_out() -> None:
     """The node redeems the single-use ticket before its caps answer 503."""
     (ws,) = re.findall(r"location = /ws \{(.*?)\n        \}", NGINX, re.DOTALL)
-    assert _directive("proxy_next_upstream") == [
-        "error timeout http_503",
-        "error timeout",
-    ]
+    assert _directive("proxy_next_upstream") == ["error timeout http_503", "error timeout"]
     assert "proxy_next_upstream error timeout;" in ws
     assert _directive("server api-[12]:8000") == ["resolve max_fails=0"] * 2
 
@@ -184,11 +171,7 @@ def test_caddy_is_hardened_and_never_on_the_stack_network() -> None:
     for key in ("read_only", "tmpfs", "cap_drop", "security_opt", "ulimits", "restart"):
         assert caddy[key] == FULL["nginx"][key]
     assert caddy["cap_add"] == ["NET_BIND_SERVICE"]
-    assert caddy["user"].split(":")[0] not in (
-        "",
-        "0",
-        "root",
-    )  # the image's default is root
+    assert caddy["user"].split(":")[0] not in ("", "0", "root")  # the image's default is root
     assert caddy["networks"] == ["edge"]  # apart from Redis and the API nodes
     assert PROD["services"]["nginx"]["networks"] == ["stack", "edge"]
 

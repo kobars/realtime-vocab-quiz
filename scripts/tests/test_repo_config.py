@@ -74,11 +74,7 @@ GATE_FAILS = "- if: contains(needs.*.result, 'failure') || contains(needs.*.resu
 @pytest.mark.parametrize(
     ("workflow", "gate", "needs"),
     [
-        (
-            "ci.yml",
-            "ci-required",
-            "[check, integration, ui, coverage, guards, review-budget]",
-        ),
+        ("ci.yml", "ci-required", "[check, integration, ui, coverage, guards, review-budget]"),
         (
             "security.yml",
             "security-required",
@@ -134,9 +130,7 @@ def _make_dry_run(target: str, *variables: str) -> str:
     ).stdout
 
 
-def test_test_steps_write_junit_reports_only_when_reports_is_set(
-    tmp_path: Path,
-) -> None:
+def test_test_steps_write_junit_reports_only_when_reports_is_set(tmp_path: Path) -> None:
     reports = tmp_path / "reports"
     commands = "".join(
         _make_dry_run(target, f"REPORTS={reports}") for target in ("check", "test-integration")
@@ -274,7 +268,9 @@ def test_only_the_publish_jobs_can_write_packages_after_every_check_and_scan() -
     publish = _section(path, "publish", 2)
     tags = _section(path, "publish-tags", 2)
     # Never on a pull request or in a fork.
-    only_here = "if: github.event_name == 'push' && github.repository == 'kobars/realtime-vocab-quiz'"
+    only_here = (
+        "if: github.event_name == 'push' && github.repository == 'kobars/realtime-vocab-quiz'"
+    )
     assert only_here in publish
     assert only_here in tags
     assert "needs: [config, images]" in publish
@@ -343,9 +339,7 @@ def test_make_check_lints_the_workflows() -> None:
     assert any("$(ZIZMOR)" in line for line in recipe)
 
 
-def test_workflow_lint_runs_the_locked_shellcheck_on_run_scripts(
-    tmp_path: Path,
-) -> None:
+def test_workflow_lint_runs_the_locked_shellcheck_on_run_scripts(tmp_path: Path) -> None:
     """actionlint skips shellcheck when it is not on PATH; the dev group locks one."""
     workflow = tmp_path / "probe.yml"
     workflow.write_text(
@@ -442,9 +436,7 @@ def test_make_check_runs_the_dependency_check_on_every_python_root() -> None:
     assert roots == ["tests", "../scripts", "../load"]
 
 
-def test_tool_dependency_check_fails_on_missing_and_transitive_imports(
-    tmp_path: Path,
-) -> None:
+def test_tool_dependency_check_fails_on_missing_and_transitive_imports(tmp_path: Path) -> None:
     # A folder named tests is skipped by deptry's default exclude; the step must still scan it.
     probe = tmp_path / "tests" / "test_probe.py"
     probe.parent.mkdir()
@@ -468,9 +460,7 @@ def test_dependency_check_fails_when_src_imports_pydantic_core(tmp_path: Path) -
     assert "DEP003 'pydantic_core' imported but it is a transitive dependency" in result.stderr
 
 
-def test_dependency_check_fails_when_a_direct_import_is_undeclared(
-    tmp_path: Path,
-) -> None:
+def test_dependency_check_fails_when_a_direct_import_is_undeclared(tmp_path: Path) -> None:
     # src imports starlette directly; without its own entry it only arrives through fastapi.
     config, removed = re.subn(
         r'^\s*"starlette[^"]*",\n',
