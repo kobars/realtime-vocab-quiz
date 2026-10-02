@@ -107,8 +107,17 @@ trap 'docker rm --force "$redis" >/dev/null 2>&1; docker network rm "$network" >
 docker network create "$network" >/dev/null
 # The Redis that compose runs (scripts/tests/test_images.py keeps them the same).
 docker run --detach --name "$redis" --network "$network" redis:8.10-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0 >/dev/null
+redis_up=""
 for _ in $(seq 15); do
-  docker exec "$redis" redis-cli ping >/dev/null 2>&1 && break
+  if docker exec "$redis" redis-cli ping >/dev/null 2>&1; then
+    redis_up=1
+    break
+  fi
   sleep 1
 done
+if [[ -z "$redis_up" ]]; then
+  echo "the smoke test's Redis did not answer PING within 15 s" >&2
+  docker logs "$redis" >&2
+  exit 1
+fi
 smoke "elsaquiz-api:$tag" check_ready --network "$network" -e "REDIS_URL=redis://${redis}:6379/0"

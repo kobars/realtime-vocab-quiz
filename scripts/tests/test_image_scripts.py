@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # set. `docker inspect` fails, unless $RESPONSE names a file: then every container whose name
 # lacks $UNHEALTHY is healthy, has one hashed asset and answers each request with that file. The
 # API image's store is $STORE (default redis) and its Lua scripts are the lines of $LUA_FILES.
+# The smoke test's Redis answers PING unless $REDIS_DOWN is set.
 FAKE_DOCKER = """#!/usr/bin/env bash
 echo "$*" >> "$DOCKER_LOG"
 case "$*" in
@@ -28,6 +29,7 @@ case "$*" in
   "exec "*" find "*) echo /usr/share/nginx/html/assets/index-abc.js ;;
   "exec "*" curl "*) cat "$RESPONSE" ;;
   *"print(Settings().store)"*) echo "${STORE:-redis}" ;;
+  *" redis-cli ping") [[ -z "${REDIS_DOWN:-}" ]] || exit 1 ;;
   *"rglob('*.lua')"*) cat "${LUA_FILES:-/dev/null}" ;;
 esac
 """
@@ -221,3 +223,22 @@ def test_smoke_fails_when_the_api_image_defaults_to_the_memory_store(tmp_path: P
     code, _, stderr = _run("smoke_images.sh", ROOT, tmp_path, env_extra=env)
     assert code != 0
     assert "elsaquiz-api:ci defaults to STORE=memory, not redis" in stderr
+
+
+def test_smoke_stops_when_its_redis_never_answers(tmp_path: Path) -> None:
+    """A clear error, not an API node started against a Redis that is not there."""
+    fast = tmp_path / "fast"
+    fast.mkdir()
+    (fast / "sleep").write_text("#!/bin/sh\n", encoding="utf-8")  # no 15 s wait in the test
+    (fast / "sleep").chmod(0o755)
+    path = f"{tmp_path / 'bin'}{os.pathsep}{fast}{os.pathsep}{os.environ['PATH']}"
+    env = _passing(tmp_path) | {"REDIS_DOWN": "1", "PATH": path}
+    code, calls, stderr = _run("smoke_images.sh", ROOT, tmp_path, env_extra=env)
+    assert code != 0
+    assert "Redis did not answer PING within 15 s" in stderr
+    assert not [c for c in calls if c.startswith("run --detach") and "elsaquiz-api" in c]
+    (network,) = [c.split()[-1] for c in calls if c.startswith("network create ")]
+    assert calls[-2:] == [
+        f"rm --force {network.replace('smoke-', 'smoke-redis-')}",
+        f"network rm {network}",
+    ]
