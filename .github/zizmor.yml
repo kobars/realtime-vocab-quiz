@@ -4,3 +4,6 @@ rules:
     config:
       policies:
         "*": hash-pin
+  # The `$/` form it suggests for the in-repository workflow is rejected by actionlint 1.7.12.
+  self-repository:
+    disable: true
