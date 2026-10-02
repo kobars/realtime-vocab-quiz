@@ -297,11 +297,12 @@ answer). `flyctl logs --app <prefix>-api` follows a node's logs (also `-web`, `-
 
 **Back up Redis.** Fly snapshots the volume every day and keeps each snapshot 5 days;
 `flyctl volumes list --app <prefix>-redis` shows its ID, and `flyctl volumes snapshots create
-<volume id>` takes one now. For a copy off Fly, write a snapshot and download it:
+<volume id>` takes one now. For a copy off Fly, write a snapshot and download it
+(`redis-cli --rdb` returns once the whole snapshot is written, unlike `BGSAVE`):
 
 ```bash
-flyctl ssh console --app myquiz-redis -C 'sh -c "REDISCLI_AUTH=\$REDIS_PASSWORD redis-cli BGSAVE"'
-flyctl ssh sftp get --app myquiz-redis /data/redis/dump.rdb quiz-dump.rdb
+flyctl ssh console --app myquiz-redis -C 'sh -c "REDISCLI_AUTH=\$REDIS_PASSWORD redis-cli --rdb /data/redis/quiz-dump.rdb"'
+flyctl ssh sftp get --app myquiz-redis /data/redis/quiz-dump.rdb quiz-dump.rdb
 ```
 
 **Tear down.** `make fly-destroy` lists the three apps and deletes them, with their Machines, the
