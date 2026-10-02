@@ -1,9 +1,10 @@
-// AI-ASSISTED: the client routes: join at `/`, the quiz at `/quiz/:quizId` (only for the joined quiz, which a reload joins again), the share link and a 404 page.
+// AI-ASSISTED: the client routes: join at `/`, hosting at `/host`, the quiz at `/quiz/:quizId` (only for the joined quiz, which a reload joins again), the share link and a 404 page.
 import { createRouter, createWebHistory, type RouteRecordRaw, type RouterHistory } from 'vue-router'
 import { useQuizStore } from '@/stores/quiz'
 
 export const routes: RouteRecordRaw[] = [
   { path: '/', name: 'join', component: () => import('@/views/JoinView.vue') },
+  { path: '/host', name: 'host', component: () => import('@/views/HostView.vue') },
   {
     path: '/quiz/:quizId',
     name: 'quiz',

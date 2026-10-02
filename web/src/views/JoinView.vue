@@ -1,8 +1,9 @@
-<!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link, the quiz preview (a miss also announced) and the join (with the busy retry, the blocking card and the rejoin after a reload), a link back to the quiz this tab is still in, in a clay card over the hero decoration (UI spec §3.1). -->
+<!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link, the quiz preview (a miss also announced) and the join (with the busy retry, the blocking card and the rejoin after a reload), a link back to the quiz this tab is still in, a quiet "Host a quiz" link when the server offers hosting, in a clay card over the hero decoration (UI spec §3.1). -->
 <script setup lang="ts">
 import { LoaderCircle } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { fetchBanks } from '@/components/host/hosting'
 import JoinField from '@/components/join/JoinField.vue'
 import QuizPreviewCard from '@/components/join/QuizPreviewCard.vue'
 import { fetchQuizPreview, type PreviewResult } from '@/components/join/preview'
@@ -38,6 +39,11 @@ let mounted = true
 onBeforeUnmount(() => {
   mounted = false
 })
+/** The host link shows only once the server lists question sets to host (a 404 means hosting is off). */
+const hostable = ref(false)
+void fetchBanks().then((result) => {
+  if (mounted) hostable.value = result.kind === 'ok'
+})
 
 const idField = useTemplateRef<{ focus: () => void }>('idField')
 const nameField = useTemplateRef<{ focus: () => void }>('nameField')
@@ -72,7 +78,14 @@ function checkId(): boolean {
   return idError.value === null
 }
 
+/**
+ * A field left empty is flagged by the submit, not on blur: a message added on blur would push down what the
+ * pointer is pressing (the "Host a quiz" link) between mousedown and mouseup, and the click would be lost.
+ */
+const leftEmpty = (value: string, error: string | null) => value.trim() === '' && error === null
+
 function onIdBlur(): void {
+  if (leftEmpty(quizId.value, idError.value)) return
   if (!checkId()) return
   void loadPreview(quizId.value)
   // Leaving the field again without an edit keeps the answer of the lookup already made.
@@ -84,6 +97,11 @@ function onNameInput(value: string): void {
 }
 
 function onNameBlur(): void {
+  if (leftEmpty(name.value, nameError.value)) return
+  checkName()
+}
+
+function checkName(): void {
   name.value = name.value.trim()
   nameError.value = displayNameError(name.value)
 }
@@ -92,7 +110,7 @@ async function submit(): Promise<void> {
   if (joining.value) return
   joinFailed.value = false
   checkId()
-  onNameBlur()
+  checkName()
   if (idError.value !== null) return focus(idField)
   if (nameError.value !== null) return focus(nameField)
   joining.value = true
@@ -283,5 +301,21 @@ watch(
         </Button>
       </form>
     </Card>
+    <p
+      v-if="hostable"
+      data-test="host-entry"
+      class="flex flex-wrap items-center gap-x-2 text-muted-foreground"
+    >
+      {{ strings.join.hostPrompt }}
+      <Button
+        as-child
+        variant="link"
+        class="px-0"
+      >
+        <RouterLink :to="{ name: 'host' }">
+          {{ strings.join.host }}
+        </RouterLink>
+      </Button>
+    </p>
   </section>
 </template>

@@ -2,7 +2,7 @@
 import { expect, type Page, test } from '@playwright/test'
 import { strings } from '../../src/strings'
 import { CORRECT, ME, QUESTION_COUNT, QUIZ_ID } from './frames'
-import { mockBackend, type Scenario } from './server'
+import { HOSTED_ID, HOSTED_PLAYERS, mockBackend, type Scenario } from './server'
 
 export interface Screen {
   name: string
@@ -35,6 +35,13 @@ async function answer(page: Page, choice: number): Promise<void> {
   await openQuestion(page)
   await page.locator(`[data-choice="${choice}"]`).click()
   await expect(page.getByTestId('feedback')).toBeVisible()
+}
+
+async function hostQuiz(page: Page): Promise<void> {
+  await mockBackend(page)
+  await page.goto('/host')
+  await page.locator('[data-bank="VOCAB-42"]').click()
+  await expect(page.getByTestId('players')).toHaveText(strings.host.players(HOSTED_PLAYERS))
 }
 
 export const SCREENS: Screen[] = [
@@ -91,6 +98,41 @@ export const SCREENS: Screen[] = [
     reach: async (page) => {
       await joinQuiz(page, { ended: true })
       await expect(page.getByRole('heading', { name: strings.results.title })).toBeFocused()
+    },
+  },
+  {
+    name: 'host',
+    reach: async (page) => {
+      await mockBackend(page)
+      await page.goto('/host')
+      await expect(page.locator('[data-bank]')).toHaveCount(3)
+    },
+  },
+  {
+    name: 'host-created',
+    reach: async (page) => {
+      await hostQuiz(page)
+      await expect(page.getByTestId('host-quiz-id')).toHaveText(HOSTED_ID)
+    },
+  },
+  {
+    name: 'host-confirm',
+    reach: async (page) => {
+      await hostQuiz(page)
+      await page.getByTestId('end').click()
+      await expect(page.getByTestId('keep-open')).toBeFocused()
+      // The click leaves the pointer over the box that replaced the button, and the focus scrolled it into view.
+      await page.mouse.move(0, 0)
+      await page.evaluate(() => window.scrollTo(0, 0))
+    },
+  },
+  {
+    name: 'host-ended',
+    reach: async (page) => {
+      await hostQuiz(page)
+      await page.getByTestId('end').click()
+      await page.getByTestId('confirm').click()
+      await expect(page.getByRole('heading', { name: strings.host.ended(HOSTED_ID) })).toBeFocused()
     },
   },
   {
