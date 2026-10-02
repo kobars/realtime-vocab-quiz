@@ -383,6 +383,8 @@ def test_the_fly_edge_is_the_vm_edge_with_only_the_fly_lines_changed() -> None:
         "    real_ip_header Fly-Client-IP;",
         "    resolver [fdaa::3] valid=5s ipv6=on;",
         "        server ${QUIZ_API_HOST}:8000 resolve max_fails=0;",
+        "    include /etc/nginx/mime.types;",
+        "    default_type application/octet-stream;",
         "    include /etc/nginx/conf.d/default.conf;",
         "        server 127.0.0.1:8080;",
         "        listen 8081;",
@@ -438,6 +440,9 @@ def test_the_rendered_fly_edge_passes_nginx_t_and_trusts_only_flys_proxy() -> No
         "real_ip_header Fly-Client-IP;",
     ]
     assert "server myquiz-api.flycast:8000 resolve max_fails=0;" in lines
+    # The site's scripts and stylesheets go out with their content types.
+    assert "# configuration file /etc/nginx/mime.types:" in lines
+    assert any(re.fullmatch(r"application/javascript\s+js;", line) for line in lines)
     assert (
         "log_format edge '$remote_addr [$time_local] \"$request_method $uri $server_protocol\" '"
         in lines
