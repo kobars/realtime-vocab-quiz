@@ -179,7 +179,8 @@ def test_launch_creates_everything_once_and_keeps_the_secrets(tmp_path: Path) ->
     code, calls, out = _run(
         tmp_path,
         "launch",
-        APPS="other \t\nmyquiz-redis \t\nmyquiz-api \t\nmyquiz-web \t\n",  # padded, as flyctl prints them
+        # Padded with blanks, as flyctl prints them.
+        APPS="other \t\nmyquiz-redis \t\nmyquiz-api \t\nmyquiz-web \t\n",
         VOLUMES='[{"id": "vol_1", "Name": "redis_data"}]',
         API_IPS='[{"Address": "fdaa:0:1::5", "Type": "private_v6"}]',
         WEB_IPS='[{"Type": "shared_v4"}, {"Type": "v6"}]',
