@@ -37,7 +37,7 @@ These rules apply to every change, whether a person or a coding agent makes it.
   `# AI-ASSISTED: <summary>` (Python, Makefile), `-- AI-ASSISTED: <summary>` (Lua),
   `// AI-ASSISTED: <summary>` (TypeScript), `<!-- AI-ASSISTED: <summary> -->` (Vue templates),
   or `AI-ASSISTED-BEGIN` … `AI-ASSISTED-END` around a block.
-- Every commit ends with the trailer `AI-Assisted: Claude Code (<model>)`.
+- Every commit carries the trailer `AI-Assisted: Claude Code (<model>)` in its trailer block.
 - Every PR has an AI-LOG entry `docs/ai-log/PR-<n>.md`, where `<n>` is the GitHub PR number.
   Write it by hand from `docs/ai-log/TEMPLATE.md` right after `gh pr create`, commit it and push
   again. Record real mistakes only, and name a test file that exists under **Verification**.
