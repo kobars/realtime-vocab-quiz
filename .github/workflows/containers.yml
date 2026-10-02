@@ -61,6 +61,7 @@ jobs:
         with:
           persist-credentials: false
       - run: make build
+        id: build
       - name: non-root, read-only smoke test
         run: scripts/smoke_images.sh "$IMAGE_TAG"
       - name: nginx -t
@@ -77,14 +78,13 @@ jobs:
           limit-severities-for-sarif: true
       - name: trivy image (web)
         # Scans the web image even when the api scan fails, so the scheduled upload has both.
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: elsaquiz-web:${{ env.IMAGE_TAG }}
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
-          skip-setup-trivy: true
           format: ${{ env.TRIVY_FORMAT }}
           output: ${{ github.event_name == 'schedule' && 'trivy-web.sarif' || '' }}
           limit-severities-for-sarif: true

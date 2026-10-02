@@ -216,6 +216,17 @@ def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
     assert workflow.count("severity: CRITICAL,HIGH") == 2
 
 
+def test_web_image_scan_runs_only_when_the_images_were_built() -> None:
+    images = _section(WORKFLOWS / "containers.yml", "images", 2)
+    build = images.index("- run: make build")
+    assert images[build + 1] == "id: build"
+    web_scan = images.index("- name: trivy image (web)")
+    condition = next(line for line in images[web_scan:] if line.startswith("if:"))
+    assert "steps.build.outcome == 'success'" in condition
+    # The api scan is skipped after a failed smoke test, so the web scan sets Trivy up itself.
+    assert "skip-setup-trivy: true" not in images
+
+
 def _audit_inputs() -> re.Pattern[str]:
     """Return the pattern of the changed paths that make a pull request run the audits."""
     lines = _section(WORKFLOWS / "security.yml", "audit-inputs", 2)
