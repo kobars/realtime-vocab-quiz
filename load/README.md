@@ -28,8 +28,9 @@ Two verdicts close the run. `valid` judges the measurement: each process reports
 peak RSS, and a run where any swarm process used more than 80% of a core is invalid, because then
 the swarm, not the server, sets the latency. `slo_met` judges the server: `slo_within` is the
 share of leaderboard updates delivered below 500 ms, where a missing or timed-out sample counts
-as a miss, so a run cannot pass on the samples that arrived alone, and `slo_met` is true when
-that share is at least 99%. The swarm exits with status 1 unless the run is valid and meets the
+as a miss, so a run cannot pass on the samples that arrived alone, and a total that a frame
+showed before its `answer_result` (`board_first`) counts as on time. `slo_met` is true when that
+share, unrounded, is at least 99%. The swarm exits with status 1 unless the run is valid and meets the
 SLO.
 
 Bots behave like the web client: every bot sends an `Origin` header, gets a fresh ticket before

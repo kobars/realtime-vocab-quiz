@@ -17,10 +17,13 @@ def percentile(sorted_ms: list[float], pct: float) -> float | None:
     return sorted_ms[max(0, math.ceil(pct / 100 * len(sorted_ms)) - 1)]
 
 
-def _share(part: int, samples: list[float], missing: int, timeouts: int) -> float | None:
-    """``part`` over every attempt: a missing or timed-out sample is a failed attempt."""
-    attempts = len(samples) + missing + timeouts
-    return round(part / attempts, 4) if attempts else None
+def _share(part: int, attempts: int) -> float | None:
+    """``part`` over ``attempts``, unrounded so a threshold compares the exact share."""
+    return part / attempts if attempts else None
+
+
+def _rounded(share: float | None) -> float | None:
+    return None if share is None else round(share, 4)
 
 
 def _latency(samples: list[float], missing: int, timeouts: int) -> dict[str, Any]:
@@ -32,7 +35,8 @@ def _latency(samples: list[float], missing: int, timeouts: int) -> dict[str, Any
         "max": ordered[-1] if ordered else None,
         "missing": missing,
         "timed_out": timeouts,
-        "completion": _share(len(ordered), ordered, missing, timeouts),
+        # a missing or timed-out sample is a failed attempt
+        "completion": _rounded(_share(len(ordered), len(ordered) + missing + timeouts)),
     }
 
 
@@ -48,7 +52,10 @@ def summary(rec: Recorder, procs: list[dict[str, float]], active_s: float) -> di
     if early := c["slots_ended_early"]:
         problems.append(f"{early} bot slots stopped at a quiz end before the deadline")
     board = (rec.board_ms, c["board_missing"], c["board_timeout"])
-    within = _share(sum(ms < SLO_MS for ms in rec.board_ms), *board)
+    # A total a frame showed before its answer_result was delivered as the interval began: on time.
+    first = c["board_first"]
+    on_time = sum(ms < SLO_MS for ms in rec.board_ms) + first
+    within = _share(on_time, len(rec.board_ms) + c["board_missing"] + c["board_timeout"] + first)
     return {
         "answer": _latency(rec.answer_ms, c["answer_missing"], c["answer_timeout"]),
         "leaderboard": _latency(*board),
@@ -58,7 +65,7 @@ def summary(rec: Recorder, procs: list[dict[str, float]], active_s: float) -> di
         "swarm": {"procs": procs, "cpu_pct_max": cpu},
         "problems": problems,
         "valid": not problems,
-        "slo_within": within,
+        "slo_within": _rounded(within),
         "slo_met": within is not None and within >= SLO_SHARE,
     }
 

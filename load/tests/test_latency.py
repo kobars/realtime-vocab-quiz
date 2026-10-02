@@ -67,3 +67,20 @@ def test_the_slo_needs_99_percent_of_updates_below_500_ms() -> None:
     unmeasured = summary(Recorder(answer_ms=[10.0]), [{"cpu_pct": 10.0, "rss_mb": 1}], 60)
     assert (unmeasured["slo_met"], unmeasured["slo_within"]) == (False, None)
     assert unmeasured["leaderboard"]["completion"] is None
+
+
+def test_a_share_just_below_99_percent_misses_the_slo() -> None:
+    rec = Recorder(answer_ms=[10.0], board_ms=[100.0] * 989)
+    rec.counts["board_missing"] = 10  # 989 of 999 on time: 98.9990%, not 99%
+    missed = summary(rec, [{"cpu_pct": 10.0, "rss_mb": 1}], 60)
+    assert (missed["slo_met"], missed["slo_within"]) == (False, 0.99)  # rounded for display only
+
+
+def test_a_total_shown_before_its_answer_result_counts_as_on_time() -> None:
+    rec = Recorder(answer_ms=[10.0], board_ms=[100.0] * 98 + [600.0])
+    rec.counts["board_first"] = 1  # 99 of 100 updates on time
+    assert summary(rec, [{"cpu_pct": 10.0, "rss_mb": 1}], 60)["slo_within"] == 0.99
+    assert summary(rec, [{"cpu_pct": 10.0, "rss_mb": 1}], 60)["slo_met"]
+    only_first = Recorder(answer_ms=[10.0])
+    only_first.counts["board_first"] = 5
+    assert summary(only_first, [{"cpu_pct": 10.0, "rss_mb": 1}], 60)["slo_met"]
