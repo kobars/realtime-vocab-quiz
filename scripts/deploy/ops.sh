@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# AI-ASSISTED: the public host's update with rollback, backup and restore (make prod-update,
-# make prod-backup, make prod-restore; docs/operations.md, "Deploy to a VM").
-# Usage: scripts/deploy/ops.sh update [REF] | backup [FILE] | restore FILE   (as root, on the VM)
+# AI-ASSISTED: the public host's start, update with rollback, backup and restore (make prod-up,
+# make prod-update, make prod-backup, make prod-restore; docs/operations.md, "Deploy to a VM").
+# Usage: scripts/deploy/ops.sh up | update [--build] [REF] | backup [FILE] | restore FILE
+#        | compose ARGS...   (as root, on the VM)
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=install.sh
 . "$(dirname "$0")/install.sh"
@@ -9,12 +10,52 @@ set -euo pipefail
 CALLER_DIR=$PWD
 cd "$(dirname "$0")/../.."
 
-# The Makefile exports its PROD_COMPOSE; run directly, the same two files.
-read -ra STACK <<<"${PROD_COMPOSE:-docker compose -f compose.yaml -f compose.prod.yaml}"
+API_IMAGE=ghcr.io/kobars/realtime-vocab-quiz-api
+WEB_IMAGE=ghcr.io/kobars/realtime-vocab-quiz-web
 
 from_caller() { if [[ $1 == /* ]]; then printf '%s\n' "$1"; else printf '%s/%s\n' "$CALLER_DIR" "$1"; fi; }
 
 ready() { wait_ready "$(env_value DOMAIN .env)" "$(env_value TLS_ISSUER .env)"; }
+
+# IMAGE_TAG from the environment (set but empty counts), else from .env. Empty: images built here.
+image_tag() {
+  if [[ -n ${IMAGE_TAG+set} ]]; then
+    printf '%s\n' "$IMAGE_TAG"
+  elif [[ -f .env ]]; then
+    env_value IMAGE_TAG .env
+  fi
+}
+
+# docker compose on the public host's stack (the prod make targets run it): with an image tag, on
+# the published images.
+prod_compose() {
+  local files=(-f compose.yaml -f compose.prod.yaml)
+  [[ -z $(image_tag) ]] || files+=(-f compose.images.yaml)
+  docker compose "${files[@]}" "$@"
+}
+
+# Starts the stack on the tag's published images, pulled first unless --no-pull, or on images
+# built here from the checkout. The edge's config files are bind-mounted: a changed one shows only
+# in a new nginx or Caddy container, so both are recreated. Each step returns on failure, as an
+# update calls it where set -e does not apply.
+up() {
+  if [[ -z $(image_tag) ]]; then
+    make build IMAGE_TAG=dev || return
+  elif [[ ${1:-} != --no-pull ]]; then
+    prod_compose --profile full pull --quiet || return
+  fi
+  prod_compose --profile full up -d --wait --wait-timeout 180 || return
+  prod_compose --profile full up -d --wait --wait-timeout 180 --no-deps --force-recreate nginx caddy
+}
+
+# Tags the images that the stack runs now as :rollback, as a pull replaces the tag's local images.
+keep_running_images() {
+  local id
+  id=$(prod_compose ps -q api-1) && [[ -n $id ]] || die "the stack is not running; start it with make prod-up"
+  docker tag "$(docker inspect --format '{{.Image}}' "$id")" "$API_IMAGE:rollback"
+  id=$(prod_compose ps -q web)
+  docker tag "$(docker inspect --format '{{.Image}}' "$id")" "$WEB_IMAGE:rollback"
+}
 
 # Puts the checkout back on BRANCH at COMMIT, or on COMMIT detached when BRANCH is empty.
 go_back() {
@@ -26,32 +67,44 @@ go_back() {
 }
 
 # Moves to REF (default: the newest commit of the branch the checkout is on; a tag install has
-# none) and restarts on it; when the stack does not get ready, goes back to the commit that ran
-# before and restarts on that.
+# none) and restarts on it, on REF's published images when .env names a tag (--build: on images
+# built here, for this run); when the stack does not get ready, goes back to the commit and the
+# images that ran before. A REF that moves the image tag writes it to .env once the stack is ready.
 update() {
-  local branch ref before after
+  local branch ref before after tag=""
+  if [[ ${1:-} == --build ]]; then
+    export IMAGE_TAG=""
+    shift
+  fi
   branch=$(git symbolic-ref -q --short HEAD || true)
   ref=${1:-$branch}
   [[ -n $ref ]] || die "the checkout is on $(git describe --tags --always), not on a branch; name the tag or branch to move to: make prod-update REF=<ref>"
+  if [[ -n $(image_tag) ]]; then
+    [[ -z ${1:-} ]] || tag=$(image_tag_for "$ref" 0)
+    keep_running_images
+  fi
+  [[ -z $tag ]] || export IMAGE_TAG=$tag
   before=$(git rev-parse HEAD)
   if ! checkout "$PWD" "" "$ref"; then
     go_back "$before" "$branch" || die "could not move to $ref, nor back to $before"
     die "could not move to $ref; the stack still runs $before"
   fi
   after=$(git rev-parse HEAD)
-  if make prod-up && ready; then
+  if up && ready; then
+    [[ -z $tag ]] || render_env .env .env "" "$tag"
     log "Updated $before -> $after; the stack is ready"
     return 0
   fi
   printf 'error: %s did not get ready; rolling back to %s\n' "$after" "$before" >&2
   go_back "$before" "$branch" || die "could not check out $before; the checkout has local changes"
-  if make prod-up && ready; then
+  if [[ -n $(image_tag) ]]; then export IMAGE_TAG=rollback; fi
+  if up --no-pull && ready; then
     die "update to $after failed; rolled back to $before, which is ready again"
   fi
   die "update to $after failed, and $before is not ready either; see make prod-logs"
 }
 
-persistence() { "${STACK[@]}" exec -T stack-redis redis-cli INFO persistence | tr -d '\r'; }
+persistence() { prod_compose exec -T stack-redis redis-cli INFO persistence | tr -d '\r'; }
 field() { sed -n "s/^$1://p"; }
 
 # BGSAVE writes the snapshot to a temporary file and renames it, so the copy is a whole one.
@@ -66,7 +119,7 @@ backup() {
   saves=$(persistence | field rdb_saves)
   # SCHEDULE: during an AOF rewrite Redis starts the save when the rewrite ends, instead of refusing
   # it. When a save already runs, Redis refuses this one and that save counts.
-  "${STACK[@]}" exec -T stack-redis redis-cli BGSAVE SCHEDULE >/dev/null || true
+  prod_compose exec -T stack-redis redis-cli BGSAVE SCHEDULE >/dev/null || true
   deadline=$(($(date +%s) + 300))
   until info=$(persistence) &&
     [[ $(field rdb_bgsave_in_progress <<<"$info") == 0 && $(field rdb_saves <<<"$info") -gt $saves ]]; do
@@ -75,9 +128,9 @@ backup() {
   done
   [[ $(field rdb_last_bgsave_status <<<"$info") == ok ]] || die "the Redis snapshot failed; see make prod-logs"
   mkdir "$tmp/redis"
-  "${STACK[@]}" cp stack-redis:/data/dump.rdb "$tmp/redis/dump.rdb"
+  prod_compose cp stack-redis:/data/dump.rdb "$tmp/redis/dump.rdb"
   log "Copying the certificates"
-  "${STACK[@]}" cp caddy:/data "$tmp/caddy"
+  prod_compose cp caddy:/data "$tmp/caddy"
   cp -p .env "$tmp/.env"
   # A new file, so an older one's mode does not carry over.
   (umask 077 && tar -czf "$tmp/backup.tar.gz" -C "$tmp" .env redis caddy)
@@ -125,7 +178,7 @@ chown -R redis:redis /data'
 # Root in the service's own image, with only the capabilities a copy and a chown need.
 restore_volume() {
   local service=$1 from=$2 script=$3
-  "${STACK[@]}" run --rm --no-deps --user 0 --cap-add CHOWN --cap-add DAC_OVERRIDE \
+  prod_compose run --rm --no-deps --user 0 --cap-add CHOWN --cap-add DAC_OVERRIDE \
     --cap-add FOWNER -v "$from:/backup:ro" --entrypoint sh "$service" -c "$script"
 }
 
@@ -141,7 +194,7 @@ restore() {
   if [[ -f .env ]]; then
     current=$(env_value DOMAIN .env)
     log "Stopping the stack"
-    "${STACK[@]}" --profile '*' down
+    prod_compose --profile '*' down
     cp -p .env .env.before-restore
   fi
   (umask 077 && cp "$tmp/.env" .env)
@@ -155,19 +208,21 @@ restore() {
   if ! restore_volume stack-redis "$tmp/redis" "$REDIS_RESTORE"; then
     [[ -n $current ]] || die "the Redis snapshot in $file did not load; the stack is not started"
     cp -p .env.before-restore .env
-    make prod-up || true
+    up || true
     die "the Redis snapshot in $file did not load; the previous .env and data are back and the stack restarted"
   fi
   log "Restoring the certificates"
   restore_volume caddy "$tmp/caddy" 'rm -rf /data/caddy && cp -a /backup/. /data/ && chown -R 65532:65532 /data'
-  make prod-up
+  up
   ready || die "restored, but https://$(env_value DOMAIN .env)/api/readyz is not ready; see make prod-logs"
   log "Restored $file; the previous .env is in .env.before-restore"
 }
 
 case ${1:-} in
-  update) update "${2:-}" ;;
+  up) up ;;
+  update) shift && update "$@" ;;
   backup) backup "${2:-}" ;;
   restore) restore "${2:-}" ;;
-  *) die "usage: ops.sh update [REF] | backup [FILE] | restore FILE" ;;
+  compose) shift && prod_compose "$@" ;;
+  *) die "usage: ops.sh up | update [--build] [REF] | backup [FILE] | restore FILE | compose ARGS..." ;;
 esac

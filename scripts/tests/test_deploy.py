@@ -218,6 +218,51 @@ def test_the_env_gets_new_secrets_once_and_keeps_them(tmp_path: Path) -> None:
         assert _env(env) == {**first, "DOMAIN": expected}
 
 
+@pytest.mark.parametrize(
+    ("tag", "files"),
+    [
+        ("main", "compose.yaml:compose.prod.yaml:compose.images.yaml"),
+        ("v1.2.0", "compose.yaml:compose.prod.yaml:compose.images.yaml"),
+        ("", "compose.yaml:compose.prod.yaml"),  # --build: the images built on the VM
+    ],
+)
+def test_the_env_names_the_image_tag_and_the_compose_files_that_run_it(
+    tmp_path: Path, tag: str, files: str
+) -> None:
+    """An .env from before the published images has neither line: both are added."""
+    env, old = tmp_path / ".env", tmp_path / "old.env"
+    for src in (ROOT / ".env.prod.example", old):
+        old.write_text("DOMAIN=a.sslip.io\nADMIN_TOKEN=x\n", encoding="utf-8")
+        _sourced(tmp_path, f'render_env "$2" "{env}" "" "$3"', str(src), tag)
+        values = _env(env)
+        assert (values["IMAGE_TAG"], values["COMPOSE_FILE"]) == (tag, files)
+        assert values.keys() == _env(src).keys() | {"IMAGE_TAG", "COMPOSE_FILE"}
+
+
+@pytest.mark.parametrize(
+    ("ref", "build", "tag"),
+    [
+        ("main", "0", "main"),
+        ("v1.2.0", "0", "v1.2.0"),
+        ("main", "1", ""),
+        ("my-branch", "1", ""),
+    ],
+)
+def test_main_and_release_tags_pull_their_published_images(
+    tmp_path: Path, ref: str, build: str, tag: str
+) -> None:
+    result = _sourced(tmp_path, f"image_tag_for '{ref}' {build}")
+    assert (result.returncode, result.stdout.strip()) == (0, tag)
+
+
+@pytest.mark.parametrize("ref", ["my-branch", "v1.2", "1.2.0", "v1.2.0-rc1"])
+def test_another_ref_has_no_published_images_and_needs_build(tmp_path: Path, ref: str) -> None:
+    result = _sourced(tmp_path, f"image_tag_for '{ref}' 0")
+    assert result.returncode == 1
+    assert f"--ref {ref} has no published images" in result.stderr
+    assert "add --build" in result.stderr
+
+
 OLD_ENV = "DOMAIN=quiz.example.com\nADMIN_TOKEN=old\n"
 # The checkout is at the commit in $STATE, on branch main unless $DETACHED is set; the merge of
 # main's upstream brings "new" (or fails on $PULL_FAILS). make fails on $BAD_UP, readyz on
@@ -237,10 +282,18 @@ FAKE_READY = '[[ $(cat "$STATE") != "${BAD_READY:-}" ]]'
 
 
 # compose's Redis counts one more save after each BGSAVE; each cp writes a file. The Redis restore
-# fails on $REDIS_FAILS.
+# fails on $REDIS_FAILS. The running api-1 and web containers run the images old-api and old-web;
+# up fails on $BAD_UP on the published images (built ones fail in make).
 FAKE_DOCKER = """echo "docker $*" >> "$LOG"
 saves="$(cat "$LOG.saves" 2>/dev/null || echo 0)"
 case "$*" in
+  *" up -d "*)
+    echo "up on ${IMAGE_TAG-the .env tag} @ $(cat "$STATE")" >> "$LOG"
+    [[ $(cat "$STATE") != "${BAD_UP:-}" || $* != *compose.images.yaml* ]] ;;
+  *" ps -q api-1") echo c-api ;;
+  *" ps -q web") echo c-web ;;
+  "inspect --format {{.Image}} c-api") echo old-api ;;
+  "inspect --format {{.Image}} c-web") echo old-web ;;
   *"redis-cli BGSAVE SCHEDULE") echo $((saves + 1)) > "$LOG.saves" ;;
   *" --entrypoint sh stack-redis "*) [[ -z ${REDIS_FAILS:-} ]] ;;
   *"redis-cli INFO persistence")
@@ -250,12 +303,14 @@ case "$*" in
 esac"""
 
 
-def _ops(tmp_path: Path, *args: str, **env: str) -> tuple[int, list[str], str, Path]:
+def _ops(
+    tmp_path: Path, *args: str, dot_env: str = OLD_ENV, **env: str
+) -> tuple[int, list[str], str, Path]:
     """Run ops.sh from a copy; return its exit code, the stubs' calls, its output and the copy."""
     repo = tmp_path / "repo"
-    if not repo.exists():  # the first call: a checkout with OLD_ENV
+    if not repo.exists():  # the first call: a checkout with DOT_ENV
         repo.mkdir()
-        (repo / ".env").write_text(OLD_ENV, encoding="utf-8")
+        (repo / ".env").write_text(dot_env, encoding="utf-8")
     (repo / ".git").mkdir(exist_ok=True)
     shutil.copytree(DEPLOY, repo / "scripts" / "deploy", dirs_exist_ok=True)
     state, log = tmp_path / "state", tmp_path / "calls.log"
@@ -291,23 +346,23 @@ BACK = ["git checkout --quiet main", "git reset --keep old"]
 @pytest.mark.parametrize(
     ("args", "env", "calls", "message"),
     [
-        ([], {}, [*PULL, "make prod-up @ new"], "Updated old -> new"),
+        ([], {}, [*PULL, "make build IMAGE_TAG=dev @ new"], "Updated old -> new"),
         (
             [],
             {"BAD_UP": "new"},
-            [*PULL, "make prod-up @ new", *BACK, "make prod-up @ old"],
+            [*PULL, "make build IMAGE_TAG=dev @ new", *BACK, "make build IMAGE_TAG=dev @ old"],
             "rolled back to old, which is ready again",
         ),
         (
             [],
             {"BAD_READY": "new"},
-            [*PULL, "make prod-up @ new", *BACK, "make prod-up @ old"],
+            [*PULL, "make build IMAGE_TAG=dev @ new", *BACK, "make build IMAGE_TAG=dev @ old"],
             "rolled back to old, which is ready again",
         ),
         (
             [],
             {"BAD_UP": "new", "BAD_READY": "old"},
-            [*PULL, "make prod-up @ new", *BACK, "make prod-up @ old"],
+            [*PULL, "make build IMAGE_TAG=dev @ new", *BACK, "make build IMAGE_TAG=dev @ old"],
             "old is not ready either",
         ),
         (
@@ -321,7 +376,7 @@ BACK = ["git checkout --quiet main", "git reset --keep old"]
         (
             ["v2"],
             {"DETACHED": "1"},
-            ["git checkout --quiet v2", "make prod-up @ v2"],
+            ["git checkout --quiet v2", "make build IMAGE_TAG=dev @ v2"],
             "old -> v2",
         ),
         (
@@ -329,9 +384,9 @@ BACK = ["git checkout --quiet main", "git reset --keep old"]
             {"DETACHED": "1", "BAD_READY": "v2"},
             [
                 "git checkout --quiet v2",
-                "make prod-up @ v2",
+                "make build IMAGE_TAG=dev @ v2",
                 "git checkout --quiet --detach old",
-                "make prod-up @ old",
+                "make build IMAGE_TAG=dev @ old",
             ],
             "rolled back to old, which is ready again",
         ),
@@ -340,12 +395,113 @@ BACK = ["git checkout --quiet main", "git reset --keep old"]
 def test_an_update_that_does_not_get_ready_rolls_back_to_the_commit_that_ran(
     tmp_path: Path, args: list[str], env: dict[str, str], calls: list[str], message: str
 ) -> None:
+    """Without an image tag in .env, the images are built here from each commit."""
     code, log, out, _ = _ops(tmp_path, "update", *args, **env)
     assert code == (1 if {"BAD_UP", "BAD_READY", "PULL_FAILS"} & set(env) or not calls else 0), out
     assert [
         c for c in log if c.startswith(("make", "git checkout", "git merge", "git reset"))
     ] == calls
     assert message in out
+
+
+PULL_ENV = OLD_ENV + "IMAGE_TAG=main\n"
+
+
+@pytest.mark.parametrize(
+    ("env", "ups", "message"),
+    [
+        ({}, ["up on the .env tag @ new"], "Updated old -> new"),
+        (
+            {"BAD_UP": "new"},
+            ["up on the .env tag @ new", "up on rollback @ old"],
+            "rolled back to old, which is ready again",
+        ),
+        (
+            {"BAD_READY": "new"},
+            ["up on the .env tag @ new", "up on rollback @ old"],
+            "rolled back to old, which is ready again",
+        ),
+    ],
+)
+def test_an_update_on_published_images_rolls_back_to_the_images_that_ran(
+    tmp_path: Path, env: dict[str, str], ups: list[str], message: str
+) -> None:
+    """A pull replaces the tag's local images, so the running ones are kept as :rollback first."""
+    code, log, out, _ = _ops(tmp_path, "update", dot_env=PULL_ENV, **env)
+    assert code == (0 if env == {} else 1), out
+    assert message in out
+    tags = [c for c in log if c.startswith("docker tag ")]
+    assert tags == [
+        "docker tag old-api ghcr.io/kobars/realtime-vocab-quiz-api:rollback",
+        "docker tag old-web ghcr.io/kobars/realtime-vocab-quiz-web:rollback",
+    ]
+    assert log.index(tags[-1]) < next(i for i, c in enumerate(log) if c.startswith("git merge"))
+    pulls = [c for c in log if c.endswith(" pull --quiet")]
+    assert len(pulls) == 1  # the rollback runs the kept images without a pull
+    assert all("-f compose.images.yaml" in c for c in [*pulls, *log] if " compose " in c)
+    assert list(dict.fromkeys(c for c in log if c.startswith("up on "))) == ups
+    assert not any(c.startswith("make") for c in log)
+
+
+def test_an_update_to_a_release_tag_runs_its_images_and_keeps_the_tag_once_ready(
+    tmp_path: Path,
+) -> None:
+    code, log, out, repo = _ops(tmp_path, "update", "v2.0.0", dot_env=PULL_ENV, DETACHED="1")
+    assert code == 0, out
+    assert next(c for c in log if c.startswith("up on ")) == "up on v2.0.0 @ v2.0.0"
+    assert _env(repo / ".env")["IMAGE_TAG"] == "v2.0.0"
+    assert _env(repo / ".env")["COMPOSE_FILE"].endswith(":compose.images.yaml")
+
+
+def test_a_failed_update_to_a_release_tag_leaves_the_env_tag(tmp_path: Path) -> None:
+    code, log, out, repo = _ops(
+        tmp_path, "update", "v2.0.0", dot_env=PULL_ENV, DETACHED="1", BAD_READY="v2.0.0"
+    )
+    assert code == 1, out
+    assert list(dict.fromkeys(c for c in log if c.startswith("up on "))) == [
+        "up on v2.0.0 @ v2.0.0",
+        "up on rollback @ old",
+    ]
+    assert (repo / ".env").read_text(encoding="utf-8") == PULL_ENV
+
+
+def test_an_update_to_a_branch_needs_build_on_published_images(tmp_path: Path) -> None:
+    code, log, out, _ = _ops(tmp_path, "update", "my-branch", dot_env=PULL_ENV)
+    assert code == 1
+    assert "--ref my-branch has no published images" in out
+    assert not any(c.startswith(("git checkout", "docker", "make")) for c in log)
+    code, log, out, _ = _ops(
+        tmp_path, "update", "--build", "my-branch", dot_env=PULL_ENV, DETACHED="1"
+    )
+    assert code == 0, out
+    assert [c for c in log if c.startswith("make")] == ["make build IMAGE_TAG=dev @ my-branch"]
+
+
+def test_an_update_with_build_builds_here_despite_the_image_tag(tmp_path: Path) -> None:
+    code, log, out, _ = _ops(tmp_path, "update", "--build", dot_env=PULL_ENV)
+    assert code == 0, out
+    assert [c for c in log if c.startswith("make")] == ["make build IMAGE_TAG=dev @ new"]
+    assert not any("compose.images.yaml" in c or c.startswith("docker tag") for c in log)
+
+
+BOTH = "-f compose.yaml -f compose.prod.yaml"
+
+
+@pytest.mark.parametrize(
+    ("dot_env", "env", "files"),
+    [
+        (OLD_ENV, {}, BOTH),
+        (PULL_ENV, {}, f"{BOTH} -f compose.images.yaml"),
+        (OLD_ENV, {"IMAGE_TAG": "v1.2.0"}, f"{BOTH} -f compose.images.yaml"),
+        (PULL_ENV, {"IMAGE_TAG": ""}, BOTH),  # set but empty: built here
+    ],
+)
+def test_the_prod_targets_add_the_published_images_when_an_image_tag_is_set(
+    tmp_path: Path, dot_env: str, env: dict[str, str], files: str
+) -> None:
+    code, log, out, _ = _ops(tmp_path, "compose", "ps", dot_env=dot_env, **env)
+    assert code == 0, out
+    assert log == [f"docker compose {files} ps"]
 
 
 def _backup(tmp_path: Path) -> tuple[Path, Path]:
@@ -383,7 +539,10 @@ def test_a_backup_holds_the_redis_snapshot_the_certificates_and_env_and_restores
     services = [re.findall(r"-v (\S+):/backup:ro --entrypoint sh (\S+) -c", run) for run in runs]
     assert [found[0][1] for found in services] == ["stack-redis", "caddy"]
     assert all(found[0][0].endswith(("/redis", "/caddy")) for found in services)
-    assert log[-1] == "make prod-up @ old"
+    assert "make build IMAGE_TAG=dev @ old" in log
+    assert [c for c in log if c.startswith("docker compose")][-1].endswith(
+        "--force-recreate nginx caddy"
+    )
 
 
 def test_a_restore_onto_a_new_host_keeps_its_own_sslip_io_name(tmp_path: Path) -> None:
@@ -415,7 +574,10 @@ def test_a_snapshot_that_does_not_load_puts_the_previous_env_back_and_restarts(
     assert "did not load; the previous .env and data are back" in out
     assert (repo / ".env").read_text(encoding="utf-8") == fresh
     assert not any(" --entrypoint sh caddy " in c for c in log)
-    assert log[-1] == "make prod-up @ old"
+    assert "make build IMAGE_TAG=dev @ old" in log
+    assert [c for c in log if c.startswith("docker compose")][-1].endswith(
+        "--force-recreate nginx caddy"
+    )
 
 
 def test_a_restore_into_a_checkout_without_env_stops_nothing(tmp_path: Path) -> None:

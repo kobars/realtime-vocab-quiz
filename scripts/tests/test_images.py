@@ -37,8 +37,24 @@ def _stages(dockerfile: Path) -> list[list[str]]:
 
 
 # The ``docker run`` options that take a value as the next argument.
-_RUN_OPTIONS_WITH_VALUE = {"-e", "--env", "-p", "--publish", "-v", "--volume", "-w", "--workdir"}
-_RUN_OPTIONS_WITH_VALUE |= {"--name", "--tmpfs", "-u", "--user", "--network", "--entrypoint"}
+_RUN_OPTIONS_WITH_VALUE = {
+    "-e",
+    "--env",
+    "-p",
+    "--publish",
+    "-v",
+    "--volume",
+    "-w",
+    "--workdir",
+}
+_RUN_OPTIONS_WITH_VALUE |= {
+    "--name",
+    "--tmpfs",
+    "-u",
+    "--user",
+    "--network",
+    "--entrypoint",
+}
 
 
 def _docker_run_images(text: str) -> list[str]:
@@ -63,15 +79,16 @@ def _docker_run_images(text: str) -> list[str]:
 def _pulled_images(path: Path) -> list[str]:
     """Return each image that a file pulls. A Dockerfile pulls every ``FROM`` image and every
     ``COPY --from`` image that is not a build stage; any other file pulls every ``image:`` value
-    except the images that ``make build`` makes here (``elsaquiz-*``), and every ``docker run``
-    image."""
+    except the images that this repository builds (``elsaquiz-*`` from ``make build``, and the
+    ones CI publishes), and every ``docker run`` image."""
     if path.name != "Dockerfile":
         text = path.read_text(encoding="utf-8")
         lines = [line.strip() for line in text.splitlines()]
         values = [
             line.removeprefix("image:").strip() for line in lines if line.startswith("image:")
         ]
-        return [value for value in values if not value.startswith("elsaquiz-")] + (
+        built_here = ("elsaquiz-", "ghcr.io/kobars/realtime-vocab-quiz-")
+        return [value for value in values if not value.startswith(built_here)] + (
             _docker_run_images(text)
         )
     images: list[str] = []
@@ -120,7 +137,9 @@ def test_every_pulled_image_is_pinned_by_digest() -> None:
     assert images["scripts/check_links.sh"], "scripts/check_links.sh"
 
 
-def test_pulled_images_read_docker_run_and_skip_comments_and_variables(tmp_path: Path) -> None:
+def test_pulled_images_read_docker_run_and_skip_comments_and_variables(
+    tmp_path: Path,
+) -> None:
     script = tmp_path / "check.sh"
     script.write_text(
         "# usage: check <image> [docker run options...]\n"
@@ -355,7 +374,10 @@ def test_api_image_bounds_its_shutdown_and_names_its_protocol_classes() -> None:
     ("argv", "address"),
     [
         ([], ("0.0.0.0", 8000)),  # noqa: S104 - the image's command
-        (["--host", "127.0.0.1", "--port", "8001"], ("127.0.0.1", 8001)),  # make dev-api
+        (
+            ["--host", "127.0.0.1", "--port", "8001"],
+            ("127.0.0.1", 8001),
+        ),  # make dev-api
     ],
 )
 def test_python_m_quiz_serves_the_module_app_with_the_server_config(

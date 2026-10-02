@@ -36,7 +36,7 @@ jobs:
         run: |
           if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
             echo stack=true >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$BASE...$HEAD" | grep -qE '^(api/|web/|infra/|compose[^/]*\.ya?ml$|(.*/)?Dockerfile$|\.dockerignore$|Makefile$|\.nvmrc$|\.python-version$|\.github/workflows/stack\.yml$)'; then
+          elif git diff --name-only "$BASE...$HEAD" | grep -qE '^(api/|web/|infra/|scripts/deploy/|\.env\.prod\.example$|compose[^/]*\.ya?ml$|(.*/)?Dockerfile$|\.dockerignore$|Makefile$|\.nvmrc$|\.python-version$|\.github/workflows/stack\.yml$)'; then
             echo stack=true >> "$GITHUB_OUTPUT"
           else
             echo stack=false >> "$GITHUB_OUTPUT"
@@ -103,7 +103,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      IMAGE_TAG: ci
       STACK_URL: https://localhost
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -115,9 +114,11 @@ jobs:
           cache-dependency-glob: api/uv.lock
       - name: stack settings
         # The shipped example, edited as docs/operations.md does, plus Caddy's local CA. Its
-        # COMPOSE_FILE makes every docker compose call below run the override too.
+        # COMPOSE_FILE makes every docker compose call below run the override too. The images
+        # are built from this commit rather than pulled (docs/operations.md, "Image tags").
         run: |
           cp .env.prod.example .env
+          sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=/; s/:compose.images.yaml//" .env
           sed -i "s/^DOMAIN=.*/DOMAIN=localhost/" .env
           sed -i "s/^ADMIN_TOKEN=$/&$(openssl rand -hex 24)/; s/^REDIS_PASSWORD=$/&$(openssl rand -hex 24)/" .env
           echo TLS_ISSUER=internal >> .env
