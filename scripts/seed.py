@@ -34,18 +34,17 @@ def run_code() -> str:
 
 def run_id(bank_id: str, code: str) -> str:
     """The bank quiz's ID and the run code, the ID cut short to keep the whole a valid quiz ID."""
-    return f"{bank_id[: QUIZ_ID_MAX - len(code) - 1]}-{code}"
+    return f"{bank_id[: QUIZ_ID_MAX - len(code) - 1].rstrip('-')}-{code}"
 
 
-def _post(api_url: str, token: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
+def _post(api_url: str, token: str, path: str, body: dict[str, Any]) -> None:
     request = urllib.request.Request(  # noqa: S310 - the URL is the operator's own API
         f"{api_url}{path}",
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json", "X-Admin-Token": token},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=10) as reply:  # noqa: S310
-        return dict(json.loads(reply.read()))
+    urllib.request.urlopen(request, timeout=10).close()  # noqa: S310 - the 2xx alone is success
 
 
 def _refused(error: urllib.error.HTTPError, what: str) -> RuntimeError:

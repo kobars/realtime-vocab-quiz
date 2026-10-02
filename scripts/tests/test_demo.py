@@ -165,4 +165,17 @@ def test_make_help_lists_the_demo_targets() -> None:
         text=True,
     ).stdout
     targets = [line.split()[0] for line in listing.splitlines()]
-    assert {"demo", "demo-stop", "new-quiz"} <= set(targets)
+    assert {"demo", "demo-stop", "demo-end", "new-quiz"} <= set(targets)
+
+
+def test_make_demo_end_asks_for_the_quiz_id() -> None:
+    env = {k: v for k, v in os.environ.items() if k not in {"ID", "MAKEFLAGS", "MAKELEVEL"}}
+    run = subprocess.run(
+        ["make", "--no-print-directory", "-n", "demo-end"],  # noqa: S607
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert (run.returncode, "set ID=<quiz id>" in run.stderr) == (2, True)

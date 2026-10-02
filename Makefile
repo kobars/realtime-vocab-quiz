@@ -81,6 +81,7 @@ demo-stop: ## Stop the demo bots; the stack keeps running
 new-quiz: ## Start a fresh 60-min quiz on the running stack; print its ID and player URL
 	docker compose --progress quiet run --rm -T seed
 demo-end: ## End quiz ID=<id> now as the mock host; its players see the final results
+	$(if $(ID),,$(error set ID=<quiz id>, as make demo printed it))
 	docker compose --progress quiet run --rm -T seed python /opt/seed.py --end '$(ID)'
 smoke-full: ## Smoke-test the running full stack through nginx, stopping one API node
 	uv run --project api --locked python load/smoke_full.py
