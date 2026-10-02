@@ -3,7 +3,7 @@
 sessions and a shared ticket store; the Redis variant is the shared store of this build."""
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from quiz.adapters.mock_auth import tokens
 from quiz.ports.clock import Clock
@@ -37,6 +37,10 @@ class MemoryTicketStore:
         session = self._live(self._sessions, session_token, now, consume=False)
         if session is None:
             return None
+        # each ticket renews the session, which moves it last in expiry order
+        renewed = replace(session, expires_ms=now + tokens.SESSION_TTL_S * 1000)
+        self._sessions[session.digest] = renewed
+        self._sessions.move_to_end(session.digest)
         _prune(self._tickets, now)
         ticket = tokens.new_token()
         key = tokens.digest(ticket)

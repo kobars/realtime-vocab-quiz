@@ -12,7 +12,7 @@ SESSION_MS, TICKET_MS = 7_200_000, 30_000  # two hours: twice the longest quiz w
 
 
 class FakeRedis:
-    """The three commands the Redis variant uses, with EX expiry on the test clock."""
+    """The commands the Redis variant uses, with EX expiry on the test clock."""
 
     def __init__(self, now: list[int]) -> None:
         self.now = now
@@ -31,9 +31,11 @@ class FakeRedis:
         self.data[name] = (value, self.now[0] + ex * 1000)
         return True
 
-    async def get(self, name: str) -> str | None:
-        self.calls.append(("GET", name, None))
-        return self._live(name)
+    async def getex(self, name: str, *, ex: int) -> str | None:
+        self.calls.append(("GETEX", name, ex))
+        if (value := self._live(name)) is not None:
+            self.data[name] = (value, self.now[0] + ex * 1000)
+        return value
 
     async def getdel(self, name: str) -> bytes | None:
         self.calls.append(("GETDEL", name, None))
@@ -115,9 +117,22 @@ async def test_unknown_or_expired_session_gets_no_ticket(
     store, now = store_and_clock
     _, token = await store.create_session("Ada")
     assert await store.issue_ticket("unknown-token") is None
-    now[0] += SESSION_MS - 1
+    now[0] += SESSION_MS
+    assert await store.issue_ticket(token) is None
+
+
+async def test_each_ticket_renews_the_session_for_its_full_lifetime(
+    store_and_clock: tuple[TicketStore, list[int]],
+) -> None:
+    store, now = store_and_clock
+    identity, token = await store.create_session("Ada")
+    now[0] += SESSION_MS - 60_000  # 1 h 59 min: the player reconnects in a later quiz
     assert await store.issue_ticket(token) is not None
-    now[0] += 1
+    now[0] += SESSION_MS - 1
+    ticket = await store.issue_ticket(token)
+    assert ticket is not None
+    assert await store.redeem(ticket) == identity
+    now[0] += SESSION_MS
     assert await store.issue_ticket(token) is None
 
 
@@ -153,7 +168,7 @@ async def test_display_name_is_nfc_normalized(
     assert identity.display_name == "Caf\u00e9"
 
 
-async def test_redis_variant_uses_set_ex_and_getdel() -> None:
+async def test_redis_variant_uses_set_ex_getex_and_getdel() -> None:
     redis = FakeRedis([0])
     store = RedisTicketStore(redis)
     _, token = await store.create_session("Ada")
@@ -161,7 +176,7 @@ async def test_redis_variant_uses_set_ex_and_getdel() -> None:
     assert ticket is not None
     await store.redeem(ticket)
     commands = [(cmd, ex) for cmd, _, ex in redis.calls]
-    assert commands == [("SET", 7_200), ("GET", None), ("SET", 30), ("GETDEL", None)]
+    assert commands == [("SET", 7_200), ("GETEX", 7_200), ("SET", 30), ("GETDEL", None)]
     names = [name for _, name, _ in redis.calls]
     assert not [name for name in names if token in name or ticket in name]  # digests only
 
@@ -187,7 +202,14 @@ class DownRedis:
     async def _fail(self, *_: object, **__: object) -> None:
         raise self.error
 
-    set = get = getdel = _fail
+    set = getex = getdel = _fail
+
+
+REFUSALS = [  # Redis refusing writes: a read-only replica, maxmemory, a failed AOF write
+    redis_errors.ReadOnlyError("You can't write against a read only replica."),
+    redis_errors.OutOfMemoryError("command not allowed when used memory > 'maxmemory'."),
+    redis_errors.ResponseError("MISCONF Errors writing to the AOF file: No space left on device"),
+]
 
 
 @pytest.mark.parametrize(
@@ -195,10 +217,16 @@ class DownRedis:
     [
         (redis_errors.ConnectionError("down"), ConnectionError),
         (redis_errors.TimeoutError("slow"), TimeoutError),
+        *((refusal, ConnectionError) for refusal in REFUSALS),
+        (
+            redis_errors.ResponseError("WRONGTYPE Operation against a key"),
+            redis_errors.ResponseError,
+        ),
     ],
+    ids=["unreachable", "slow", "READONLY", "OOM", "MISCONF", "another reply error"],
 )
-async def test_redis_variant_raises_the_builtin_errors_when_redis_is_unreachable(
-    raised: redis_errors.RedisError, seen: type[OSError]
+async def test_redis_variant_raises_the_builtin_errors_when_redis_is_unreachable_or_refuses(
+    raised: redis_errors.RedisError, seen: type[Exception]
 ) -> None:
     store = RedisTicketStore(DownRedis(raised))
     for call in (store.create_session("Ada"), store.issue_ticket("t"), store.redeem("t")):

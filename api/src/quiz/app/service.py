@@ -9,6 +9,7 @@ import logging
 import unicodedata
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
@@ -16,6 +17,7 @@ from typing import Any
 from quiz.contracts import messages as m
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.obs import metrics
+from quiz.obs.logs import Throttle
 from quiz.ports.clock import Clock
 from quiz.ports.questions import QuestionBank
 from quiz.ports.store import Finished, Joined, Limits, Place, Ranks, Store
@@ -27,7 +29,7 @@ RESYNC_INTERVAL_MS, NAME_MAX = 1_000, 32
 STANDINGS_TRIES = 3  # a tick or a join between the two reads of ``standings`` makes them differ
 type Standing = tuple[m.Snapshot] | tuple[m.Snapshot, m.RankUpdate]
 OUTAGE_LOG_INTERVAL_MS = 1_000  # at most one store outage line per interval; the counter has all
-CLOSE_INTERNAL, CLOSE_REPLACED = 1011, 4001
+CLOSE_INTERNAL, CLOSE_OVERLOAD, CLOSE_REPLACED = 1011, 1013, 4001
 
 
 @dataclass(slots=True)
@@ -53,6 +55,10 @@ class Refused(Exception):  # noqa: N818 - a reply, not a fault
     def __init__(self, code: m.ErrorCode, text: str) -> None:
         super().__init__(text)
         self.code = code
+
+
+def _admit_all(_quiz_id: str) -> AbstractContextManager[bool]:
+    return nullcontext(enter_result=True)
 
 
 def _error(code: m.ErrorCode, text: str, request_type: str) -> m.ProtocolError:
@@ -118,10 +124,15 @@ class QuizService:
         self._store, self._bank, self._clock, self._tick_ms = store, bank, clock, tick_ms
         self._shared: dict[str, Shared] = {}  # per quiz: the standings at its latest seq
         self._refills: dict[str, asyncio.Task[Shared]] = {}  # per quiz: the read in flight
-        self._outage_logged_ms: int | None = None
+        # per quiz: a token that each drop replaces, so a read that started before it is not kept
+        self._epochs: dict[str, object] = {}
+        self._outage_log = Throttle(clock, OUTAGE_LOG_INTERVAL_MS)
         self._pages: dict[PageKey, tuple[int, m.LeaderboardPage]] = {}  # (expires at ms, page)
         self._pages_swept_ms = 0  # every page expires a tick after it is cached
         self._page_reads: dict[PageKey, asyncio.Task[m.LeaderboardPage]] = {}
+        # whether this node can send the quiz's live updates, held while the join runs; the
+        # composition root sets it
+        self.admission: Callable[[str], AbstractContextManager[bool]] = _admit_all
 
     def drop_cache(self, quiz_id: str | None = None) -> None:
         """Forget the cached standings and pages of one quiz, or of all, and the reads in flight.
@@ -130,9 +141,11 @@ class QuizService:
         resubscribe path calls this before it sends its repair snapshots (redis.md §5).
         """
         if quiz_id is None:
+            self._epochs.clear()
             self._shared.clear()
             self._refills.clear()
         else:
+            self._epochs.pop(quiz_id, None)
             self._shared.pop(quiz_id, None)
             self._refills.pop(quiz_id, None)
         self._drop_pages(quiz_id)
@@ -178,10 +191,7 @@ class QuizService:
         except Refused as error:
             return Outcome((_error(error.code, str(error), kind),))
         except ConnectionError, TimeoutError:
-            now = self._clock()
-            last = self._outage_logged_ms
-            if last is None or now - last >= OUTAGE_LOG_INTERVAL_MS:
-                self._outage_logged_ms = now
+            if self._outage_log.due():
                 log.warning("store unreachable on %s", kind, exc_info=True)
             return Outcome((_error(m.ErrorCode.UNAVAILABLE, "the store is unreachable", kind),))
         except Exception:
@@ -197,8 +207,18 @@ class QuizService:
             raise Refused(m.ErrorCode.INVALID_MESSAGE, f"displayName must be 1-{NAME_MAX} chars")
         if conn.quiz_id not in {None, quiz_id}:
             raise Refused(m.ErrorCode.INVALID_STATE, f"this socket serves {conn.quiz_id}")
-        if (j := None if conn.read_only else await self._join(conn, quiz_id, name)) is None:
-            snapshot = await self.snapshot(quiz_id, conn.user_id)
+        j, snapshot = None, None  # read only: the final standings need no live updates
+        if not conn.read_only:
+            with self.admission(quiz_id) as admitted:
+                if admitted:
+                    j = await self._join(conn, quiz_id, name)
+                elif (snapshot := await self.snapshot(quiz_id, conn.user_id)).status == "open":
+                    # close 1013: the client reconnects, maybe to a node with a free subscription
+                    text = "this node follows no more quizzes"
+                    refusal = _error(m.ErrorCode.UNAVAILABLE, text, "join")
+                    return Outcome((refusal,), close_code=CLOSE_OVERLOAD)
+        if j is None:  # ended, or this socket is read only
+            snapshot = snapshot or await self.snapshot(quiz_id, conn.user_id)
             conn.quiz_id, conn.read_only = quiz_id, True
             return Outcome((snapshot, _error(m.ErrorCode.QUIZ_ENDED, "the quiz has ended", "join")))
         conn.quiz_id, conn.time_limit_ms, conn.present = quiz_id, j.time_limit_ms, True
@@ -240,7 +260,11 @@ class QuizService:
         if (questions := await self._bank.questions(conn.bank_quiz_id)) is None:
             text = f"the question bank has no quiz {conn.bank_quiz_id}"
             raise LookupError(text)
-        q = questions[s.question_index]
+        # the bank is read from files at start: a changed bank must not serve another question
+        index, bank = s.question_index, conn.bank_quiz_id
+        if index >= len(questions) or (q := questions[index]).question_id != s.question_id:
+            text = f"bank quiz {bank} has no question {s.question_id} at index {index}"
+            raise LookupError(text)
         return m.Question(
             atSeq=s.at_seq,
             questionIndex=s.question_index,
@@ -350,8 +374,14 @@ class QuizService:
 
     async def _refill(self, quiz_id: str) -> Shared:
         """Read the cached standings again; concurrent misses of one quiz share one read."""
-        read = partial(self._store.snapshot, quiz_id, None)
-        shared = self._shared[quiz_id] = await _share(self._refills, quiz_id, read)
+        return await _share(self._refills, quiz_id, partial(self._read_shared, quiz_id, None))
+
+    async def _read_shared(self, quiz_id: str, user_id: str | None) -> Shared:
+        """Read the standings and cache them, unless the cache was dropped during the read."""
+        epoch = self._epochs.setdefault(quiz_id, object())
+        shared = await self._store.snapshot(quiz_id, user_id)
+        if self._epochs.get(quiz_id) is epoch:
+            self._shared[quiz_id] = shared
         return shared
 
     async def snapshot(self, quiz_id: str, user_id: str | None) -> m.Snapshot:
@@ -359,7 +389,7 @@ class QuizService:
 
         When the two never meet at one key, one full read with the user returns both."""
         if (read := await self._at_one_key(quiz_id, () if user_id is None else (user_id,))) is None:
-            full = self._shared[quiz_id] = await self._store.snapshot(quiz_id, user_id)
+            full = await self._read_shared(quiz_id, user_id)
             return _message(full, full.you)
         ranks, shared = read
         return _message(shared, next(iter(ranks.rows.values()), None))

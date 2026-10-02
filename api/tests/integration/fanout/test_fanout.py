@@ -59,7 +59,7 @@ def store(request: pytest.FixtureRequest) -> FeedStore:
 
 
 def ticker_of(store: FeedStore, sink: Sink) -> Ticker:
-    return Ticker(store, sink, QuizService(store, MockQuestionBank({}), lambda: 0), "n1")
+    return Ticker(store, sink, QuizService(store, MockQuestionBank({}), lambda: 0), "n1", lambda: 0)
 
 
 def loops() -> int:

@@ -2,11 +2,11 @@
 """Every metric the service exports. ``/metrics`` serves ``REGISTRY``. Each metric is registered
 here up front, and a labelled counter starts with each label value at 0 (``ws_errors_total``: its
 ``UNAVAILABLE`` series; ``ws_closes_total``: each known close code and ``other``), so a scrape shows
-those series before their first event. The scoring
-service counts answers, error replies, resyncs and clock steps; the gateway its sockets, pending
-closes and closes by code; each socket's sender its send delays and the leaderboard frames
-conflation dropped; the fan-out tick its frames, durations and publish lags; the log pipeline the
-lines it dropped; a timer the event loop's lag."""
+those series before their first event. The scoring service counts answers, error replies, resyncs
+and clock steps; the gateway its sockets, pending closes and closes by code; each socket's sender
+its send delays and the leaderboard frames conflation dropped; the fan-out tick its frames,
+durations, publish lags and the feeds it could not subscribe to; the log pipeline the lines it
+dropped; a timer the event loop's lag."""
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -75,6 +75,15 @@ TICK_DURATION = Histogram(
     buckets=(0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5),
     registry=REGISTRY,
 )
+FEED_SUBSCRIBE_FAILURES = Counter(
+    "feed_subscribe_failures_total",
+    "Quiz feeds this node could not subscribe to: a join refused because every subscription"
+    " connection is taken (reason limit), or a subscribe attempt that failed (reason error)",
+    ["reason"],
+    registry=REGISTRY,
+)
+for _reason in ("limit", "error"):
+    FEED_SUBSCRIBE_FAILURES.labels(_reason)
 WS_ERRORS = Counter(
     "ws_errors_total",
     "WebSocket error replies of the use cases by request type and code",

@@ -1,4 +1,5 @@
-# AI-ASSISTED: store faults and malformed broadcasts never stop the tick loop or the relay early.
+# AI-ASSISTED: store faults and malformed broadcasts never stop the tick loop or the relay early;
+# a writable join restarts a loop that ended; feeds this node cannot subscribe to are counted.
 import asyncio
 import json
 import logging
@@ -9,7 +10,9 @@ from unittest.mock import Mock, call
 
 import pytest
 
-from quiz.app.service import QuizService
+from quiz.adapters.ws.registry import Registry
+from quiz.adapters.ws.sender import Sender
+from quiz.app.service import Connection, QuizService
 from quiz.contracts import messages as m
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.fanout import tick
@@ -29,6 +32,7 @@ class ScriptedStore:
     def __init__(self, *steps: Publish | Exception, messages: Sequence[str] = ()) -> None:
         self.steps, self.messages, self.calls = steps, messages, 0
         self.ranks_error: Exception | None = None
+        self.subscribe_errors: list[Exception] = []  # subscribe raises these first, in turn
         self.host_ends: list[int | Exception] = []  # end_by_host plays these in turn
 
     async def end_quiz(self, _quiz_id: str, _reason: str) -> End:
@@ -57,6 +61,8 @@ class ScriptedStore:
 
     @asynccontextmanager
     async def subscribe(self, _quiz_id: str) -> AsyncIterator[AsyncIterator[str]]:
+        if self.subscribe_errors:
+            raise self.subscribe_errors.pop(0)
         yield self._feed()
 
     async def _feed(self) -> AsyncIterator[str]:
@@ -75,9 +81,15 @@ def last_sent(sockets: Mock) -> dict[str, Any]:
     return cast("dict[str, Any]", json.loads(sockets.send_to.call_args.args[2]))
 
 
-async def run(store: ScriptedStore, sockets: Mock, service: Mock | None = None) -> None:
+async def run(
+    store: ScriptedStore,
+    sockets: Mock,
+    service: Mock | None = None,
+    clock: Callable[[], int] = lambda: 0,
+) -> None:
     """Run quiz Q's loop on this node until it ends by itself."""
-    ticker = Ticker(cast("FeedStore", store), sockets, service or Mock(spec=QuizService), "n1")
+    service = service or Mock(spec=QuizService)
+    ticker = Ticker(cast("FeedStore", store), sockets, service, "n1", clock)
     ticker.open("Q")
     await asyncio.wait_for(ticker._loops["Q"], 1)  # noqa: SLF001 - the loop under test
 
@@ -91,13 +103,23 @@ STORE_BLIPS = pytest.mark.parametrize("blip", [ConnectionError(), TimeoutError()
 
 @STORE_BLIPS
 async def test_a_store_blip_logs_a_warning_and_the_loop_keeps_ticking(
-    sockets: Mock, caplog: pytest.LogCaptureFixture, blip: Exception
+    sockets: Mock, caplog: pytest.LogCaptureFixture, blip: Exception, backoffs: list[int]
 ) -> None:
     store = ScriptedStore(blip, Publish("clean"), Publish("ended", SEQ))
     await run(store, sockets)
-    assert store.calls == 3
+    assert (store.calls, backoffs) == (3, [1])
     assert logged(caplog, logging.WARNING) == ["tick of quiz Q: store unreachable"]
     assert logged(caplog, logging.ERROR) == []
+
+
+async def test_tick_failures_in_a_row_back_off_and_log_once_per_interval(
+    sockets: Mock, caplog: pytest.LogCaptureFixture, backoffs: list[int]
+) -> None:
+    down = ConnectionError()
+    store = ScriptedStore(down, down, down, Publish("clean"), down, Publish("ended", SEQ))
+    await run(store, sockets, clock=iter([0, 500, 1_000, 1_200]).__next__)
+    assert backoffs == [1, 2, 3, 1]  # the subscription held: each failure grows the wait
+    assert logged(caplog, logging.WARNING) == ["tick of quiz Q: store unreachable"] * 2
 
 
 async def test_a_quiz_the_store_lost_ends_the_loop_quietly(
@@ -258,7 +280,7 @@ async def test_a_frame_with_no_change_time_is_counted_but_not_timed(
     metric: Callable[..., float],
 ) -> None:
     store = ScriptedStore(Publish("published", SEQ + 1), Publish("published", SEQ + 2, lag_ms=150))
-    ticker = Ticker(cast("FeedStore", store), Mock(), Mock(spec=QuizService), "n1")
+    ticker = Ticker(cast("FeedStore", store), Mock(), Mock(spec=QuizService), "n1", lambda: 0)
     frames, lags = (
         metric("leaderboard_frames_total"),
         metric("leaderboard_publish_lag_seconds_count"),
@@ -269,3 +291,71 @@ async def test_a_frame_with_no_change_time_is_counted_but_not_timed(
     assert metric("leaderboard_frames_total") - frames == 2
     assert metric("leaderboard_publish_lag_seconds_count") - lags == 1
     assert metric("leaderboard_publish_lag_seconds_sum") - lag_s == pytest.approx(0.15)
+
+
+async def test_a_writable_join_restarts_the_loop_of_a_quiz_whose_loop_ended() -> None:
+    store = ScriptedStore(*[Publish("ended", SEQ + 1)] * 2, messages=[ended(SEQ + 1)])
+    registry = Registry(cast("Store", store), 10_000)
+    ticker = Ticker(cast("FeedStore", store), registry, Mock(spec=QuizService), "n1", lambda: 0)
+    registry.watcher = ticker
+    sender = Mock(spec=Sender, close_code=None)
+    registry.bind(Connection("c1", "u1", quiz_id="Q", present=True), sender)
+    ended_loop = ticker._loops["Q"]  # noqa: SLF001 - the loop under test
+    await asyncio.wait_for(ended_loop, 1)  # quiz_ended relayed; the socket stays bound
+    registry.bind(Connection("c2", "u2", quiz_id="Q", read_only=True), sender)
+    assert "Q" not in ticker._loops  # noqa: SLF001 - an ended loop leaves; read only needs none
+    registry.bind(Connection("c3", "u3", quiz_id="Q", present=True), sender)  # the id was reused
+    assert ticker._loops["Q"] is not ended_loop  # noqa: SLF001
+    await ticker.stop()
+
+
+async def test_a_failed_subscribe_is_counted_and_retried(
+    sockets: Mock, backoffs: list[int], metric: Callable[..., float]
+) -> None:
+    store = ScriptedStore(Publish("ended", SEQ + 1), messages=[ended(SEQ + 1)])
+    store.subscribe_errors = [ConnectionError("No connection available.")]
+    before = metric("feed_subscribe_failures_total", reason="error")
+    await run(store, sockets, repairing())
+    assert (metric("feed_subscribe_failures_total", reason="error"), backoffs) == (before + 1, [0])
+
+
+def admits(ticker: Ticker, quiz_id: str) -> bool:
+    with ticker.admission(quiz_id) as admitted:
+        return admitted
+
+
+async def test_a_node_at_its_subscription_limit_admits_only_the_quizzes_it_follows(
+    sockets: Mock, metric: Callable[..., float]
+) -> None:
+    store = cast("FeedStore", ScriptedStore())
+    ticker = Ticker(store, sockets, Mock(spec=QuizService), "n1", lambda: 0, max_quizzes=1)
+    before = metric("feed_subscribe_failures_total", reason="limit")
+    assert admits(ticker, "A")
+    ticker.open("A")
+    assert (admits(ticker, "A"), admits(ticker, "B")) == (True, False)
+    assert metric("feed_subscribe_failures_total", reason="limit") == before + 1
+    await ticker.stop()
+    assert admits(ticker, "B")
+
+
+async def test_a_join_in_flight_holds_its_subscription_until_the_bind_opens_the_loop(
+    sockets: Mock,
+) -> None:
+    store = cast("FeedStore", ScriptedStore())
+    ticker = Ticker(store, sockets, Mock(spec=QuizService), "n1", lambda: 0, max_quizzes=1)
+    with ticker.admission("A") as a:  # the join's store write awaits here
+        assert (a, admits(ticker, "A"), admits(ticker, "B")) == (True, True, False)
+    ticker.open("A")  # the bind, right after the join returned
+    assert admits(ticker, "B") is False
+    await ticker.stop()
+
+
+async def test_no_loop_starts_past_the_limit_for_a_join_that_was_not_admitted(
+    sockets: Mock,
+) -> None:
+    store = cast("FeedStore", ScriptedStore())
+    ticker = Ticker(store, sockets, Mock(spec=QuizService), "n1", lambda: 0, max_quizzes=1)
+    ticker.open("A")
+    ticker.open("B")  # a refused join on a bound socket, or a read-only join, still binds
+    assert list(ticker._loops) == ["A"]  # noqa: SLF001 - the loops under test
+    await ticker.stop()
