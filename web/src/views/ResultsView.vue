@@ -87,10 +87,7 @@ const timeLeft = computed(() => {
         />
         <PinnedRow />
       </template>
-      <AllPlayers
-        v-if="all || store.playerCount > TOP_ROWS"
-        v-model:open="all"
-      />
+      <AllPlayers v-model:open="all" />
     </template>
   </section>
   <section

@@ -6,7 +6,6 @@ import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 import AllPlayers from './AllPlayers.vue'
 import LeaderboardRows from './LeaderboardRows.vue'
-import { TOP_ROWS } from './limits'
 import PinnedRow from './PinnedRow.vue'
 
 const store = useQuizStore()
@@ -46,10 +45,6 @@ const all = ref(false)
       />
       <PinnedRow />
     </template>
-    <!-- With every player in the top 10 there is nothing more to show. -->
-    <AllPlayers
-      v-if="all || store.playerCount > TOP_ROWS"
-      v-model:open="all"
-    />
+    <AllPlayers v-model:open="all" />
   </Card>
 </template>

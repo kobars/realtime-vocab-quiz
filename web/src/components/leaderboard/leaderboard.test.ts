@@ -130,11 +130,21 @@ it('"Show all players" takes the place of the top 10 and my pinned row, and clos
 
 it('"Show all players" is not offered while every player fits in the top 10', async () => {
   await joinedStore()
-  const w = render(LeaderboardPanel)
   await receive(board(4, top(10), 10))
+  const w = render(LeaderboardPanel)
   expect(button(w, 'Show all players')).toBeUndefined()
   await receive(board(5, top(11), 11))
   expect(button(w, 'Show all players')?.exists()).toBe(true)
+})
+
+it('"Show all players" stays offered, with the focus on it, when the player count drops back to 10', async () => {
+  await joinedStore()
+  const w = render(LeaderboardPanel)
+  await receive(board(4, top(11), 11))
+  ;(button(w, 'Show all players')?.element as HTMLElement).focus()
+  // A store restart can lose the last second of joins, so a later frame may count fewer players.
+  await receive(board(5, top(10), 10))
+  expect(document.activeElement?.textContent?.trim()).toBe('Show all players')
 })
 
 it('pages through get_leaderboard and reloads the open page at most once per second while scores move', async () => {

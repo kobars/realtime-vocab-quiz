@@ -1,15 +1,18 @@
-<!-- AI-ASSISTED: "Show all players": a panel that takes the place of the top 10 (v-model:open tells the parent), with get_leaderboard pages, read again (at most once per second, on the monotonic clock) while the standings move or no reply came, with a loading status until a page arrives and the shown rows kept while the next one loads, in a flat clay panel inside the leaderboard card that fades in behind motion-safe (UI spec §3.6, §6.1; protocol §3, §7). -->
+<!-- AI-ASSISTED: "Show all players", offered once some player is outside the top 10: a panel that takes the place of the top 10 (v-model:open tells the parent), with get_leaderboard pages, read again (at most once per second, on the monotonic clock) while the standings move or no reply came, with a loading status until a page arrives and the shown rows kept while the next one loads, in a flat clay panel inside the leaderboard card that fades in behind motion-safe (UI spec §3.6, §6.1; protocol §3, §7). -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { Button } from '@quiz/clay'
 import { PAGE_SIZE, type StandingsPage, useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 import LeaderboardRows from './LeaderboardRows.vue'
-import { PAGE_RELOAD_MS } from './limits'
+import { PAGE_RELOAD_MS, TOP_ROWS } from './limits'
 
 const store = useQuizStore()
 /** Open: the parent hides its own rows, so the pages are the only list on screen. */
 const open = defineModel<boolean>('open', { default: false })
+/** Offered once some player is outside the top 10, and from then on: a count that drops (a store restart can lose the last second of joins) never takes the button, and the focus on it, away. */
+const offered = ref(false)
+watch(() => store.playerCount > TOP_ROWS, (more) => more && (offered.value = true), { immediate: true })
 const offset = ref(0)
 const toggle = useTemplateRef<InstanceType<typeof Button>>('toggle')
 const panel = useTemplateRef<HTMLElement>('panel')
@@ -79,7 +82,7 @@ onBeforeUnmount(cancel)
 
 <template>
   <Button
-    v-if="!open"
+    v-if="offered && !open"
     ref="toggle"
     variant="outline"
     @click="show"
@@ -87,7 +90,7 @@ onBeforeUnmount(cancel)
     {{ strings.leaderboard.showAll }}
   </Button>
   <section
-    v-else
+    v-else-if="open"
     ref="panel"
     tabindex="-1"
     class="flex flex-col gap-3 rounded-card border-clay bg-card p-4 motion-safe:animate-fade-in"
