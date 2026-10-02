@@ -16,13 +16,21 @@ let start: ReturnType<typeof vi.fn>
 let preview: { status: number; body: unknown }
 const open = { title: 'Everyday words', questionCount: 10, status: 'open', players: 3 }
 const missing = { error: 'QUIZ_NOT_FOUND', message: 'Quiz not found.' }
+/** The bank list the host link waits for; the server offers no hosting unless a test says so. */
+let banks: { status: number; body: unknown }
+const BANKS_URL = '/api/banks'
+const answerBanks = () => new Response(JSON.stringify(banks.body), { status: banks.status })
+/** The quiz lookups made so far, without the bank list. */
+const lookups = () => vi.mocked(fetch).mock.calls.filter(([url]) => url !== BANKS_URL).length
 
 beforeEach(() => {
   setActivePinia(createPinia())
   sessionStorage.clear()
   start = vi.fn()
   preview = { status: 200, body: open }
-  vi.stubGlobal('fetch', vi.fn(async () => {
+  banks = { status: 404, body: { error: 'NOT_FOUND', message: 'Not found.' } }
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url === BANKS_URL) return answerBanks()
     if (preview.status === 0) throw new TypeError('offline')
     return new Response(JSON.stringify(preview.body), { status: preview.status })
   }))
@@ -229,7 +237,7 @@ describe('preview', () => {
     await id.trigger('blur')
     await flushPromises()
     expect(describedBy(id)).toContain(strings.join.notFound)
-    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(lookups()).toBe(1)
   })
 
   it('announces "no quiz" in the polite preview region, which a lookup that ends after the focus left still reaches', async () => {
@@ -273,7 +281,7 @@ describe('preview', () => {
     preview = { status: 200, body: open }
     await name.setValue('Ana')
     await submit()
-    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(lookups()).toBe(2)
     expect(start).toHaveBeenCalledWith('VOCAB-42', 'Ana')
   })
 
@@ -460,7 +468,8 @@ describe('join', () => {
     /** Each lookup waits until the test answers it, in any order. */
     function heldLookups() {
       const held: Array<(response: Response) => void> = []
-      vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => held.push(resolve))))
+      vi.stubGlobal('fetch', vi.fn((url: string) =>
+        url === BANKS_URL ? Promise.resolve(answerBanks()) : new Promise<Response>((resolve) => held.push(resolve))))
       return (index: number, status: number, body: unknown) => {
         held[index]?.(new Response(JSON.stringify(body), { status }))
         return flushPromises()
@@ -502,5 +511,25 @@ describe('join', () => {
       await answer(0, 200, open)
       expect(start).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('host link', () => {
+  it('offers "Host a quiz" after the join form when the server lists question sets, and it opens /host', async () => {
+    banks = { status: 200, body: [{ id: 'VOCAB-42', title: 'Everyday English', questionCount: 10 }] }
+    const { wrapper } = await screen()
+    const link = wrapper.get('[data-test="host-entry"] a')
+    expect([link.text(), link.attributes('href')]).toEqual([strings.join.host, '/host'])
+    expect(wrapper.get('form').element.compareDocumentPosition(link.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it.each([
+    ['hosting is off (404)', 404, { error: 'NOT_FOUND', message: 'Not found.' }],
+    ['the list fails', 503, {}],
+    ['the list is empty', 200, []],
+  ])('hides the link when %s', async (_, status, body) => {
+    banks = { status, body }
+    const { wrapper } = await screen()
+    expect(wrapper.find('[data-test="host-entry"]').exists()).toBe(false)
   })
 })

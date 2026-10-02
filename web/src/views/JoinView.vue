@@ -1,8 +1,9 @@
-<!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link, the quiz preview (a miss also announced) and the join (with the busy retry, the blocking card and the rejoin after a reload), a link back to the quiz this tab is still in, in a clay card over the hero decoration (UI spec §3.1). -->
+<!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link, the quiz preview (a miss also announced) and the join (with the busy retry, the blocking card and the rejoin after a reload), a link back to the quiz this tab is still in, a quiet "Host a quiz" link when the server offers hosting, in a clay card over the hero decoration (UI spec §3.1). -->
 <script setup lang="ts">
 import { LoaderCircle } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { fetchBanks } from '@/components/host/hosting'
 import JoinField from '@/components/join/JoinField.vue'
 import QuizPreviewCard from '@/components/join/QuizPreviewCard.vue'
 import { fetchQuizPreview, type PreviewResult } from '@/components/join/preview'
@@ -37,6 +38,11 @@ const live = computed(() => (!joining.value && store.blocked === null && (store.
 let mounted = true
 onBeforeUnmount(() => {
   mounted = false
+})
+/** The host link shows only once the server lists question sets to host (a 404 means hosting is off). */
+const hostable = ref(false)
+void fetchBanks().then((result) => {
+  if (mounted) hostable.value = result.kind === 'ok'
 })
 
 const idField = useTemplateRef<{ focus: () => void }>('idField')
@@ -283,5 +289,21 @@ watch(
         </Button>
       </form>
     </Card>
+    <p
+      v-if="hostable"
+      data-test="host-entry"
+      class="flex flex-wrap items-center gap-x-1 text-muted-foreground"
+    >
+      {{ strings.join.hostPrompt }}
+      <Button
+        as-child
+        variant="link"
+        class="px-2"
+      >
+        <RouterLink :to="{ name: 'host' }">
+          {{ strings.join.host }}
+        </RouterLink>
+      </Button>
+    </p>
   </section>
 </template>
