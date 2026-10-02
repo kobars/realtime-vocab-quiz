@@ -1,0 +1,17 @@
+# AI-ASSISTED: HTTPS for the public host (compose.prod.yaml): a certificate for DOMAIN, renewed
+# automatically, and every request and WebSocket proxied to nginx.
+{
+	# No HTTP/3: the host's firewall opens TCP 80 and 443 only.
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$DOMAIN} {
+	tls {
+		issuer {$TLS_ISSUER}
+	}
+	header Strict-Transport-Security "max-age=31536000"
+	# Caddy replaces the client's X-Forwarded-For with the address it sees.
+	reverse_proxy nginx:8080
+}

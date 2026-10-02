@@ -60,8 +60,10 @@ ui_run = mkdir -p web/node_modules && docker run --rm --platform linux/amd64 --i
 	corepack enable && pnpm install --frozen-lockfile --store-dir /tmp/pnpm-store && eval "pnpm exec playwright test $(1) $$UI_ARGS"'
 # The bots that make demo starts.
 BOTS ?= 20
+# The full stack on a public host, behind Caddy's HTTPS (docs/operations.md, "Deploy to a VM").
+PROD_COMPOSE = docker compose -f compose.yaml -f compose.prod.yaml
 
-.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget
+.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget prod-up prod-down prod-logs prod-demo
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -83,6 +85,14 @@ new-quiz: ## Start a fresh 60-min quiz on the running stack; print its ID and pl
 demo-end: ## End quiz ID=<id> now as the mock host; its players see the final results
 	$(if $(ID),,$(error set ID=<quiz id>, as make demo printed it))
 	docker compose --progress quiet run --rm -T seed python /opt/seed.py --end '$(ID)'
+prod-up: build ## Build and start the full stack behind HTTPS on a public host (.env from .env.prod.example)
+	$(PROD_COMPOSE) --profile full up -d --wait --wait-timeout 180
+prod-down: ## Stop the public host's stack; its data and certificates stay
+	$(PROD_COMPOSE) --profile '*' down
+prod-logs: ## Follow the logs of the public host's stack
+	$(PROD_COMPOSE) --profile full logs -f --tail 100
+prod-demo: ## Start a fresh 60-min quiz on the public host's stack; print its HTTPS player URL
+	$(PROD_COMPOSE) --progress quiet run --rm -T seed
 smoke-full: ## Smoke-test the running full stack through nginx, stopping one API node
 	uv run --project api --locked python load/smoke_full.py
 dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)

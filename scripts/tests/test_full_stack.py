@@ -1,6 +1,8 @@
-# AI-ASSISTED: checks on the compose full profile and the edge nginx config, read as files.
-"""The full stack's hardening and edge rules, read from ``compose.yaml`` (with pre-commit's YAML
-loader, which resolves the anchors) and ``infra/nginx/nginx.conf``; no Docker needed."""
+# AI-ASSISTED: checks on the compose full profile, its public-host override and the edge nginx
+# config, read as files.
+"""The full stack's hardening and edge rules, read from ``compose.yaml`` and ``compose.prod.yaml``
+(with pre-commit's YAML loader, which resolves the anchors) and ``infra/nginx/nginx.conf``; no
+Docker needed."""
 
 import re
 from pathlib import Path
@@ -14,6 +16,9 @@ ROOT = Path(__file__).resolve().parents[2]
 COMPOSE: dict[str, Any] = yaml_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
 FULL = {name: s for name, s in COMPOSE["services"].items() if "full" in s.get("profiles", ())}
 NGINX = (ROOT / "infra" / "nginx" / "nginx.conf").read_text(encoding="utf-8")
+PROD_TEXT = (ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
+# pre-commit's loader knows no compose tags: read `!reset []` as the empty list it resets to.
+PROD: dict[str, Any] = yaml_load(PROD_TEXT.replace("ports: !reset []", "ports: []"))
 
 
 def _directive(name: str) -> list[str]:
@@ -143,3 +148,69 @@ def test_make_down_stops_every_profile() -> None:
     """``docker compose down`` without a profile leaves profiled services running."""
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     assert "\n\t$(COMPOSE_NO_SECRETS) --profile '*' down\n" in makefile
+
+
+def test_on_a_public_host_only_caddy_publishes_a_port_80_and_443() -> None:
+    services = PROD["services"]
+    assert services["caddy"]["ports"] == ["80:80", "443:443"]
+    assert "ports: !reset []" in PROD_TEXT
+    assert services["nginx"]["ports"] == []
+    assert [name for name, s in services.items() if s.get("ports")] == ["caddy"]
+
+
+def test_caddy_is_hardened_and_never_on_the_stack_network() -> None:
+    caddy = PROD["services"]["caddy"]
+    for key in ("read_only", "tmpfs", "cap_drop", "security_opt", "ulimits", "restart"):
+        assert caddy[key] == FULL["nginx"][key]
+    assert caddy["cap_add"] == ["NET_BIND_SERVICE"]
+    assert caddy["networks"] == ["edge"]  # apart from Redis and the API nodes
+    assert PROD["services"]["nginx"]["networks"] == ["stack", "edge"]
+
+
+def test_nginx_trusts_x_forwarded_for_from_the_edge_network_only() -> None:
+    """The image's entrypoint renders templates/edge/ into NGINX_ENVSUBST_OUTPUT_DIR/edge/."""
+    nginx = PROD["services"]["nginx"]
+    (edge,) = PROD["networks"]["edge"]["ipam"]["config"]
+    assert nginx["environment"]["EDGE_SUBNET"] == edge["subnet"]
+    template = (ROOT / "infra" / "nginx" / "real-ip.conf.template").read_text(encoding="utf-8")
+    assert re.findall(r"^(\w+) ([^;]+);", template, re.MULTILINE) == [
+        ("set_real_ip_from", "${EDGE_SUBNET}"),
+        ("real_ip_header", "X-Forwarded-For"),
+    ]
+    (mount,) = nginx["volumes"]
+    assert (
+        mount
+        == "./infra/nginx/real-ip.conf.template:/etc/nginx/templates/edge/real-ip.conf.template:ro"
+    )
+    assert f"{nginx['environment']['NGINX_ENVSUBST_OUTPUT_DIR']}/edge/*.conf" in _directive(
+        "include"
+    )
+
+
+def test_on_a_public_host_the_nodes_allow_the_public_origin_from_env() -> None:
+    for node in ("api-1", "api-2"):
+        assert PROD["services"][node]["environment"] == {
+            "ALLOWED_ORIGINS": "${ALLOWED_ORIGINS:?set ALLOWED_ORIGINS in .env}"
+        }
+    assert PROD["services"]["seed"]["command"][-2:] == [
+        "--public-url",
+        "https://${DOMAIN:?set DOMAIN in .env}",
+    ]
+
+
+def test_the_public_host_example_env_names_the_origin_and_the_default_cap() -> None:
+    lines = (ROOT / ".env.prod.example").read_text(encoding="utf-8").splitlines()
+    env = dict(line.split("=", 1) for line in lines if line and not line.startswith("#"))
+    assert env["ALLOWED_ORIGINS"] == "https://${DOMAIN}"
+    assert env["ADMIN_TOKEN"] == env["REDIS_PASSWORD"] == ""  # a comment would be the value
+    assert int(env["PER_IP_CONN_CAP"]) == Settings.model_fields["per_ip_conn_cap"].default
+    assert re.fullmatch(r"\d+[mg]b", env["REDIS_MAXMEMORY"])
+
+
+def test_the_public_host_targets_run_both_compose_files() -> None:
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "\nPROD_COMPOSE = docker compose -f compose.yaml -f compose.prod.yaml\n" in makefile
+    for target in ("prod-up", "prod-down", "prod-logs", "prod-demo"):
+        recipe = re.search(rf"^{target}:.*\n\t(.*)", makefile, re.MULTILINE)
+        assert recipe is not None
+        assert recipe[1].startswith("$(PROD_COMPOSE) ")
