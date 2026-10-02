@@ -287,7 +287,9 @@ class QuizService:
         if conn.last_resync_ms is not None and now - conn.last_resync_ms < RESYNC_INTERVAL_MS:
             raise Refused(m.ErrorCode.RATE_LIMITED, "at most one resync per second")
         conn.last_resync_ms = now
-        return Outcome(await self.standing(quiz_id, conn.user_id))
+        standing = await self.standing(quiz_id, conn.user_id)
+        metrics.RESYNCS.inc()
+        return Outcome(standing)
 
     async def standing(self, quiz_id: str, user_id: str) -> Standing:
         return _standing(await self.snapshot(quiz_id, user_id))

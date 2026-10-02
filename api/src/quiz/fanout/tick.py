@@ -158,6 +158,7 @@ class Ticker:
         result = await self._store.publish_if_dirty(quiz_id, self._node_id)
         if result.status == "published":
             metrics.LEADERBOARD_FRAMES.inc()
+            metrics.LEADERBOARD_PUBLISH_LAG.observe(result.lag_ms / 1000)
         return result
 
 

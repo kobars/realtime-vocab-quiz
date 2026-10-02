@@ -259,7 +259,10 @@ def test_the_report_is_printed_before_the_result_is_saved(
 
 @pytest.mark.parametrize(("slo_met", "status"), [(True, 0), (False, 1)])
 def test_a_valid_run_that_misses_the_slo_exits_with_status_1(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, slo_met: bool, status: int  # noqa: FBT001
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    slo_met: bool,  # noqa: FBT001
+    status: int,
 ) -> None:
     result = summary(Recorder(answer_ms=[10.0]), [], 1) | {"slo_met": slo_met}
     monkeypatch.setattr(bots, "run", lambda _: result)

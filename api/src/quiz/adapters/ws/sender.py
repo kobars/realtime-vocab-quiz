@@ -20,6 +20,7 @@ from fastapi import WebSocket
 
 from quiz.contracts import messages as m
 from quiz.contracts.codec import encode
+from quiz.obs import metrics
 
 CLOSE_OVERLOAD = 1013
 FLUSH_S = 5.0
@@ -65,6 +66,7 @@ class Sender:
             data = data.replace(_NOT_REBASED, _REBASED, 1)
             while self._queue and self._queue[-1].leaderboard:
                 self._queued -= len(self._queue.pop().data)
+                metrics.LEADERBOARD_FRAMES_CONFLATED.inc()
         self._append(data, leaderboard=leaderboard)
         if self.buffered > self._hard:
             self._queue.clear()

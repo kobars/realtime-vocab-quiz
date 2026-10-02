@@ -2,8 +2,9 @@
 """Every metric the service exports. ``/metrics`` serves ``REGISTRY``. Each metric is registered
 here up front, and a labelled counter starts with each label value at 0 (``ws_errors_total``: its
 ``UNAVAILABLE`` series), so a scrape shows those series before their first event. The scoring
-service counts answers, error replies and clock steps, the gateway open sockets, the fan-out tick
-its frames and durations, the log pipeline the lines it dropped."""
+service counts answers, error replies, resyncs and clock steps, the gateway open sockets and the
+leaderboard frames conflation dropped, the fan-out tick its frames, durations and publish lags, the
+log pipeline the lines it dropped."""
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -25,6 +26,18 @@ for _result in ("correct", "wrong", "late"):
 LEADERBOARD_FRAMES = Counter(
     "leaderboard_frames_total", "Leaderboard frames published by this node", registry=REGISTRY
 )
+LEADERBOARD_FRAMES_CONFLATED = Counter(
+    "leaderboard_frames_conflated_total",
+    "Leaderboard frames dropped from a slow socket's send queue by a newer frame",
+    registry=REGISTRY,
+)
+LEADERBOARD_PUBLISH_LAG = Histogram(
+    "leaderboard_publish_lag_seconds",
+    "Time from the first change a published leaderboard frame carries to its publication",
+    buckets=(0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.75, 1.0, 2.5),
+    registry=REGISTRY,
+)
+RESYNCS = Counter("resyncs_total", "Resync requests answered with a snapshot", registry=REGISTRY)
 TICK_DURATION = Histogram(
     "tick_duration_seconds",
     "Duration of one coalescing tick: the publish script, and the shifted ranks when due",
