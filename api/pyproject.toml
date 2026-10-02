@@ -58,7 +58,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["quiz", "check_internal", "bots", "latency", "player"]
+known-first-party = ["quiz", "bots", "latency", "player"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004"]
