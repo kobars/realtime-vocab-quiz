@@ -34,18 +34,39 @@ def backoff_s(attempt: int) -> float:
 
 
 class Ticker:
-    def __init__(
-        self, store: FeedStore, sockets: Sockets, service: QuizService, node_id: str, clock: Clock
+    def __init__(  # noqa: PLR0913 - the loop's collaborators and two node settings
+        self,
+        store: FeedStore,
+        sockets: Sockets,
+        service: QuizService,
+        node_id: str,
+        clock: Clock,
+        *,
+        max_quizzes: int | None = None,
     ) -> None:
-        """``clock`` paces the warning of an unreachable store: one per interval for every quiz."""
+        """``clock`` paces the warning of an unreachable store: one per interval for every quiz.
+        ``max_quizzes`` is how many subscriptions the store holds at once; None for no limit."""
         self._store, self._sockets, self._service = store, sockets, service
-        self._node_id = node_id
+        self._node_id, self._max_quizzes = node_id, max_quizzes
         self._outage_log = Throttle(clock, OUTAGE_LOG_INTERVAL_MS)
         self._tick_s = store.limits.tick_ms / 1000
         self._loops: dict[str, asyncio.Task[None]] = {}
 
+    def admits(self, quiz_id: str) -> bool:
+        """Whether this node can follow the quiz: it does, or a subscription is free; a refusal
+        is counted. A join it refuses would be answered but never get a live update."""
+        if self._max_quizzes is None or self._following(quiz_id):
+            return True
+        if sum(self._following(other) for other in self._loops) < self._max_quizzes:
+            return True
+        metrics.FEED_SUBSCRIBE_FAILURES.inc()
+        return False
+
+    def _following(self, quiz_id: str) -> bool:
+        return (task := self._loops.get(quiz_id)) is not None and not task.done()
+
     def open(self, quiz_id: str) -> None:
-        if (task := self._loops.get(quiz_id)) is None or task.done():
+        if not self._following(quiz_id):
             self._loops[quiz_id] = asyncio.create_task(self._run(quiz_id))
 
     def close(self, quiz_id: str) -> None:
@@ -73,12 +94,16 @@ class Ticker:
         progress = asyncio.Event()  # set by a relayed broadcast or a tick that went through
         attempt, failed = 0, False
         while True:
+            subscribed = False
             try:
                 async with self._store.subscribe(quiz_id) as messages:
+                    subscribed = True
                     if failed:
                         await self._repair(quiz_id, relay)
                     await self._serve(quiz_id, relay, messages, progress)
             except Exception as error:
+                if not subscribed:
+                    metrics.FEED_SUBSCRIBE_FAILURES.inc()
                 if isinstance(error, DomainError) and error.code is ErrorCode.QUIZ_NOT_FOUND:
                     return  # expired, or lost by the store: also from the repair's read (§5)
                 log.exception("fan-out of quiz %s failed: subscribing again", quiz_id)

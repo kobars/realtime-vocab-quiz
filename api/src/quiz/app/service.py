@@ -123,6 +123,8 @@ class QuizService:
         self._outage_log = Throttle(clock, OUTAGE_LOG_INTERVAL_MS)
         self._pages: dict[PageKey, tuple[int, m.LeaderboardPage]] = {}  # (expires at ms, page)
         self._page_reads: dict[PageKey, asyncio.Task[m.LeaderboardPage]] = {}
+        # whether this node can send the quiz's live updates; the composition root sets it
+        self.admits: Callable[[str], bool] = lambda _quiz_id: True
 
     def drop_cache(self, quiz_id: str | None = None) -> None:
         """Forget the cached standings and pages of one quiz, or of all, and the reads in flight.
@@ -196,6 +198,8 @@ class QuizService:
             raise Refused(m.ErrorCode.INVALID_MESSAGE, f"displayName must be 1-{NAME_MAX} chars")
         if conn.quiz_id not in {None, quiz_id}:
             raise Refused(m.ErrorCode.INVALID_STATE, f"this socket serves {conn.quiz_id}")
+        if not self.admits(quiz_id):  # the client retries, and may reach another node
+            raise Refused(m.ErrorCode.UNAVAILABLE, "this node follows no more quizzes")
         if (j := None if conn.read_only else await self._join(conn, quiz_id, name)) is None:
             snapshot = await self.snapshot(quiz_id, conn.user_id)
             conn.quiz_id, conn.read_only = quiz_id, True

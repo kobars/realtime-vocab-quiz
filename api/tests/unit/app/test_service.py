@@ -172,6 +172,15 @@ async def test_join_errors_and_requests_before_join(service: QuizService) -> Non
     assert await send(service, conn, m.Ping()) == [m.Pong(seq=0)]
 
 
+async def test_a_join_this_node_cannot_follow_is_unavailable_and_writes_nothing(
+    service: QuizService, store: SpyStore
+) -> None:
+    service.admits = lambda quiz_id: quiz_id != QUIZ
+    join = m.Join(quizId=QUIZ, displayName="A")
+    assert await refused(service, Connection("c-a", "a"), join) == (E.UNAVAILABLE, None)
+    assert (await store.snapshot(QUIZ, None)).player_count == 0
+
+
 async def test_join_after_end_is_read_only(service: QuizService, store: SpyStore) -> None:
     store.now[0] += 60_000
     conn = Connection("c-a", "a")

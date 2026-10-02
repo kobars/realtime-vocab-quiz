@@ -1,14 +1,18 @@
 # AI-ASSISTED: the composition root on Redis: the start hook loads every Lua script; a join burst
 # above the connection pool's size waits for a connection instead of failing; quiz subscriptions
 # never take the command pool's connections; readiness needs a write that Redis accepts; a ticket
-# renews its session's expiry.
+# renews its session's expiry; a node with every subscription taken refuses a join to a new quiz.
 import asyncio
 import hashlib
+import json
 import uuid
-from contextlib import AsyncExitStack
+from collections.abc import Callable
+from contextlib import AsyncExitStack, ExitStack
+from functools import partial
 
 import httpx
 from redis.asyncio import Redis
+from starlette.testclient import TestClient
 
 from quiz.adapters.mock_auth import tokens
 from quiz.adapters.mock_auth.redis_store import SESSION_KEY
@@ -93,3 +97,32 @@ async def test_a_ticket_renews_its_session_for_the_full_lifetime(redis_url: str)
         await admin.expire(key, 60)  # 1 h 59 min old
         assert await tickets.issue_ticket(token) is not None
         assert await admin.ttl(key) == tokens.SESSION_TTL_S
+
+
+def test_a_join_to_a_quiz_past_the_subscription_limit_is_unavailable(
+    redis_url: str, metric: Callable[..., float]
+) -> None:
+    settings = Settings(store="redis", redis_url=redis_url, redis_max_connections=1)
+    app = create_app(settings)
+    services, replies = services_of(app), []
+    quizzes = [f"F-{uuid.uuid4().hex[:8].upper()}" for _ in range(2)]
+    create = partial(services.store.create_quiz, window_ms=60_000, time_limit_ms=20_000)
+
+    async def ticket() -> str | None:
+        return await services.tickets.issue_ticket((await services.tickets.create_session("A"))[1])
+
+    with TestClient(app) as client, ExitStack() as sockets:
+        portal = client.portal
+        assert portal is not None
+        before = metric("feed_subscribe_failures_total")
+        for quiz_id in quizzes:  # both sockets stay open: the first quiz keeps its subscription
+            portal.call(create, quiz_id, (Question("q0", 1),))
+            url, origin = f"/ws?ticket={portal.call(ticket)}", {"origin": "http://localhost:8080"}
+            ws = sockets.enter_context(client.websocket_connect(url, ["quiz.v1"], headers=origin))
+            ws.send_text(
+                json.dumps({"v": 1, "type": "join", "quizId": quiz_id, "displayName": "A"})
+            )
+            replies.append(ws.receive_json())
+    assert replies[0]["type"] == "joined"
+    assert (replies[1]["type"], replies[1]["code"]) == ("error", "UNAVAILABLE")
+    assert metric("feed_subscribe_failures_total") == before + 1

@@ -1,5 +1,5 @@
 # AI-ASSISTED: store faults and malformed broadcasts never stop the tick loop or the relay early;
-# a writable join restarts a loop that ended.
+# a writable join restarts a loop that ended; feeds this node cannot subscribe to are counted.
 import asyncio
 import json
 import logging
@@ -32,6 +32,7 @@ class ScriptedStore:
     def __init__(self, *steps: Publish | Exception, messages: Sequence[str] = ()) -> None:
         self.steps, self.messages, self.calls = steps, messages, 0
         self.ranks_error: Exception | None = None
+        self.subscribe_errors: list[Exception] = []  # subscribe raises these first, in turn
         self.host_ends: list[int | Exception] = []  # end_by_host plays these in turn
 
     async def end_quiz(self, _quiz_id: str, _reason: str) -> End:
@@ -60,6 +61,8 @@ class ScriptedStore:
 
     @asynccontextmanager
     async def subscribe(self, _quiz_id: str) -> AsyncIterator[AsyncIterator[str]]:
+        if self.subscribe_errors:
+            raise self.subscribe_errors.pop(0)
         yield self._feed()
 
     async def _feed(self) -> AsyncIterator[str]:
@@ -304,3 +307,27 @@ async def test_a_writable_join_restarts_the_loop_of_a_quiz_whose_loop_ended() ->
     registry.bind(Connection("c3", "u3", quiz_id="Q", present=True), sender)  # the id was reused
     assert ticker._loops["Q"] is not ended_loop  # noqa: SLF001
     await ticker.stop()
+
+
+async def test_a_failed_subscribe_is_counted_and_retried(
+    sockets: Mock, backoffs: list[int], metric: Callable[..., float]
+) -> None:
+    store = ScriptedStore(Publish("ended", SEQ + 1), messages=[ended(SEQ + 1)])
+    store.subscribe_errors = [ConnectionError("No connection available.")]
+    before = metric("feed_subscribe_failures_total")
+    await run(store, sockets, repairing())
+    assert (metric("feed_subscribe_failures_total"), backoffs) == (before + 1, [0])
+
+
+async def test_a_node_at_its_subscription_limit_admits_only_the_quizzes_it_follows(
+    sockets: Mock, metric: Callable[..., float]
+) -> None:
+    store = cast("FeedStore", ScriptedStore())
+    ticker = Ticker(store, sockets, Mock(spec=QuizService), "n1", lambda: 0, max_quizzes=1)
+    before = metric("feed_subscribe_failures_total")
+    assert ticker.admits("A")
+    ticker.open("A")
+    assert (ticker.admits("A"), ticker.admits("B")) == (True, False)
+    assert metric("feed_subscribe_failures_total") == before + 1
+    await ticker.stop()
+    assert ticker.admits("B")
