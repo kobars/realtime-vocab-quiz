@@ -415,8 +415,9 @@ TODO: authentication, input limits, origin checks and abuse limits.
 <!-- AI-ASSISTED-BEGIN: drafted with Claude Code from api/src/quiz/adapters/ws/heartbeat.py and the gateway's upgrade checks. -->
 
 Transport limits before the app. API nodes sit behind nginx and are never published directly:
-uvicorn's `limit_concurrency` and the gateway's caps count only requests that reach the app. So
-the server config bounds what comes before: a request head is cut at 16 KiB (400) and closed
+uvicorn runs with no connection limit of its own and times no request body (nginx buffers each
+body first), and the gateway's caps count only accepted sockets. So the server config bounds
+what comes before: a request head is cut at 16 KiB (400) and closed
 when it is not complete `HEADER_TIMEOUT_MS` (10 s) after the connection opened or the request
 began; a WebSocket message of more than 64 fragments, empty ones included, is closed with 1009;
 on shutdown, requests still open after 5 s are cancelled. Upgrade attempts are throttled per

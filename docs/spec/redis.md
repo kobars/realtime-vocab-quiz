@@ -32,6 +32,7 @@ This document is the store design behind the quiz rules. It keeps the consistenc
 | 13 | `quiz:{Q}:replaced` | set | the `connId`s that a newer `join` of their user took over; a `join` from one of them is refused |
 | 14 | `quiz:{Q}:tick` | string | the tick token: the publishing node's ID, set with `SET NX PX 200` |
 | — | `quiz:{Q}:events` | pub/sub channel | one message per `seq`: `{"frame": <the broadcast JSON (leaderboard or quiz_ended)>, "ranks": [[uid, rank, score], …]}` |
+| — | `quiz:ready:probe` | string | `1`, written by the readiness probe (`GET /readyz`) with a 5 s expiry; belongs to no quiz |
 | — | `quiz:{Q}:control` | pub/sub channel | `{"type": "session_replaced", "uid": …, "connId": <the replaced connection>}`; no `seq`, never relayed to a client |
 
 **TTL.** Keys 1–13 are the data keys. They share one TTL, `QUIZ_TTL_MS` = 24 h, and every write script ends by running `PEXPIRE` on all of them, so a quiz expires as a whole 24 h after its last write and is never half there. A key that a script creates gets its TTL in the same script. The tick token keeps its own 200 ms expiry and is never refreshed; `publish_leaderboard` only cuts it back to one tick when a clock step back has stretched it (Redis stores expiry as wall-clock time). The channels are not keys and have no TTL.

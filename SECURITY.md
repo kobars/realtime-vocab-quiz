@@ -29,9 +29,9 @@ limits, the ticket check, the Redis scripts and the client.
 ## Deployment assumption
 
 An API node is never published directly: nginx is the only public entry, and in
-`compose.yaml` the nodes publish no port. uvicorn's `limit_concurrency` and the gateway's
-connection caps count only requests that reach the app, so the node bounds the earlier stages
-itself (`api/src/quiz/adapters/ws/heartbeat.py`): a request head above 16 KiB gets 400, a head
+`compose.yaml` the nodes publish no port. uvicorn runs with no connection limit of its own
+and times no request body (nginx buffers each body before passing it on), and the gateway's
+connection caps count only accepted sockets, so the node bounds the earlier stages itself (`api/src/quiz/adapters/ws/heartbeat.py`): a request head above 16 KiB gets 400, a head
 not complete within `HEADER_TIMEOUT_MS` (10 s by default) is closed, a WebSocket message of more
 than 64 fragments is closed with 1009, and the upgrade attempts of one client address are
 throttled before the ticket lookup (`docs/spec/protocol.md` §8).
