@@ -704,7 +704,9 @@ the job ends.
 | Display name | at most 128 characters raw, 1–32 after trim and NFC | `contracts/messages.py`, `adapters/mock_auth/tokens.py` |
 
 The client address comes from `X-Forwarded-For` only when the peer is a trusted proxy (nginx,
-`TRUSTED_PROXIES`). The mock admin API exists only with `ADMIN_MOCK=1`; without the
+`TRUSTED_PROXIES`). On a public host (`compose.prod.yaml`), Caddy terminates HTTPS, sends HSTS
+and replaces any `X-Forwarded-For` a client sent; nginx trusts that header from Caddy's network
+alone, so each player keeps their own address for the caps. The mock admin API exists only with `ADMIN_MOCK=1`; without the
 `X-Admin-Token` header (compared in constant time) its paths answer 404 like unknown paths.
 nginx answers 404 for `/api/metrics`. The containers run as non-root users on read-only root
 filesystems with every capability dropped, and the web image sends a CSP and the other

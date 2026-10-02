@@ -276,7 +276,7 @@ make down
 api/        the server: FastAPI app, Lua scripts, tests (unit, property, contract, integration, acceptance)
 web/        the Vue 3 client and its tests
 contracts/  the JSON Schema of the wire protocol, generated from the server's models
-infra/      the nginx configuration of the full stack
+infra/      the nginx and Caddy configuration of the full stack
 load/       the bot swarm for load runs
 scripts/    repository checks and generators
 docs/       specs, decisions and the AI log
@@ -288,5 +288,6 @@ docs/       specs, decisions and the AI log
 - [docs/DECISIONS.md](docs/DECISIONS.md): architecture decision records
 - [docs/spec/](docs/spec/): the domain, protocol, Redis and UI specs
 - [docs/ai-log/](docs/ai-log/README.md): how AI was used in each change, and how it was checked
+- [docs/operations.md](docs/operations.md): deploying the stack to a public VM behind HTTPS
 - [CONTRIBUTING.md](CONTRIBUTING.md): the make targets, the checks and the pull request workflow
 - [SECURITY.md](SECURITY.md): how to report a vulnerability

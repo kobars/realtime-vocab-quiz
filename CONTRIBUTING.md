@@ -23,7 +23,7 @@ uv run --project api pre-commit install    # run the hooks on staged files at ea
 | Server tests and quality | pytest, pytest-asyncio, pytest-cov, Hypothesis, httpx, ruff, mypy, import-linter |
 | Client | Node 24, pnpm 11, Vue 3, Vite, TypeScript, Pinia, Vue Router, Tailwind CSS, shadcn-vue, VueUse, lucide |
 | Client tests and quality | Vitest (v8 coverage), @vue/test-utils, happy-dom, Playwright, axe-core, ESLint, vue-tsc |
-| Infra | Docker Compose, nginx |
+| Infra | Docker Compose, nginx, Caddy (HTTPS on a public host) |
 
 ## Make targets
 
@@ -37,6 +37,7 @@ uv run --project api pre-commit install    # run the hooks on staged files at ea
 | `make new-quiz` | Start a fresh 60-minute quiz on the running stack and print its ID, its player URL and the command that ends it. Each run gets a new ID (`VOCAB-42-7K3Q`) that plays the seed quiz `VOCAB-42` (`bankQuizId` of `POST /admin/quizzes`), so it never collides with an earlier run or with the seed quiz IDs that the system tests and browser specs create |
 | `make demo-end ID=<id>` | End that quiz now as the mock host (`POST /admin/quizzes/{id}/end`): every player sees the final results |
 | `make smoke-full` | Smoke-test the running full stack through nginx: health checks on each node, one answer, then stop the node that holds the socket and check the player comes back on the other node (`load/smoke_full.py`) |
+| `make prod-up`, `make prod-down`, `make prod-logs`, `make prod-demo` | The full stack on a public host behind Caddy's HTTPS (`compose.yaml` with `compose.prod.yaml`, settings from `.env.prod.example`): build and start, stop, follow the logs, and start a fresh 60-minute quiz with its HTTPS player URL ([docs/operations.md](docs/operations.md)) |
 | `make load` | The bot swarm as a container on the stack network against the running full stack, with its options in `LOAD_ARGS` ([load/README.md](load/README.md) explains them and holds the measured runs) |
 | `make test` | The server unit, property and contract tests and the client tests, without Redis |
 | `make test-integration` | The tests that need Redis (a Redis container per run, or `REDIS_URL` when it is set), then the acceptance tests on Redis |
@@ -92,7 +93,7 @@ Every pull request and every push to `main` runs these GitHub Actions workflows:
   reach the `limit` in `api/pyproject.toml`. Neither counts the paths that `.gitattributes`
   marks `linguist-generated` (lock files, generated contracts, shadcn-vue components).
 - `containers.yml`: the container and infrastructure files. hadolint (`.hadolint.yaml`),
-  shellcheck, `docker compose config`, `scripts/check_nginx.sh` (`nginx -t` on the web image's
+  shellcheck, `docker compose config` (alone and with `compose.prod.yaml`), `scripts/check_nginx.sh` (`nginx -t` on the web image's
   site and on any `nginx.conf` under `infra/`), Trivy on the configuration (fails on any
   finding) and on both images (fails on a CRITICAL or HIGH finding that has a fix), and
   `scripts/smoke_images.sh`. The smoke test runs each image as a non-root user on a read-only
@@ -104,7 +105,9 @@ Every pull request and every push to `main` runs these GitHub Actions workflows:
 - `stack.yml`: builds the images, starts the full stack and runs `make test-system` and
   `make test-browser` on every pull request that changes `api/`, `web/`, `infra/`, a compose
   file, a Dockerfile, the `Makefile`, `.nvmrc` or `.python-version`, on pushes to `main` and
-  nightly; it uploads the Playwright report, and the stack's logs when a suite fails.
+  nightly; it uploads the Playwright report, and the stack's logs when a suite fails. Its
+  `prod` job starts the stack with `compose.prod.yaml` on top, Caddy using a certificate from
+  its local CA (`TLS_ISSUER=internal`), and runs `make test-system` over HTTPS and wss.
 - `links.yml` runs weekly and also checks the external links.
 
 The CI, security and container workflows also run weekly on `main`, where the CI run tries ten
