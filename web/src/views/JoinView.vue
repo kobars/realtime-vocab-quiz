@@ -78,7 +78,14 @@ function checkId(): boolean {
   return idError.value === null
 }
 
+/**
+ * A field left empty is flagged by the submit, not on blur: a message added on blur would push down what the
+ * pointer is pressing (the "Host a quiz" link) between mousedown and mouseup, and the click would be lost.
+ */
+const leftEmpty = (value: string, error: string | null) => value.trim() === '' && error === null
+
 function onIdBlur(): void {
+  if (leftEmpty(quizId.value, idError.value)) return
   if (!checkId()) return
   void loadPreview(quizId.value)
   // Leaving the field again without an edit keeps the answer of the lookup already made.
@@ -90,6 +97,11 @@ function onNameInput(value: string): void {
 }
 
 function onNameBlur(): void {
+  if (leftEmpty(name.value, nameError.value)) return
+  checkName()
+}
+
+function checkName(): void {
   name.value = name.value.trim()
   nameError.value = displayNameError(name.value)
 }
@@ -98,7 +110,7 @@ async function submit(): Promise<void> {
   if (joining.value) return
   joinFailed.value = false
   checkId()
-  onNameBlur()
+  checkName()
   if (idError.value !== null) return focus(idField)
   if (nameError.value !== null) return focus(nameField)
   joining.value = true

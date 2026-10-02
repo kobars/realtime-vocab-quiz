@@ -187,6 +187,17 @@ describe('validation', () => {
     expect(id.attributes('aria-invalid')).toBeUndefined()
   })
 
+  it('leaves an empty field alone on blur, so nothing below it moves, and flags it on submit', async () => {
+    const { id, name, describedBy, submit } = await screen()
+    await id.trigger('blur')
+    await name.setValue('  ')
+    await name.trigger('blur')
+    expect([id.attributes('aria-invalid'), name.attributes('aria-invalid')]).toEqual([undefined, undefined])
+    await submit()
+    expect(describedBy(id)).toEqual([strings.join.quizIdHint, strings.join.quizIdInvalid])
+    expect(describedBy(name)).toEqual([strings.join.nameRequired])
+  })
+
   it('refuses an empty name, then sends the trimmed one', async () => {
     const { id, name, describedBy, submit } = await screen()
     await id.setValue('VOCAB-42')
