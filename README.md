@@ -36,7 +36,8 @@ Open the player URL in two browser windows, join with a different name in each, 
 end command and both windows show the final podium. `make new-quiz` starts another quiz on the
 running stack, and `make down` stops everything.
 
-To serve it over HTTPS from a fresh Ubuntu VM, one command installs it: see
+To serve it over HTTPS from a fresh Ubuntu VM, one command installs it on the images that CI
+publishes, and `make do-deploy` creates that VM on DigitalOcean from a laptop: see
 [Deploy to a VM](docs/operations.md#deploy-to-a-vm).
 
 ## What it does

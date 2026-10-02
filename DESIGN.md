@@ -144,6 +144,15 @@ own sockets. Redis is the only database: the mock identity keeps its sessions an
 there, so a ticket made on one node works on the other. The mock question bank is read from
 JSON files when a node starts.
 
+**Deployment.** One host runs the whole stack with Docker Compose. On a public host
+(`compose.prod.yaml`), Caddy terminates HTTPS in front of nginx. CI builds the API and web
+images for amd64 and arm64, scans them and publishes them to GitHub Container Registry
+(`ghcr.io/kobars/realtime-vocab-quiz-api` and `-web`, tagged `main`, the commit's short SHA and
+`vX.Y.Z`) with SBOM and provenance attestations; the host pulls the tag named by `IMAGE_TAG`
+instead of building ([ADR-012](docs/DECISIONS.md#adr-012--prebuilt-images-on-ghcr-and-doctl-over-terraform-for-one-droplet)).
+`make do-deploy` creates the host as a DigitalOcean Droplet with doctl, and its cloud-init user
+data runs the install script ([docs/operations.md](docs/operations.md#deploy-to-a-vm)).
+
 ## 4. Components
 
 The server is one Python package, `quiz` (`api/src/quiz/`), split into layers. The
@@ -967,5 +976,6 @@ Every decision is recorded in full (context, decision, alternatives considered, 
 | [ADR-009](docs/DECISIONS.md#adr-009--repository-layout-and-the-vue-client-api-web-generated-contracts) | One repository with `api/`, `web/` and generated `contracts/`; a Vue 3, Vite, Pinia and Tailwind client using types generated from the Pydantic models. |
 | [ADR-010](docs/DECISIONS.md#adr-010--a-playful-design-system-of-our-own-clay-replaces-the-neutral-look) | Our own playful design system, "Clay": brand violet with role fills under dark text, a self-hosted rounded font, hard shadows tinted from the primary, and a dark theme that follows the OS; contrast is a test. |
 | [ADR-011](docs/DECISIONS.md#adr-011--images-pinned-by-digest-the-runtime-stages-keep-the-os-package-upgrade) | Every image pinned by digest and updated by Dependabot; the runtime stages keep the OS package upgrade. |
+| [ADR-012](docs/DECISIONS.md#adr-012--prebuilt-images-on-ghcr-and-doctl-over-terraform-for-one-droplet) | CI publishes scanned, attested multi-arch images to GHCR and the public host pulls them by `IMAGE_TAG`; a doctl script, not Terraform, creates the one Droplet, its firewall and DNS record. |
 
 <!-- AI-ASSISTED-END -->
