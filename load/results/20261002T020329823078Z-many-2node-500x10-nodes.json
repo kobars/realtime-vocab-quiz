@@ -1,0 +1,24 @@
+{
+  "options": {
+    "containers": "elsaquiz-api-1-1,elsaquiz-api-2-1",
+    "ramp": 32.0,
+    "duration": 175.0,
+    "every": 5,
+    "label": "many-2node-500x10"
+  },
+  "samples": 35,
+  "nodes": {
+    "elsaquiz-api-1-1": {
+      "cpu_pct_mean": 74.4,
+      "cpu_pct_max": 99.65,
+      "mem_mib_idle": 59.8,
+      "mem_mib_max": 243.6
+    },
+    "elsaquiz-api-2-1": {
+      "cpu_pct_mean": 73.5,
+      "cpu_pct_max": 98.86,
+      "mem_mib_idle": 60.0,
+      "mem_mib_max": 242.4
+    }
+  }
+}
