@@ -802,8 +802,11 @@ total, with missing and timed-out samples counted as misses.
   (frames a slow socket's send queue dropped for a newer one), `resyncs_total` (resync requests
   answered with a snapshot), `tick_duration_seconds` (histogram of one tick),
   `feed_subscribe_failures_total` (by `reason`: `limit`, joins refused because every
-  subscription connection is taken; `error`, subscribe attempts that failed) and `redis_clock_step_total` (answers scored at
-  elapsed 0 after a Redis clock step back).
+  subscription connection is taken; `error`, subscribe attempts that failed),
+  `ws_errors_total{request,code}` (the `error` replies of the use cases, by request type and
+  error code), `redis_clock_step_total` (answers scored at elapsed 0 after a Redis clock step
+  back) and `log_lines_dropped_total` (log lines lost because the queue to the log writer was
+  full or the output stream was closed or broken).
 - JSON logs (`obs/logs.py`, structlog): one `http_request` line per request with the path,
   status and duration; a line when a socket closes, with its code; each line carries the
   `request_id` (a socket's connection ID) and the `quiz_id`. No API log line holds a ticket.
