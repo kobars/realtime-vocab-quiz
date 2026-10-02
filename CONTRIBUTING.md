@@ -73,9 +73,10 @@ QUIZ_SUBNET=10.89.80.0/24
 
 The make targets and the system and browser tests of that checkout then use its stack, since they
 read `.env`. Both checkouts build the same `elsaquiz-api:dev` and `elsaquiz-web:dev` images; to
-run different code in the second, build it with `IMAGE_TAG=b make build` and add `IMAGE_TAG=b` to
-its `.env`. The development Redis of `make up` always takes `127.0.0.1:6381`, so only one
-checkout can run it at a time.
+run different code in the second, add `IMAGE_TAG=b` to its `.env` for compose and pass it to
+`make build` and `make demo` too (`make build IMAGE_TAG=b`), which take the tag from the command
+line or the shell, not from `.env`. The development Redis of `make up` always takes
+`127.0.0.1:6381`, so only one checkout can run it at a time.
 
 ## Develop without Docker
 
@@ -132,10 +133,11 @@ layers need more:
   the production build, with no backend: `web/e2e/fixtures/` mocks the
   HTTP calls and the quiz socket and pauses the page clock. Fifteen screens, the player's from the
   join form to the final results plus the four host screens and the not-found page, run at 320,
-  768 and 1280 px wide in light and dark with reduced motion (the Leaderboard tab only below 1024 px; wider, the leaderboard sits beside every play screen). Each
-  must match its screenshot baseline in `web/e2e/__screenshots__/` (at most 50 pixels differ) and
-  pass axe for WCAG 2.2 A and AA, with no sideways scroll (also at 640 px, a 1280 px window at
-  200% zoom), controls of at least 44 × 44 px and a visible focus ring at every Tab stop. The
+  768 and 1280 px wide in light and dark with reduced motion (the Leaderboard tab only below
+  1024 px; wider, the leaderboard sits beside every play screen). Each must match its screenshot
+  baseline in `web/e2e/__screenshots__/` (at most 50 pixels differ) and pass axe for WCAG 2.2 A
+  and AA, with no sideways scroll (also at 640 px, a 1280 px window at 200% zoom), controls of at
+  least 44 × 44 px and a visible focus ring at every Tab stop. The
   gallery has one baseline per colour scheme at 1280 px, and passes axe with no sideways scroll at
   every width. It all runs in the Playwright image pinned in the `Makefile`, always as
   `linux/amd64`, so every machine renders like CI; it needs Docker, and `make check` needs no browser. `make ui-baselines`
