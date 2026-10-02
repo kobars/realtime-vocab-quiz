@@ -665,7 +665,8 @@ it('phones: the 10 s and 5 s warnings sit outside the tab panels, so the Leaderb
 })
 
 it('keys 1–4 answer only with the focus in the question: not from a leaderboard button, still from the prompt', async () => {
-  const w = await playing()
+  // More players than the top 10, so the board offers "Show all players".
+  const w = await playing(board(1, 30), question())
   const showAll = w.findAll('#panel-leaderboard button').find((b) => b.text() === 'Show all players')
   ;(showAll?.element as HTMLElement).focus()
   press('1')

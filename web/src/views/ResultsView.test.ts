@@ -1,4 +1,4 @@
-// AI-ASSISTED: component tests for the finished and results screens and the podium (order, medals, the one-shot rise) and an ended quiz with no players, driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the finished and results screens, the podium (order, medals, the one-shot rise), the top 10 with my pinned row, "Show all players" in their place, and an ended quiz with no players, driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -78,7 +78,7 @@ it('when the quiz ends: the provisional mark goes, my final rank shows and focus
   expect(document.activeElement?.textContent?.trim()).toBe('Final results')
 })
 
-it('results: the podium (second, first, third), the rest of the top 50 and the same paging', async () => {
+it('results: the podium (second, first, third), the rest of the top 10 and the same paging', async () => {
   await join()
   await receive({ type: 'quiz_ended', seq: 6, playerCount: 60, entries: [...top(3), me(4, 900), ...top(46, 5)], you: { rank: 4, score: 900 } })
   const w = render()
@@ -87,7 +87,8 @@ it('results: the podium (second, first, third), the rest of the top 50 and the s
   expect(w.findAll('[data-rank]').map((step) => step.classes().find((c) => c.startsWith('order-')))).toEqual(['order-2', 'order-1', 'order-3'])
   expect(w.find('[data-rank="1"]').text()).toMatch(/Player 1.*1490.*1/s)
   expect(w.find('[data-test="my-result"]').text()).toContain('You placed #4 of 60')
-  expect(w.findAll('ol').at(-1)?.findAll('li')).toHaveLength(47)
+  expect(w.findAll('ol').at(-1)?.findAll('li')).toHaveLength(7)
+  expect(w.find('[data-test="pinned"]').exists()).toBe(false)
   await w.findAll('button').find((b) => b.text() === 'Show all players')?.trigger('click')
   expect(getLeaderboard.mock.calls).toEqual([[0, 100]])
 })
@@ -128,14 +129,14 @@ it('a podium with fewer than 3 players shows only its steps, and a viewer with y
   expect(w.findAll('ol').at(-1)?.findAll('li')).toHaveLength(0)
 })
 
-it('results from an ended snapshot of more than 50 players list only ranks 4 to 50 under the podium', async () => {
+it('results from an ended snapshot of more than 10 players list only ranks 4 to 10 under the podium', async () => {
   await join(false)
   await receive({ type: 'snapshot', atSeq: 9, status: 'ended', playerCount: 60, onlineCount: 0, entries: [...top(3), me(4, 900), ...top(56, 5)],
     you: { rank: 4, score: 900 } })
   const w = render()
   const ranks = (w.findAll('ol').at(-1)?.findAll('li') ?? []).map((li) => li.text().match(/#(\d+)/)?.[1])
-  expect(ranks).toHaveLength(47)
-  expect([ranks[0], ranks.at(-1)]).toEqual(['4', '50'])
+  expect(ranks).toHaveLength(7)
+  expect([ranks[0], ranks.at(-1)]).toEqual(['4', '10'])
 })
 
 it('finished: my score and my rank are polite live regions, and the rank is announced at most once every 5 s', async () => {
@@ -159,19 +160,55 @@ it('finished: my score and my rank are polite live regions, and the rank is anno
 
 it('after the end, "Show all players" never shows a live page from before the end', async () => {
   await join()
-  await receive({ type: 'finished', atSeq: 5, score: 410, rank: 2, playerCount: 3 })
+  const live = [me(1, 410), ...top(11, 2)]
+  const final = [row(1, 500), me(2, 410), ...top(10, 3)]
+  await receive({ type: 'finished', atSeq: 5, score: 410, rank: 1, playerCount: 12 })
   const w = render()
   await w.findAll('button').find((b) => b.text() === 'Show all players')?.trigger('click')
-  await receive({ type: 'leaderboard_page', atSeq: 7, offset: 0, final: false, playerCount: 3, entries: [me(1, 410), row(2, 140), row(3, 0)] })
-  expect(w.find('[data-test="page-range"]').text()).toBe('Players 1–3 of 3')
-  await receive({ type: 'quiz_ended', seq: 8, playerCount: 3, entries: [row(1, 500), me(2, 410), row(3, 90)], you: { rank: 2, score: 410 } })
+  await receive({ type: 'leaderboard_page', atSeq: 7, offset: 0, final: false, playerCount: 12, entries: live })
+  expect(w.find('[data-test="page-range"]').text()).toBe('Players 1–12 of 12')
+  await receive({ type: 'quiz_ended', seq: 8, playerCount: 12, entries: final, you: { rank: 2, score: 410 } })
   await w.findAll('button').find((b) => b.text() === 'Show all players')?.trigger('click')
   expect(w.find('[data-test="page-status"]').text()).toBe('Loading players…')
   expect(w.find('section[aria-label="Show all players"]').findAll('li')).toHaveLength(0)
-  await receive({ type: 'leaderboard_page', atSeq: 7, offset: 0, final: false, playerCount: 3, entries: [me(1, 410), row(2, 140), row(3, 0)] })
+  await receive({ type: 'leaderboard_page', atSeq: 7, offset: 0, final: false, playerCount: 12, entries: live })
   expect(w.find('section[aria-label="Show all players"]').findAll('li')).toHaveLength(0)
-  await receive({ type: 'leaderboard_page', atSeq: 8, offset: 0, final: true, playerCount: 3, entries: [row(1, 500), me(2, 410), row(3, 90)] })
-  expect(w.find('[data-test="page-range"]').text()).toBe('Players 1–3 of 3 · Final standings')
+  await receive({ type: 'leaderboard_page', atSeq: 8, offset: 0, final: true, playerCount: 12, entries: final })
+  expect(w.find('[data-test="page-range"]').text()).toBe('Players 1–12 of 12 · Final standings')
+})
+
+it('"Show all players" shows each player once, never under a list that already holds the same rows', async () => {
+  await join(false)
+  const final = [...top(3), me(4, 900), ...top(18, 5)]
+  await receive({ type: 'quiz_ended', seq: 6, playerCount: 22, entries: final, you: { rank: 4, score: 900 } })
+  const w = render()
+  await w.findAll('button').find((b) => b.text() === 'Show all players')?.trigger('click')
+  await receive({ type: 'leaderboard_page', atSeq: 6, offset: 0, final: true, playerCount: 22, entries: final })
+  for (const userId of ['p5', 'u1', 'p22']) expect(w.findAll(`li[data-user="${userId}"]`)).toHaveLength(1)
+})
+
+it('results: my row outside the top 10 is pinned under ranks 4 to 10, and "Show all players" takes their place until it closes', async () => {
+  await join(false)
+  await receive({ type: 'quiz_ended', seq: 6, playerCount: 30, entries: [...top(14), me(15, 1_340), ...top(15, 16)], you: { rank: 15, score: 1_340 } })
+  const w = render()
+  expect(w.get('[data-test="pinned"]').text()).toMatch(/#15.*Ana \(you\).*1340/s)
+  expect(w.findAll('li[data-user="u1"]')).toHaveLength(0)
+  const show = w.findAll('button').find((b) => b.text() === 'Show all players')
+  ;(show?.element as HTMLElement).focus()
+  await show?.trigger('click')
+  await nextTick()
+  expect([w.find('[data-test="pinned"]').exists(), w.findAll('[data-rank]').length]).toEqual([false, 3])
+  document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  await nextTick()
+  await nextTick()
+  expect([w.find('[data-test="pinned"]').exists(), document.activeElement?.textContent?.trim()]).toEqual([true, 'Show all players'])
+})
+
+it('results: "Show all players" is not offered when every player is in the top 10', async () => {
+  await join(false)
+  await receive({ type: 'quiz_ended', seq: 6, playerCount: 10, entries: [...top(3), me(4, 900), ...top(6, 5)], you: { rank: 4, score: 900 } })
+  const w = render()
+  expect(w.findAll('button').some((b) => b.text() === 'Show all players')).toBe(false)
 })
 
 it('an ended quiz that no one played says so, with no podium, no list and no player range', async () => {

@@ -3,13 +3,13 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Entry } from '@/protocol/types.generated'
 import { strings } from '@/strings'
-import { MAX_MOVES, TOP_N } from './limits'
+import { MAX_MOVES, TOP_ROWS } from './limits'
 import { MY_ROW, placeFill, RANK_CHIP } from './places'
 
 /** `replacements` counts the full replacements (`snapshot`, `rebase: true`); a change of it swaps the rows in one step. */
 const props = withDefaults(defineProps<{ entries: Entry[]; myUserId?: string | null; limit?: number; animate?: boolean; replacements?: number }>(), {
   myUserId: null,
-  limit: TOP_N,
+  limit: TOP_ROWS,
   animate: true,
   replacements: 0,
 })

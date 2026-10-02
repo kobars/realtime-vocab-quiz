@@ -1,4 +1,4 @@
-// AI-ASSISTED: component tests for the leaderboard rows, the live panel and "Show all players" paging (its loading status and the rows kept while paging), driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the leaderboard rows, the live panel (top 10, my pinned row) and "Show all players" (in place of the top 10) paging (its loading status and the rows kept while paging), driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -32,7 +32,7 @@ async function joinedStore() {
   await receive(
     { type: 'joined', atSeq: 3, quizId: 'VOCAB-42', userId: 'u1', displayName: 'Ana', questionCount: 10, timeLimitMs: 20_000,
       quizRemainingMs: 600_000, cursor: -1, cursorOpen: false, finished: false, score: 0 },
-    { type: 'snapshot', atSeq: 3, status: 'open', playerCount: 3, onlineCount: 2, entries: [row(1, 140), me(2, 0), row(3, 0)], you: { rank: 2, score: 0 } },
+    { type: 'snapshot', atSeq: 3, status: 'open', playerCount: 30, onlineCount: 20, entries: [row(1, 140), me(2, 0), row(3, 0)], you: { rank: 2, score: 0 } },
   )
   return store
 }
@@ -64,17 +64,17 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-it('renders rows in rank order, at most 50, and ties keep equal scores with distinct ranks', () => {
+it('renders rows in rank order, at most 10, and ties keep equal scores with distinct ranks', () => {
   const tied = [row(3, 90), row(2, 140, 'b'), row(1, 140, 'a'), ...top(197, 4)]
   const w = rows(tied)
-  expect(w.findAll('li')).toHaveLength(50)
+  expect(w.findAll('li')).toHaveLength(10)
   expect(ranks(w).slice(0, 3)).toEqual(['#1', '#2', '#3'])
   expect(w.findAll('li').slice(0, 2).map((li) => li.findAll('span')[2]?.text())).toEqual(['140', '140'])
 })
 
 it('keeps each row element across 5 updates per second, and skips FLIP when more than 20 rows move', async () => {
   let entries = top(50)
-  const w = rows(entries)
+  const w = track(mount(LeaderboardRows, { ...options, props: { entries, limit: 50 } }))
   const element = (userId: string) => w.find(`[data-user="${userId}"]`).element
   const before = element('p10')
   for (let tick = 0; tick < 25; tick++) {
@@ -89,21 +89,54 @@ it('keeps each row element across 5 updates per second, and skips FLIP when more
   expect(w.find('ol').attributes('data-flip')).toBe('false')
 })
 
-it('highlights my row, shows the counts, and pins my row from rank_update outside the top 50', async () => {
+it('highlights my row, shows the counts, and pins my row from rank_update outside the top 10', async () => {
   const store = await joinedStore()
   const w = render(LeaderboardPanel)
   expect(w.find('[aria-current="true"]').text()).toContain('Ana (you)')
-  expect(w.find('[data-test="counts"]').text()).toBe('3 players · 2 online')
+  expect(w.find('[data-test="counts"]').text()).toBe('30 players · 20 online')
   expect(w.find('[data-test="pinned"]').exists()).toBe(false)
   await receive(board(4, top(50)), { type: 'rank_update', atSeq: 4, rank: 120, score: 310, playerCount: 300 })
   const pinned = w.find('[data-test="pinned"]').findAll('span').map((span) => span.text())
   expect([store.myRank, pinned]).toEqual([120, ['#120', 'Ana (you)', '310']])
-  // It stays in view at the bottom of the window below up to 50 rows, on an opaque dock that hides the rows under it.
+  // It stays in view at the bottom of the window below the rows, on an opaque dock that hides the rows under it.
   expect(w.get('[data-test="pinned-dock"]').classes()).toEqual(expect.arrayContaining(['sticky', 'bottom-0', 'bg-card', 'py-2']))
   // My old row fades out (it keeps its leave class until the transition ends).
   expect(w.find('[aria-current="true"]:not(.lb-leave-active)').exists()).toBe(false)
   await receive(board(5, [me(1, 2_000), ...top(49, 2)]))
   expect(w.find('[data-test="pinned"]').exists()).toBe(false)
+})
+
+it('shows the top 10; my row at rank 11 is pinned under them, at rank 10 it is highlighted in place', async () => {
+  await joinedStore()
+  const w = render(LeaderboardPanel)
+  await receive(board(4, [...top(10), me(11, 1_380), ...top(39, 12)]))
+  // My old row fades out (it keeps its leave class until the transition ends).
+  expect([w.findAll('li:not(.lb-leave-active)').length, w.find('[aria-current="true"]:not(.lb-leave-active)').exists()]).toEqual([10, false])
+  expect(w.get('[data-test="pinned"]').text()).toMatch(/#11.*Ana \(you\).*1380/s)
+  await receive(board(5, [...top(9), me(10, 1_420), ...top(40, 11)]))
+  expect([w.find('[data-test="pinned"]').exists(), w.get('[aria-current="true"]').text()]).toEqual([false, '#10Ana (you)1420'])
+})
+
+it('"Show all players" takes the place of the top 10 and my pinned row, and closing it brings them back', async () => {
+  await joinedStore()
+  const w = render(LeaderboardPanel)
+  await receive(board(4, top(50)), { type: 'rank_update', atSeq: 4, rank: 120, score: 310, playerCount: 300 })
+  expect([w.findAll('ol').length, w.find('[data-test="pinned"]').exists()]).toEqual([1, true])
+  await button(w, 'Show all players')?.trigger('click')
+  await receive(page(7, 0, top(100)))
+  expect([w.findAll('ol').length, w.find('[data-test="pinned"]').exists(), pageRanks(w).length]).toEqual([1, false, 100])
+  expect(w.findAll('[data-user="p2"]')).toHaveLength(1)
+  await button(w, 'Close')?.trigger('click')
+  expect([w.find('section section').exists(), w.find('[data-test="pinned"]').exists(), button(w, 'Show all players')?.exists()]).toEqual([false, true, true])
+})
+
+it('"Show all players" is not offered while every player fits in the top 10', async () => {
+  await joinedStore()
+  const w = render(LeaderboardPanel)
+  await receive(board(4, top(10), 10))
+  expect(button(w, 'Show all players')).toBeUndefined()
+  await receive(board(5, top(11), 11))
+  expect(button(w, 'Show all players')?.exists()).toBe(true)
 })
 
 it('pages through get_leaderboard and reloads the open page at most once per second while scores move', async () => {

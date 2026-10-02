@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: "Show all players": get_leaderboard pages, read again (at most once per second, on the monotonic clock) while the standings move or no reply came, with a loading status until a page arrives and the shown rows kept while the next one loads, in a flat clay panel inside the leaderboard card that fades in behind motion-safe (UI spec §3.6, §6.1; protocol §3, §7). -->
+<!-- AI-ASSISTED: "Show all players": a panel that takes the place of the top 10 (v-model:open tells the parent), with get_leaderboard pages, read again (at most once per second, on the monotonic clock) while the standings move or no reply came, with a loading status until a page arrives and the shown rows kept while the next one loads, in a flat clay panel inside the leaderboard card that fades in behind motion-safe (UI spec §3.6, §6.1; protocol §3, §7). -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { Button } from '@quiz/clay'
@@ -8,7 +8,8 @@ import LeaderboardRows from './LeaderboardRows.vue'
 import { PAGE_RELOAD_MS } from './limits'
 
 const store = useQuizStore()
-const open = ref(false)
+/** Open: the parent hides its own rows, so the pages are the only list on screen. */
+const open = defineModel<boolean>('open', { default: false })
 const offset = ref(0)
 const toggle = useTemplateRef<InstanceType<typeof Button>>('toggle')
 const panel = useTemplateRef<HTMLElement>('panel')

@@ -1,11 +1,12 @@
-<!-- AI-ASSISTED: the finished and results screens: a provisional rank and the live board until the end, with my score and rank in live regions, then the podium, my final rank in a highlighted clay card and the top 50 under a gradient heading, or a note when no one played (UI spec §3.6, §6.3). -->
+<!-- AI-ASSISTED: the finished and results screens: a provisional rank and the live board until the end, with my score and rank in live regions, then the podium, my final rank in a highlighted clay card, the rest of the top 10 and my row pinned under it when I am further down, under a gradient heading, with "Show all players" in their place while it is open, or a note when no one played (UI spec §3.6, §6.3). -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import AllPlayers from '@/components/leaderboard/AllPlayers.vue'
 import LeaderboardPanel from '@/components/leaderboard/LeaderboardPanel.vue'
 import LeaderboardRows from '@/components/leaderboard/LeaderboardRows.vue'
+import PinnedRow from '@/components/leaderboard/PinnedRow.vue'
 import ResultsPodium from '@/components/leaderboard/ResultsPodium.vue'
-import { TOP_N } from '@/components/leaderboard/limits'
+import { TOP_ROWS } from '@/components/leaderboard/limits'
 import { Badge, Card } from '@quiz/clay'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
@@ -13,8 +14,11 @@ import { strings } from '@/strings'
 const store = useQuizStore()
 const heading = useTemplateRef<HTMLElement>('heading')
 const podium = computed(() => store.entries.filter((row) => row.rank <= 3))
-// An ended snapshot carries every player up to 200; the list stops at the top 50.
-const rest = computed(() => store.entries.filter((row) => row.rank > 3 && row.rank <= TOP_N))
+// An ended snapshot carries every player up to 200; the list stops at the top 10.
+const rest = computed(() => store.entries.filter((row) => row.rank > 3 && row.rank <= TOP_ROWS))
+const pinned = computed(() => store.myRank !== null && !store.entries.some((row) => row.userId === store.quiz?.userId && row.rank <= TOP_ROWS))
+/** "Show all players" is open: its pages replace the list under the podium, so no player is listed twice. */
+const all = ref(false)
 const focusHeading = () => void nextTick(() => heading.value?.focus())
 onMounted(focusHeading)
 watch(() => store.ended, focusHeading)
@@ -77,11 +81,17 @@ const timeLeft = computed(() => {
           {{ strings.results.points(store.myScore) }}
         </p>
       </Card>
-      <LeaderboardRows
-        :entries="rest"
-        :my-user-id="store.quiz?.userId"
+      <template v-if="!all">
+        <LeaderboardRows
+          :entries="rest"
+          :my-user-id="store.quiz?.userId"
+        />
+        <PinnedRow v-if="pinned" />
+      </template>
+      <AllPlayers
+        v-if="all || store.playerCount > TOP_ROWS"
+        v-model:open="all"
       />
-      <AllPlayers />
     </template>
   </section>
   <section
