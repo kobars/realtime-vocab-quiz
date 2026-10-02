@@ -52,7 +52,9 @@ class Registry:
         first = quiz_id not in self._quizzes
         self._senders[conn.conn_id] = sender
         self._quizzes.setdefault(quiz_id, {})[conn.conn_id] = (conn.user_id, sender)
-        self._players.setdefault(quiz_id, {})[conn.user_id] = sender
+        players = self._players.setdefault(quiz_id, {})
+        if sender.close_code is None:  # a replaced socket's late join must not take it back
+            players[conn.user_id] = sender
         if first and self.watcher is not None:
             self.watcher.open(quiz_id)
 

@@ -10,7 +10,7 @@ from redis.asyncio import Redis
 from quiz.adapters.redis import RedisStore
 from quiz.adapters.redis.keys import quiz_keys
 from quiz.domain.session import Question
-from quiz.ports.store import Limits, Row
+from quiz.ports.store import Limits, Place
 
 
 async def test_frames_snapshot_and_final_standings_use_the_configured_limits(
@@ -69,5 +69,17 @@ async def test_ranks_of_reads_the_asked_users_without_the_standings_rows(
     monkeypatch.setattr(redis_client, "evalsha", spy)
     ranks = await redis_store.ranks_of(quiz_id, ["b"])
     assert (ranks.at_seq, ranks.status, ranks.player_count) == (0, "open", 2)
-    assert ranks.rows == {"b": Row(2, "b", "B", 0)}
-    assert [reply[5] for reply in replies] == [[]]  # the reply carries no standings rows
+    assert ranks.rows == {"b": Place(2, 0)}
+    assert [reply[5:] for reply in replies] == [[[], [[2, 0]]]]  # no standings rows, no name
+
+
+async def test_ranks_of_1500_players_reads_each_rank_and_score(redis_store: RedisStore) -> None:
+    quiz_id = f"T-{uuid.uuid4().hex[:12].upper()}"
+    await redis_store.create_quiz(
+        quiz_id, (Question("q0", 1),), window_ms=60_000, time_limit_ms=20_000
+    )
+    users = [f"u{n:04}" for n in range(1500)]  # all on 0 points: ranked by join time, then id
+    for user in users:
+        await redis_store.join(quiz_id, user, user, f"c-{user}")
+    ranks = await redis_store.ranks_of(quiz_id, users)
+    assert ranks.rows == {user: Place(n + 1, 0) for n, user in enumerate(users)}

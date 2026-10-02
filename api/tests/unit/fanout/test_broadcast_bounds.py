@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 from quiz.fanout.broadcast import Relay
-from quiz.ports.store import Limits, Ranks, Row, Store
+from quiz.ports.store import Limits, Place, Ranks, Store
 
 LIMITS = Limits(top_n=2, full_list_max=3)
 
@@ -31,7 +31,7 @@ def store_reading(ranks: Ranks) -> Mock:
 async def test_a_shifted_rank_goes_out_only_above_full_list_max_and_below_the_top_n(
     sockets: Mock, player_count: int, rank: int, updates: int
 ) -> None:
-    store = store_reading(Ranks(1, "open", player_count, {"u": Row(rank, "u", "U", 0)}))
+    store = store_reading(Ranks(1, "open", player_count, {"u": Place(rank, 0)}))
     relay = Relay("Q", store, sockets, LIMITS)
     await relay.relay(leaderboard(1, player_count))
     await relay.shifted()
@@ -42,7 +42,7 @@ async def test_a_shifted_rank_goes_out_only_above_full_list_max_and_below_the_to
 async def test_a_shifted_read_at_the_seq_of_the_frame_keeps_the_frames_rank(
     sockets: Mock, read_seq: int, updates: int
 ) -> None:
-    store = store_reading(Ranks(read_seq, "open", 4, {"u": Row(4, "u", "U", 100)}))
+    store = store_reading(Ranks(read_seq, "open", 4, {"u": Place(4, 100)}))
     relay = Relay("Q", store, sockets, LIMITS)
     await relay.relay(leaderboard(1, 4, ("u", 3, 100)))  # the frame sends u its rank 3
     await relay.shifted()
@@ -50,7 +50,7 @@ async def test_a_shifted_read_at_the_seq_of_the_frame_keeps_the_frames_rank(
 
 
 async def test_a_second_shifted_read_waits_for_a_newer_frame(sockets: Mock) -> None:
-    store = store_reading(Ranks(1, "open", 4, {"u": Row(4, "u", "U", 100)}))
+    store = store_reading(Ranks(1, "open", 4, {"u": Place(4, 100)}))
     relay = Relay("Q", store, sockets, LIMITS)
     await relay.relay(leaderboard(1, 4))
     await relay.shifted()
@@ -59,16 +59,16 @@ async def test_a_second_shifted_read_waits_for_a_newer_frame(sockets: Mock) -> N
 
 
 async def test_a_repair_at_an_older_seq_tracks_ranks_from_the_snapshots(sockets: Mock) -> None:
-    store = store_reading(Ranks(100, "open", 4, {"u": Row(4, "u", "U", 100)}))
+    store = store_reading(Ranks(100, "open", 4, {"u": Place(4, 100)}))
     relay = Relay("Q", store, sockets, LIMITS)
     await relay.relay(leaderboard(100, 4))
     await relay.shifted()  # rank 4 at seq 100
-    relay.repaired(Ranks(95, "open", 4, {"u": Row(3, "u", "U", 90)}))  # the store lost seq 96-100
-    store.ranks_of.return_value = Ranks(96, "open", 4, {"u": Row(3, "u", "U", 90)})
+    relay.repaired(Ranks(95, "open", 4, {"u": Place(3, 90)}))  # the store lost seq 96-100
+    store.ranks_of.return_value = Ranks(96, "open", 4, {"u": Place(3, 90)})
     await relay.relay(leaderboard(95, 4))  # the snapshot holds it
     await relay.relay(leaderboard(96, 4))
     await relay.shifted()  # the rank the snapshot gave: no second one
-    store.ranks_of.return_value = Ranks(97, "open", 4, {"u": Row(5, "u", "U", 90)})
+    store.ranks_of.return_value = Ranks(97, "open", 4, {"u": Place(5, 90)})
     await relay.relay(leaderboard(97, 4))
     await relay.shifted()
     assert (sockets.broadcast.call_count, store.ranks_of.call_count) == (3, 3)
