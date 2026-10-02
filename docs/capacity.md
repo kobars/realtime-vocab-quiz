@@ -2,10 +2,11 @@
 
 [System design](../DESIGN.md#9-performance-and-capacity)
 
-<!-- AI-ASSISTED-BEGIN: sections 9 and 10 drafted with Claude Code from api/src/quiz/config.py, the contracts, docs/spec/ and docs/DECISIONS.md; the frame sizes were computed by encoding sample frames in compact JSON; the measured numbers are copied from the load runs in load/results/. -->
+<!-- AI-ASSISTED-BEGIN: capacity estimate drafted with Claude Code from api/src/quiz/config.py, the contracts, docs/spec/ and the ADRs; the frame sizes were computed by encoding sample frames in compact JSON; the memory per socket is computed from the load runs in load/results/. -->
 
 Every number below is either an input with its source, a value computed from those inputs (the
-formula is given), or a measurement from a load-run file. The measured table is the last part.
+formula is given), or a measurement from a load-run file. The measured results are in
+[DESIGN §9](../DESIGN.md#measured-results).
 
 **Assumptions.**
 
@@ -39,7 +40,7 @@ The cap of A9 counts characters, not bytes, and allows any text: the JSON writes
 characters as raw UTF-8 (up to 4 bytes each) and control characters as 6-byte `\u00XX` escapes.
 So a 200-row frame of 32-character names is at most about 40 KB with 4-byte characters
 (`20,995 + 200 × 32 × 3`) and about 53 KB with control characters (`20,995 + 200 × 32 × 5`).
-The rest of this section uses the 12-character column.
+The rest of this page uses the 12-character column.
 
 **Per-connection memory** (computed, a partial estimate). A healthy socket's send queue is
 empty between ticks; one queued 200-row frame is 17 KB. The soft limit (A5) holds
@@ -56,8 +57,8 @@ conflated frames. A slow or abusive socket can fill these buffers in the process
 Their sum is about 634 KiB per socket plus one outbound frame, or 10,000 × 634 KiB ≈ 6.0 GiB
 at the 10,000-socket cap if every client is slow and floods at once. Python's object overhead,
 the decoded copies of queued messages and the kernel's socket buffers come on top, so this is
-not an upper bound. The steady-state memory per socket (RSS divided by sockets) comes from the
-[measured runs below](../DESIGN.md#measured-results).
+not an upper bound. The steady-state memory per socket (RSS divided by sockets), at the end of
+this page, comes from the [measured runs](../DESIGN.md#measured-results).
 
 **Connections per node** (computed). The cap is 10,000 sockets per process (A4); two nodes
 hold 20,000. In one hot quiz above 200 players, each socket gets at most 5 frames per second
@@ -65,12 +66,12 @@ hold 20,000. In one hot quiz above 200 players, each socket gets at most 5 frame
 `50,000 × 4,296 B` ≈ 215 MB/s of egress per node, plus at most one `rank_update` per socket
 per tick (A7). All of it runs on one core (A12), so CPU or the network is likely to set the
 practical number below the cap: 215 MB/s is about 1.7 Gbit/s before framing, above a 1 Gbit/s
-link. Measured ([the table below](../DESIGN.md#measured-results)): one node held 2,500 sockets of one hot quiz within C5 (p99
+link. Measured ([DESIGN §9](../DESIGN.md#measured-results)): one node held 2,500 sockets of one hot quiz within C5 (p99
 364 ms) at 63 % of its core on average, peaking at 89 %, and each node of the two-node run held
 about 2,500 at 71 to 73 %, peaking just above a full core (p99 409 ms). So the practical number per node in one hot quiz is 2,500
 measured, and by extrapolating the CPU about 3,500 at most (an estimate, not measured), against
 the computed cap of 10,000: CPU, not memory, sets it. Across many quizzes the first ceiling is
-A13: with the default pool a node serves at most 100 quizzes at once, so the [500-quiz run below](../DESIGN.md#measured-results)
+A13: with the default pool a node serves at most 100 quizzes at once, so the [500-quiz run](../DESIGN.md#measured-results)
 set `REDIS_MAX_CONNECTIONS` to 1,000 (`load/compose.bank.yaml`). Past that limit a node refuses
 a `join` to one more quiz with `UNAVAILABLE` and close 1013, and counts it in
 `feed_subscribe_failures_total{reason="limit"}`; the client reconnects after 5 s plus its
@@ -113,7 +114,7 @@ Redis load per second (computed, a subtotal of the main calls):
 
 - `N / 5` scoring scripts and `N / 5` serving scripts for `next`;
 - 5 tick-script calls per active quiz for every node that holds a socket of the quiz (ADR-006,
-  §10); above 200 players each call that publishes also runs one `ZRANK` for each scorer since
+  [DESIGN §10](../DESIGN.md#10-scalability-and-trade-offs)); above 200 players each call that publishes also runs one `ZRANK` for each scorer since
   the last frame and one `HGET` for each of those outside the top 50, and the frames cost one
   `PUBLISH` per tick per quiz;
 - one `GET` per `ping` for `pong.seq`: sockets / 25 s, 400 per second for 10,000 sockets
