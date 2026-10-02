@@ -1,5 +1,43 @@
 # System design: real-time vocabulary quiz
 
+<!-- AI-ASSISTED-BEGIN: contents list and reading map drafted with Claude Code from the headings below. -->
+
+**Contents.**
+
+1. [Summary](#1-summary)
+2. [Assumptions and non-goals](#2-assumptions-and-non-goals)
+3. [Architecture](#3-architecture)
+4. [Components](#4-components), with [Maintainability](#maintainability)
+5. [Data flow](#5-data-flow)
+6. [Technologies and justification](#6-technologies-and-justification)
+7. [Consistency contract](#7-consistency-contract)
+8. [Non-functional requirements](#8-non-functional-requirements)
+9. [Capacity estimate](#9-capacity-estimate)
+10. [Scalability and trade-offs](#10-scalability-and-trade-offs)
+11. [Reliability and failure modes](#11-reliability-and-failure-modes)
+12. [Security](#12-security)
+13. [Observability](#13-observability)
+14. [Implemented and mocked](#14-implemented-and-mocked)
+15. [AI Collaboration in Design](#15-ai-collaboration-in-design)
+16. [ADR index](#16-adr-index)
+
+**Where to find.**
+
+| Topic | Sections |
+|---|---|
+| Architecture | [§3](#3-architecture): context, containers, walk-through and deployment |
+| Components | [§4](#4-components): every component, its role and what it talks to |
+| Data flow | [§5](#5-data-flow): join, answer to leaderboard, reconnect, hosting and quiz end |
+| Technologies | [§6](#6-technologies-and-justification): each choice against its alternative, with the ADRs of [§16](#16-adr-index) |
+| AI collaboration in the design | [§15](#15-ai-collaboration-in-design) |
+| Scalability | [§10](#10-scalability-and-trade-offs), sized by [§9](#9-capacity-estimate) |
+| Performance | The targets of [§2](#2-assumptions-and-non-goals) and [§8](#8-non-functional-requirements), measured in [§9](#9-capacity-estimate) |
+| Reliability | [§11](#11-reliability-and-failure-modes), on the guarantees of [§7](#7-consistency-contract) |
+| Maintainability | [Maintainability](#maintainability) in §4 |
+| Observability | [§13](#13-observability) |
+
+<!-- AI-ASSISTED-END -->
+
 <!-- AI-ASSISTED-BEGIN: sections 1-4 drafted with Claude Code from docs/spec/ and docs/DECISIONS.md, checked by hand against the code layout and the import-linter contracts; the Mermaid diagrams were rendered with the Mermaid CLI. -->
 
 ## 1. Summary
@@ -1029,10 +1067,12 @@ the draft. (4) Every fix stated in a spec section, with the test that pins it li
 tests run: `make test-integration` and the unit suites in `make check` pass on `main`; the exact
 commands and results are in each AI-LOG entry.
 
-**AI-LOG entries for the design.** `docs/ai-log/design-phase.md`; the spec PRs
-`docs/ai-log/PR-3.md`, `PR-5.md`, `PR-7.md`, `PR-9.md`; and their fix PRs `PR-16.md`,
-`PR-18.md`, `PR-26.md`, `PR-30.md`, `PR-34.md`. Every later PR has its own entry in
-`docs/ai-log/`.
+**AI-LOG entries for the design.** [design-phase.md](docs/ai-log/design-phase.md); the spec
+PRs [PR-3](docs/ai-log/PR-3.md), [PR-5](docs/ai-log/PR-5.md), [PR-7](docs/ai-log/PR-7.md) and
+[PR-9](docs/ai-log/PR-9.md); and their fix PRs [PR-16](docs/ai-log/PR-16.md),
+[PR-18](docs/ai-log/PR-18.md), [PR-26](docs/ai-log/PR-26.md), [PR-30](docs/ai-log/PR-30.md) and
+[PR-34](docs/ai-log/PR-34.md). Every later PR has its own entry in
+[docs/ai-log/](docs/ai-log/README.md).
 
 <!-- AI-ASSISTED-END -->
 
