@@ -121,6 +121,22 @@ async def test_a_quiz_serves_the_bank_quiz_it_was_created_from() -> None:
     assert (first.prompt, second.prompt, asked) == ("word 0?", "word 1?", [QUIZ, QUIZ])
 
 
+async def test_a_failed_bank_quiz_read_starts_no_question_timer(
+    service: QuizService, store: SpyStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conn = await joined(service)
+
+    async def down(_: str) -> str:
+        raise ConnectionError
+
+    monkeypatch.setattr(store, "bank_quiz_id", down)
+    assert await refused(service, conn, m.Next(questionIndex=0)) == (E.UNAVAILABLE, None)
+    monkeypatch.undo()
+    store.now[0] += 5_000
+    [question] = await send(service, conn, m.Next(questionIndex=0))
+    assert question.remainingMs == question.timeLimitMs  # the timer starts at the retry
+
+
 async def test_join_errors_and_requests_before_join(service: QuizService) -> None:
     conn, unknown = Connection("c-a", "a"), m.Join(quizId="NOPE-1", displayName="A")
     page, resync = m.GetLeaderboard(offset=0, limit=10), m.Resync(lastSeq=0)

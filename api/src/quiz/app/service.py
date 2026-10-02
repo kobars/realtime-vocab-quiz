@@ -39,7 +39,7 @@ class Connection:  # what one socket knows: its user (from the ticket) and its q
     present: bool = False  # joined while open: holds the presence that its leave removes
     time_limit_ms: int = 0
     last_resync_ms: int | None = None
-    bank_quiz_id: str | None = None  # the bank quiz it plays, read at the first serve
+    bank_quiz_id: str | None = None  # the bank quiz it plays, read before the first serve
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,14 +228,14 @@ class QuizService:
 
     async def _on_next(self, conn: Connection, msg: m.Next) -> m.ServerMessage:
         quiz_id = _bound(conn, write=True)
+        if conn.bank_quiz_id is None:  # before the serve: a failed read must not start its timer
+            conn.bank_quiz_id = await self._store.bank_quiz_id(quiz_id)
         serve = self._store.serve_next(quiz_id, conn.user_id, msg.questionIndex, conn.conn_id)
         s = await self._write(quiz_id, serve)
         if isinstance(s, Finished):
             return m.Finished(
                 atSeq=s.at_seq, score=s.total, rank=s.rank, playerCount=s.player_count
             )
-        if conn.bank_quiz_id is None:
-            conn.bank_quiz_id = await self._store.bank_quiz_id(quiz_id)
         if (questions := await self._bank.questions(conn.bank_quiz_id)) is None:
             text = f"the question bank has no quiz {conn.bank_quiz_id}"
             raise LookupError(text)
