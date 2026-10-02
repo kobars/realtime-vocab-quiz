@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -13,23 +14,32 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 # Answers `id -u` with a non-root uid and lists three compose services, unless $COMPOSE_FAILS is
-# set. `docker inspect` fails, unless $RESPONSE names a file: then every container is healthy, has
-# one hashed asset and answers each request with that file.
+# set. `docker inspect` fails, unless $RESPONSE names a file: then every container whose name
+# lacks $UNHEALTHY is healthy, has one hashed asset and answers each request with that file. The
+# API image's store is $STORE (default redis) and its Lua scripts are the lines of $LUA_FILES.
 FAKE_DOCKER = """#!/usr/bin/env bash
 echo "$*" >> "$DOCKER_LOG"
 case "$*" in
   *" id -u") echo 10001 ;;
   "compose "*"config --services") [[ -z "${COMPOSE_FAILS:-}" ]] || exit 1
     printf 'redis\\napi-1\\napi-2\\n' ;;
-  "inspect "*) [[ -n "${RESPONSE:-}" ]] && echo "running healthy" || exit 1 ;;
+  "inspect "*) [[ -n "${RESPONSE:-}" && "$*" != *"${UNHEALTHY:-none}"* ]] || exit 1
+    echo "running healthy" ;;
   "exec "*" find "*) echo /usr/share/nginx/html/assets/index-abc.js ;;
   "exec "*" curl "*) cat "$RESPONSE" ;;
+  *"print(Settings().store)"*) echo "${STORE:-redis}" ;;
+  *"rglob('*.lua')"*) cat "${LUA_FILES:-/dev/null}" ;;
 esac
 """
+LUA = "api/src/quiz/adapters/redis/lua/"
 
 
 def _run(
-    script: str, cwd: Path, tmp_path: Path, root: Path = ROOT, **env_extra: str
+    script: str,
+    cwd: Path,
+    tmp_path: Path,
+    root: Path = ROOT,
+    env_extra: Mapping[str, str] | None = None,
 ) -> tuple[int, list[str], str]:
     """Run ``script`` of the checkout ``root`` in ``cwd`` with the docker stub; return its exit
     code, the docker calls and its stderr."""
@@ -41,7 +51,7 @@ def _run(
     log = tmp_path / "docker.log"
     log.touch()
     path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
-    env = {**os.environ, "PATH": path, "DOCKER_LOG": str(log), **env_extra}
+    env = {**os.environ, "PATH": path, "DOCKER_LOG": str(log), **(env_extra or {})}
     result = subprocess.run(
         [str(root / "scripts" / script), "ci"], cwd=cwd, env=env, capture_output=True, check=False
     )
@@ -82,7 +92,7 @@ def test_infra_nginx_config_is_tested_with_the_compose_service_names_resolvable(
 def test_the_nginx_check_stops_when_compose_cannot_list_the_services(tmp_path: Path) -> None:
     """Compose refuses to read the file while the full stack's secrets are unset."""
     repo = _repo_with_infra_nginx_conf(tmp_path)
-    code, calls, _ = _run("check_nginx.sh", repo, tmp_path, COMPOSE_FAILS="1")
+    code, calls, _ = _run("check_nginx.sh", repo, tmp_path, env_extra={"COMPOSE_FAILS": "1"})
     assert code != 0
     assert not [c for c in calls if "/etc/nginx/nginx.conf:ro" in c]
 
@@ -98,10 +108,30 @@ def _response(tmp_path: Path, missing: str = "") -> Path:
     return response
 
 
+def _lua_files(tmp_path: Path, missing: str = "") -> Path:
+    """The repo's Lua scripts, relative to the lua/ folder, except ``missing``."""
+    tracked = subprocess.run(
+        ["git", "ls-files", f"{LUA}*.lua"],  # noqa: S607
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    names = sorted(path.removeprefix(LUA) for path in tracked if path != f"{LUA}{missing}")
+    listing = tmp_path / "lua.txt"
+    listing.write_text("".join(f"{name}\n" for name in names), encoding="utf-8")
+    return listing
+
+
+def _passing(tmp_path: Path) -> dict[str, str]:
+    """The environment in which every image passes the smoke test."""
+    return {"RESPONSE": str(_response(tmp_path)), "LUA_FILES": str(_lua_files(tmp_path))}
+
+
 def test_smoke_checks_the_security_headers_on_the_spa_route_and_on_an_asset(
     tmp_path: Path,
 ) -> None:
-    code, calls, _ = _run("smoke_images.sh", ROOT, tmp_path, RESPONSE=str(_response(tmp_path)))
+    code, calls, _ = _run("smoke_images.sh", ROOT, tmp_path, env_extra=_passing(tmp_path))
     assert code == 0
     requests = [c.split()[-1] for c in calls if c.startswith("exec ") and " curl " in c]
     assert requests == [
@@ -112,7 +142,9 @@ def test_smoke_checks_the_security_headers_on_the_spa_route_and_on_an_asset(
 
 def test_smoke_fails_when_a_response_lacks_a_security_header(tmp_path: Path) -> None:
     response = _response(tmp_path, missing="Content-Security-Policy")
-    code, calls, stderr = _run("smoke_images.sh", ROOT, tmp_path, RESPONSE=str(response))
+    code, calls, stderr = _run(
+        "smoke_images.sh", ROOT, tmp_path, env_extra={"RESPONSE": str(response)}
+    )
     assert code != 0
     assert "/ lacks Content-Security-Policy: default-src 'self';" in stderr
     started = [c.split("--name ")[1].split()[0] for c in calls if c.startswith("run --detach")]
@@ -144,6 +176,53 @@ def test_smoke_fails_when_the_snippet_yields_fewer_headers_than_it_adds(
         (repo / "web").mkdir()
         (repo / "web" / "security-headers.conf").write_text(snippet, encoding="utf-8")
     response = _response(tmp_path)
-    code, _, stderr = _run("smoke_images.sh", ROOT, tmp_path, root=repo, RESPONSE=str(response))
+    code, _, stderr = _run(
+        "smoke_images.sh", ROOT, tmp_path, root=repo, env_extra={"RESPONSE": str(response)}
+    )
     assert code != 0
     assert error in stderr
+
+
+def test_smoke_runs_the_api_image_on_a_redis_of_its_own_until_it_is_ready(tmp_path: Path) -> None:
+    code, calls, _ = _run("smoke_images.sh", ROOT, tmp_path, env_extra=_passing(tmp_path))
+    assert code == 0
+    (network,) = [c.split()[-1] for c in calls if c.startswith("network create ")]
+    redis = network.replace("smoke-", "smoke-redis-")
+    assert f"run --detach --name {redis} --network {network} redis:8-alpine" in calls
+    (api,) = [c for c in calls if c.startswith("run --detach") and "elsaquiz-api" in c]
+    assert f"--network {network} -e REDIS_URL=redis://{redis}:6379/0" in api
+    assert "STORE" not in api  # the image's default
+    name = api.split("--name ")[1].split()[0]
+    (ready,) = [c for c in calls if c.startswith(f"exec {name} python")]
+    assert "http://127.0.0.1:8000/readyz" in ready
+    assert calls[-2:] == [f"rm --force {redis}", f"network rm {network}"]
+
+
+def test_smoke_removes_the_redis_and_its_network_when_the_api_never_gets_healthy(
+    tmp_path: Path,
+) -> None:
+    env = _passing(tmp_path) | {"UNHEALTHY": "elsaquiz-api"}
+    code, calls, _ = _run("smoke_images.sh", ROOT, tmp_path, env_extra=env)
+    assert code != 0
+    (network,) = [c.split()[-1] for c in calls if c.startswith("network create ")]
+    assert calls[-2:] == [
+        f"rm --force {network.replace('smoke-', 'smoke-redis-')}",
+        f"network rm {network}",
+    ]
+
+
+@pytest.mark.parametrize("missing", ["score_answer.lua", "lib/points.lua"])
+def test_smoke_fails_when_the_api_image_lacks_a_lua_script(tmp_path: Path, missing: str) -> None:
+    env = _passing(tmp_path) | {"LUA_FILES": str(_lua_files(tmp_path, missing))}
+    code, calls, stderr = _run("smoke_images.sh", ROOT, tmp_path, env_extra=env)
+    assert code != 0
+    assert "API image Lua scripts differ from the repo" in stderr
+    assert f"< {missing}" in stderr
+    assert not [c for c in calls if c.startswith("network create ")]
+
+
+def test_smoke_fails_when_the_api_image_defaults_to_the_memory_store(tmp_path: Path) -> None:
+    env = _passing(tmp_path) | {"STORE": "memory"}
+    code, _, stderr = _run("smoke_images.sh", ROOT, tmp_path, env_extra=env)
+    assert code != 0
+    assert "elsaquiz-api:ci defaults to STORE=memory, not redis" in stderr
