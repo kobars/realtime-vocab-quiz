@@ -255,8 +255,15 @@ def test_destroy_with_nothing_tagged_deletes_nothing(tmp_path: Path) -> None:
 
 def test_the_make_targets_pass_their_variables_to_the_script() -> None:
     def dry(*args: str) -> str:
+        # Run from make check, the inner make would inherit its flags and name its folder.
+        env = {k: v for k, v in os.environ.items() if k not in {"MAKEFLAGS", "MAKELEVEL", "MFLAGS"}}
         result = subprocess.run(
-            [MAKE, "-n", *args], cwd=ROOT, capture_output=True, text=True, check=True
+            [MAKE, "-n", "--no-print-directory", *args],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return " ".join(result.stdout.split())  # an empty option leaves its spaces
 
