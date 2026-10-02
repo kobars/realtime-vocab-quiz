@@ -1,5 +1,6 @@
-// AI-ASSISTED: screenshot baselines of every screen at each project's width and color scheme, plus the layout checks a full-page screenshot cannot show: one outline around the phone tabs and nothing showing beside the pinned row.
+// AI-ASSISTED: screenshot baselines of every screen at each project's width and color scheme, plus the layout checks a full-page screenshot cannot show: one outline around the phone tabs and the pinned row under the top 10.
 import { expect, test } from '@playwright/test'
+import { strings } from '../src/strings'
 import { SCREENS } from './fixtures/screens'
 
 for (const screen of SCREENS) {
@@ -23,13 +24,11 @@ test('the selected phone tab draws no outline inside the tab track\'s outline', 
   expect(borders[1]).toBe('rgba(0, 0, 0, 0)')
 })
 
-test('a row scrolling under the pinned row is hidden by its dock, never shown beside it', async ({ page }) => {
+test('the pinned row sits under the tenth row, never over a row', async ({ page }) => {
   await leaderboard?.reach(page)
-  // Just above my row, inside the dock: the top 50 run on under it, so a row there would show around my row.
-  const hit = await page.getByTestId('pinned').evaluate((row) => {
-    const { left, width, top } = row.getBoundingClientRect()
-    const element = document.elementFromPoint(left + width / 2, top - 4)
-    return { inRow: element?.closest('li') !== null, inDock: element?.closest('[data-test="pinned-dock"]') !== null }
-  })
-  expect(hit).toEqual({ inRow: false, inDock: true })
+  const rows = page.getByRole('region', { name: strings.leaderboard.title }).locator('li')
+  await expect(rows).toHaveCount(10)
+  const pinned = await page.getByTestId('pinned').boundingBox()
+  const tenth = await rows.nth(9).boundingBox()
+  expect(pinned?.y ?? 0).toBeGreaterThan((tenth?.y ?? Infinity) + (tenth?.height ?? 0))
 })
