@@ -216,6 +216,20 @@ it('results after a join to an ended quiz (no joined): my row in the top 10 is n
   expect(w.get('[data-test="pinned"]').text()).toMatch(/#15.*Ana \(you\).*1340/s)
 })
 
+it('results after a join to an ended quiz (no joined): my row is highlighted and marked "(you)" in the top 10 and in "Show all players"', async () => {
+  useQuizStore().join('VOCAB-42', 'Ana')
+  const final = [...top(3), me(4, 900), ...top(18, 5)]
+  emit({ type: 'identity', userId: 'u1' })
+  await receive({ type: 'snapshot', atSeq: 9, status: 'ended', playerCount: 22, onlineCount: 0, entries: final, you: { rank: 4, score: 900 } },
+    { type: 'error', code: 'QUIZ_ENDED', message: 'ended', requestType: 'join' })
+  const w = render()
+  const mine = () => w.get('li[data-user="u1"]')
+  expect([mine().text(), mine().attributes('aria-current')]).toEqual([expect.stringContaining('Ana (you)'), 'true'])
+  await w.findAll('button').find((b) => b.text() === 'Show all players')?.trigger('click')
+  await receive({ type: 'leaderboard_page', atSeq: 9, offset: 0, final: true, playerCount: 22, entries: final })
+  expect([mine().text(), mine().attributes('aria-current')]).toEqual([expect.stringContaining('Ana (you)'), 'true'])
+})
+
 it('results: "Show all players" is not offered when every player is in the top 10', async () => {
   await join(false)
   await receive({ type: 'quiz_ended', seq: 6, playerCount: 10, entries: [...top(3), me(4, 900), ...top(6, 5)], you: { rank: 4, score: 900 } })

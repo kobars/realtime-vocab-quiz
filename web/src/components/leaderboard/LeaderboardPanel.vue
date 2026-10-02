@@ -1,6 +1,6 @@
 <!-- AI-ASSISTED: the live leaderboard panel: player counts, the top 10, my row pinned below it when I am further down, and "Show all players", whose paged list takes the place of the top 10 while it is open, in a clay card (UI spec §3.5). -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { Badge, Card } from '@quiz/clay'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
@@ -9,7 +9,6 @@ import LeaderboardRows from './LeaderboardRows.vue'
 import PinnedRow from './PinnedRow.vue'
 
 const store = useQuizStore()
-const me = computed(() => store.quiz?.userId ?? null)
 /** "Show all players" is open: its pages replace the top 10, so no player is listed twice. */
 const all = ref(false)
 </script>
@@ -40,7 +39,7 @@ const all = ref(false)
     <template v-if="!all">
       <LeaderboardRows
         :entries="store.entries"
-        :my-user-id="me"
+        :my-user-id="store.userId"
         :replacements="store.replacements"
       />
       <PinnedRow />

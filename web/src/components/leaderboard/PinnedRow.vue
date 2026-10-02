@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: my row pinned under the top 10 when my rank is further down: a decorative gap mark, then my rank, name and score in the highlighted clay row; it decides from my rank alone, so a join to an ended quiz (no `joined`, no user ID) never pins a row the top 10 already shows (UI spec §3.5, §3.6). -->
+<!-- AI-ASSISTED: my row pinned under the top 10 when my rank is further down: a decorative gap mark, then my rank, name and score in the highlighted clay row; it decides from my rank alone, so a join to an ended quiz (no `joined`) never pins a row the top 10 already shows (UI spec §3.5, §3.6). -->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useQuizStore } from '@/stores/quiz'

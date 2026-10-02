@@ -27,10 +27,12 @@ export interface QuizSocket {
 /**
  * Server messages in the order to apply them (broadcasts only once SeqTracker releases them), plus status changes.
  * `closed` follows a final close code or `stop`; `failed` means the client gave up after 10 connects without a `joined`.
+ * `identity` names the user each connect signs in as, before its socket opens: a join to an ended quiz gets no `joined`.
  */
 export type ClientEvent =
   | Exclude<ServerMessage, { type: 'pong' | 'question' }>
   | QuestionEvent
+  | { type: 'identity'; userId: string }
   | { type: 'status'; status: 'connecting' | 'open' | 'resyncing' | 'reconnecting' | 'closed' | 'failed'; code: number | null }
 
 /**
@@ -188,13 +190,15 @@ export class QuizClient {
     const generation = this.generation
     this.emit({ type: 'status', status: 'connecting', code: null })
     let ticket: string
+    let userId: string
     try {
-      ;({ ticket } = await connectTicket(this.o.api, this.displayName, this.o.storage))
+      ;({ ticket, identity: { userId } } = await connectTicket(this.o.api, this.displayName, this.o.storage))
     } catch {
       if (generation === this.generation) this.closed(DEAD_LINK)
       return
     }
     if (this.stopped || generation !== this.generation) return
+    this.emit({ type: 'identity', userId })
     const socket = this.o.socketFactory(`${this.o.url}?ticket=${encodeURIComponent(ticket)}`, SUBPROTOCOL)
     this.socket = socket
     const openTimer = this.after(OPEN_TIMEOUT_MS, () => this.kill(socket))

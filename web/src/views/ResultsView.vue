@@ -83,7 +83,7 @@ const timeLeft = computed(() => {
       <template v-if="!all">
         <LeaderboardRows
           :entries="rest"
-          :my-user-id="store.quiz?.userId"
+          :my-user-id="store.userId"
         />
         <PinnedRow />
       </template>
