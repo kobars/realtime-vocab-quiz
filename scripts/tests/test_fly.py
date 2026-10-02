@@ -177,7 +177,7 @@ def test_launch_creates_everything_once_and_keeps_the_secrets(tmp_path: Path) ->
     code, calls, out = _run(
         tmp_path,
         "launch",
-        APPS="other\nmyquiz-redis\nmyquiz-api\nmyquiz-web\n",
+        APPS="other \t\nmyquiz-redis \t\nmyquiz-api \t\nmyquiz-web \t\n",  # padded, as flyctl prints them
         VOLUMES='[{"id": "vol_1", "Name": "redis_data"}]',
         API_IPS='[{"Address": "fdaa:0:1::5", "Type": "private_v6"}]',
         WEB_IPS='[{"Type": "shared_v4"}, {"Type": "v6"}]',
@@ -242,7 +242,11 @@ def test_demo_passes_the_token_in_the_environment_only(tmp_path: Path) -> None:
     )
 
 
-DESTROY_ENV = {"FLY_APP": "myquiz", "APPS": "myquiz-api\nmyquiz-redis\nmyquiz-web\nother\n"}
+# flyctl pads each name with blanks.
+DESTROY_ENV = {
+    "FLY_APP": "myquiz",
+    "APPS": "myquiz-api \t\nmyquiz-redis \t\nmyquiz-web \t\nother \t\n",
+}
 
 
 def test_destroy_deletes_the_three_apps_once_the_prefix_is_typed(tmp_path: Path) -> None:

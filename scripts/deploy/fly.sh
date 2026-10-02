@@ -87,6 +87,13 @@ import_secrets() {
 # reading as "nothing there". On a dry run, nothing exists.
 lookup() { if [[ $DRY_RUN == 1 ]]; then printf '\n'; else "$@"; fi; }
 
+# The organization's app names, one per line: flyctl pads each name with blanks.
+app_names() {
+  local apps
+  apps=$(lookup flyctl apps list --org "$ORG" --quiet)
+  awk '{ print $1 }' <<<"$apps"
+}
+
 launch() {
   local apps app volumes ips admin_token redis_password
   load_settings
@@ -111,7 +118,7 @@ launch() {
     fi
   fi
 
-  apps=$(lookup flyctl apps list --org "$ORG" --quiet)
+  apps=$(app_names)
   for app in "$REDIS" "$API" "$WEB"; do
     grep -qx "$app" <<<"$apps" || run flyctl apps create "$app" --org "$ORG"
   done
@@ -201,7 +208,7 @@ destroy() {
   local apps app found="" answer
   load_settings
   need_flyctl
-  apps=$(lookup flyctl apps list --org "$ORG" --quiet)
+  apps=$(app_names)
   for app in "$WEB" "$API" "$REDIS"; do
     if [[ $DRY_RUN == 1 ]] || grep -qx "$app" <<<"$apps"; then found+=" $app"; fi
   done
