@@ -99,7 +99,13 @@ DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 def _image_files() -> list[Path]:
     """Every file that can pull an image: the Dockerfiles, the compose files, the workflows and
     the shell scripts."""
-    globs = ("*/Dockerfile", "compose*.yaml", ".github/workflows/*.yml", "scripts/*.sh")
+    globs = (
+        "*/Dockerfile",
+        "infra/*/Dockerfile",
+        "compose*.yaml",
+        ".github/workflows/*.yml",
+        "scripts/*.sh",
+    )
     return sorted(path for pattern in globs for path in ROOT.glob(pattern))
 
 
@@ -154,6 +160,7 @@ def test_the_tests_and_ci_run_the_redis_image_that_compose_runs() -> None:
     # Not a host name such as stack-redis:6379.
     redis = re.compile(r"(?<![\w.-])redis:[\w.-]+(?:@sha256:[0-9a-f]{64})?")
     paths = ["compose.yaml", ".github/workflows/ci.yml", "api/tests/conftest.py"]
+    paths += ["scripts/smoke_images.sh"]
     found = [set(redis.findall((ROOT / path).read_text(encoding="utf-8"))) for path in paths]
     assert len(found[0]) == 1
     assert all(images == found[0] for images in found), dict(zip(paths, found, strict=True))
@@ -176,6 +183,13 @@ def test_api_runtime_holds_only_the_venv_and_the_source_and_runs_as_10001() -> N
     assert "USER 10001:10001" in runtime
     assert any("/healthz" in line for line in runtime if "CMD" in line)
     assert any(line.startswith("HEALTHCHECK") for line in runtime)
+
+
+def test_api_image_defaults_to_the_redis_store() -> None:
+    """A replica started without STORE would otherwise keep quizzes and tickets of its own."""
+    _, runtime = _stages(ROOT / "api" / "Dockerfile")
+    envs = [line for line in runtime if line.startswith("ENV ")]
+    assert any(re.search(r"(^ENV | )STORE=redis( |$)", line) for line in envs), envs
 
 
 def _server_config() -> uvicorn.Config:

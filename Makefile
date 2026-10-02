@@ -58,8 +58,10 @@ ui_run = mkdir -p web/node_modules && docker run --rm --platform linux/amd64 --i
 	-v "$(CURDIR)":/repo -v elsaquiz-ui-node-modules:/repo/web/node_modules -w /repo/web $(PLAYWRIGHT_IMAGE) \
 	sh -c 'trap "chown -R $$HOST_IDS dist test-results playwright-report e2e/__screenshots__ 2>/dev/null || true" EXIT; \
 	corepack enable && pnpm install --frozen-lockfile --store-dir /tmp/pnpm-store && eval "pnpm exec playwright test $(1) $$UI_ARGS"'
+# The bots that make demo starts.
+BOTS ?= 20
 
-.PHONY: help build up down smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget
+.PHONY: help build up down demo demo-stop new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -72,6 +74,12 @@ up: ## Start the development Redis
 	$(COMPOSE_NO_SECRETS) up -d --wait redis
 down: ## Stop the development Redis and the full stack
 	$(COMPOSE_NO_SECRETS) --profile '*' down
+demo: build ## Start the full stack, a fresh 60-min quiz and BOTS bots (default 20); print the URLs
+	IMAGE_TAG='$(IMAGE_TAG)' scripts/demo.sh '$(BOTS)'
+demo-stop: ## Stop the demo bots; the stack keeps running
+	$(COMPOSE_NO_SECRETS) rm --stop --force bots
+new-quiz: ## Start a fresh 60-min quiz on the running stack; print its ID and player URL
+	docker compose --progress quiet run --rm -T seed
 smoke-full: ## Smoke-test the running full stack through nginx, stopping one API node
 	uv run --project api --locked python load/smoke_full.py
 dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)

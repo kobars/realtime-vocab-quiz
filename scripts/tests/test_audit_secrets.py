@@ -70,9 +70,15 @@ def test_fails_outside_a_git_repository(tmp_path: Path) -> None:
 
 
 def test_fails_in_a_shallow_clone(tmp_path: Path) -> None:
+    """A throwaway origin, so the test runs where the checkout has no history (the test image)."""
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "-q", "-b", "main")
+    for message in ("first", "second"):
+        _git(origin, "commit", "-q", "--allow-empty", "-m", message)
     shallow = tmp_path / "shallow"
     subprocess.run(
-        ["git", "clone", "-q", "--depth", "1", ROOT.as_uri(), str(shallow)],  # noqa: S607
+        ["git", "clone", "-q", "--depth", "1", origin.as_uri(), str(shallow)],  # noqa: S607
         check=True,
         capture_output=True,
     )
