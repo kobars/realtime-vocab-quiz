@@ -203,14 +203,15 @@ no time and no points: each script reads Redis `TIME` itself.
    `QuizService` (`app/service.py`).
 5. `join.lua` checks the quiz and its deadline, creates the player with score 0 on the
    first join, writes the presence entry with this connection's ID and sets the quiz's `dirty`
-   flag. It never increments `seq` and never publishes. If the user already held
-   another connection, the script returns that connection's ID.
+   flag. It never increments `seq` and publishes no broadcast. If the user already held
+   another connection, the script returns that connection's ID and publishes a
+   `session_replaced` message on the quiz's `control` channel.
 6. The node replies `joined {atSeq, cursor, score, …}` and records the socket in its registry
-   (`adapters/ws/registry.py`). An older socket of the same user on this node gets
-   `SESSION_REPLACED` and close 4001; one on another node is refused with `SESSION_REPLACED` at
-   its next write, because the scripts compare the connection ID. The quiz's first socket on a
-   node starts that node's loop for the quiz (`fanout/tick.py`): it subscribes to
-   `quiz:{<quizId>}:events` and ticks.
+   (`adapters/ws/registry.py`). The user's older socket gets `SESSION_REPLACED` and close 4001:
+   at once on this node, or through the `control` message on the node that holds it (and the
+   scripts refuse its writes, since they compare the connection ID). The quiz's first socket on
+   a node starts that node's loop for the quiz (`fanout/tick.py`): it subscribes to
+   `quiz:{<quizId>}:events` and `quiz:{<quizId>}:control` and ticks.
 7. The client sends one `resync {lastSeq}` and gets a `snapshot`: the standings at one `seq`
    from `read_standings.lua`, and its own row read fresh.
 8. The next tick's `leaderboard` frame carries the new player count to everyone.
@@ -591,7 +592,7 @@ Test paths are under `api/tests/` (server) or `web/src/` (client). "Not tested" 
 | Message flood | The per-connection token bucket (20/s, burst 40), before parsing | Dropped messages get `RATE_LIMITED`; 10 s of abuse closes 1008 | The flooding client is cut off | Bucket before the parser; caps per address and per process | `integration/ws/test_gateway.py::test_the_token_bucket_runs_before_the_parser`, `::test_ten_seconds_of_abuse_get_rate_limited_then_close_1008` |
 | Lost last frame (no later `seq` shows the gap) | `pong.seq` above the last applied `seq` | The client checks again 1 s later and resyncs if no frame arrived | Standings lag by at most one ping (25 s) plus 1 s | `pong` carries the counter read from Redis | `web/src/protocol/seq.test.ts` (the pong check); `unit/app/test_service.py::test_ping_reads_only_the_counter` |
 | Redis restore that moves `seq` back | A broadcast with `seq` below the last applied one | The client resyncs at once and accepts the lower snapshot | Standings jump back to the restored state | Resync on a lower `seq`; an epoch next to `seq` would also catch a counter that climbs past `lastSeq` first (§10) | `web/src/protocol/seq.test.ts` (resyncs at once on a lower `seq`). A counter that climbs past `lastSeq` before the client sees a frame is not caught: no epoch yet |
-| Reconnect with a new ticket | `join.lua` finds the user's player and presence | Same user, same score and cursor; the new connection takes over the presence; the older socket gets `SESSION_REPLACED` | Play continues; an older tab shows "opened elsewhere" (4001) | Session token per tab; ticket per connect | `web/src/protocol/identity.test.ts`; `unit/adapters/test_mock_auth.py::test_tickets_of_one_session_share_the_user`; `unit/app/test_service.py::test_session_replaced_closes_the_older_socket` |
+| Reconnect with a new ticket | `join.lua` finds the user's player and presence | Same user, same score and cursor; the new connection takes over the presence; the older socket gets `SESSION_REPLACED` | Play continues; an older tab shows "opened elsewhere" (4001) | Session token per tab; ticket per connect | `web/src/protocol/identity.test.ts`; `unit/adapters/test_mock_auth.py::test_tickets_of_one_session_share_the_user`; `unit/app/test_service.py::test_session_replaced_closes_the_older_socket`; `integration/test_two_nodes.py::test_join_on_other_node_closes_old_socket_4001` |
 
 **Known limits.**
 
@@ -606,9 +607,6 @@ Test paths are under `api/tests/` (server) or `web/src/` (client). "Not tested" 
   until the next gap. The fix is a `seq` epoch (§10).
 - **The AOF loss window.** AOF `everysec` can lose about the last second of acknowledged
   answers on a Redis crash; only the host end waits for the fsync.
-- **A replaced socket on another node is closed late.** `join.lua` publishes the replacement on
-  the quiz's `control` channel, but no node listens to it yet: the older socket is refused
-  with `SESSION_REPLACED` at its next write instead of being closed at once.
 
 ## 12. Security
 
