@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the quiz preview card on the join screen: an icon tile, the title, whether the quiz has ended, and the question and player counts as pills. -->
+<!-- AI-ASSISTED: the quiz preview card on the join screen: an icon tile, the title, whether the quiz has ended, and the question and player counts as pills; it sits inside the join card, so it has an outline but no shadow of its own. -->
 <script setup lang="ts">
 import { BookOpenText } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
@@ -9,7 +9,7 @@ defineProps<{ quiz: QuizPreview }>()
 </script>
 
 <template>
-  <div class="flex items-start gap-4 rounded-card border-clay bg-card p-4 shadow-clay">
+  <div class="flex items-start gap-4 rounded-card border-clay bg-card p-4">
     <span
       class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-cyan text-night"
       aria-hidden="true"

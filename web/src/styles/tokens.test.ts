@@ -43,6 +43,17 @@ describe('design tokens', () => {
     expect(block(tokens.indexOf('@media (prefers-color-scheme: dark)'))).toContain('color-scheme: dark;')
   })
 
+  it.each(['--shadow-clay', '--shadow-clay-lift', '--shadow-press', '--shadow-press-hover', '--shadow-press-active'])(
+    'the dark theme redefines %s with no sideways offset, so no ghost box sits beside a surface on the dark page',
+    (name) => {
+      const value = darkTokens[name] ?? ''
+      // Each layer starts at depth 0; a layer of a color-mix() nests its commas in parentheses.
+      const layers = value.replace(/\([^()]*(\([^()]*\)[^()]*)*\)/g, '()').split(',').map((layer) => layer.trim())
+      expect(layers.length).toBeGreaterThan(0)
+      for (const layer of layers) expect(layer).toMatch(/^0 \d+px /)
+    },
+  )
+
   it.each(MOTION)('reduced motion sets %s to 0ms', (name) => {
     expect(reducedMotion).toContain(`${name}: 0ms;`)
   })

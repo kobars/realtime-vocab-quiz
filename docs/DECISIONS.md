@@ -27,7 +27,7 @@ Each decision uses the format below. ADRs are never renumbered; a later ADR supe
 | ADR-007 | Backplane: Redis pub/sub, `seq` and resync (Streams as the next step) | accepted |
 | ADR-008 | One Redis schema for scoring and fan-out | accepted |
 | ADR-009 | Repository layout and the Vue client: `api/`, `web/`, generated `contracts/` | accepted |
-| ADR-010 | A playful design system of our own ("Clay") replaces the neutral look: self-hosted font, OS-driven dark theme, hard tinted shadows | accepted |
+| ADR-010 | A playful design system of our own ("Clay") replaces the neutral look: self-hosted font, OS-driven dark theme, hard tinted shadows (a glow and a 2 px edge in dark), one focus outline | accepted |
 | ADR-011 | Images pinned by digest; the runtime stages keep the OS package upgrade | accepted |
 
 ## ADR-001 — Build the real-time quiz service, with a Python and FastAPI server; mock identity, questions and admin
@@ -316,6 +316,10 @@ The first client used direction "Slate" (`docs/spec/ui.md` §7.1): a neutral sla
 - About 40 kB of font files are served from the app's own origin and cached; text renders in the fallback stack until the font arrives.
 - Every color has a light and a dark value, and a new token needs both rows in the spec table, or `tokens.test.ts` fails.
 - The light input outline (3.14:1 on the page) and focus ring (4.37:1 on the page) pass 3:1 with less margin than Slate's; the contrast test keeps them from slipping below it.
+
+### Amendment: dark-theme depth and one focus indicator
+
+Testing the dark theme in a browser showed that the hard offsets did not carry over: on the near-black page a 6 to 10 px violet offset reads as a misplaced ghost box, and nested surfaces stacked them (a preview card inside the join card, a button inside both). Focus also looked doubled: controls drew a box-shadow ring with a 2 px offset on top of their own 3 px outline, and two links painted Tailwind's default white offset. The dark block now redefines the shadow tokens as a soft glow under surfaces and a 2 px edge straight down under controls, and a surface inside a card casts no shadow in either theme; the light theme keeps its hard offsets, so this narrows "hard shadows tinted from the primary" to the light theme rather than reversing it. Focus is one indicator everywhere: the page's 2 px `--ring` outline with a transparent gap, which a control with its own outline pulls onto that outline (`focus-hug`), so it reads as one band. An outline also stays visible in forced colors, where box-shadow rings disappear. The rule is in `docs/spec/ui.md` §7.5; `web/src/components/ui/ui.test.ts` and `web/src/styles/main.test.ts` hold the focus rule, `web/src/styles/tokens.test.ts` the dark values.
 
 <!-- AI-ASSISTED-END -->
 
