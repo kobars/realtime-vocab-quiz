@@ -35,6 +35,25 @@ def test_every_full_stack_service_is_hardened() -> None:
         assert service["ulimits"] == {"nofile": 65536}
 
 
+def test_every_full_stack_service_restarts_unless_it_was_stopped() -> None:
+    """``make smoke-full`` stops a node with ``docker compose stop``, which the policy respects;
+    the one-shot services (bots, seed, tests) stay finished."""
+    assert {name: s.get("restart") for name, s in FULL.items()} == dict.fromkeys(
+        FULL, "unless-stopped"
+    )
+    others = {name: s for name, s in COMPOSE["services"].items() if name not in FULL}
+    assert [name for name, s in others.items() if "restart" in s] == []
+
+
+def test_the_stack_redis_refuses_writes_when_full_instead_of_evicting_quiz_state() -> None:
+    command = FULL["stack-redis"]["command"]
+    flags = dict(zip(command[1::2], command[2::2], strict=True))
+    assert flags["--maxmemory"] == "${REDIS_MAXMEMORY:-256mb}"
+    assert flags["--maxmemory-policy"] == "noeviction"
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert re.search(r"^# REDIS_MAXMEMORY=256mb ", example, re.MULTILINE)
+
+
 def test_two_api_nodes_with_distinct_ids_share_one_redis_and_trust_only_the_stack_network() -> None:
     nodes = [FULL["api-1"]["environment"], FULL["api-2"]["environment"]]
     assert [env["NODE_ID"] for env in nodes] == ["api-1", "api-2"]
@@ -84,6 +103,28 @@ def test_the_identity_rate_limit_lets_a_load_run_join() -> None:
     (rate,) = re.findall(r"zone=identity:10m rate=(\d+)r/s", NGINX)
     for burst in re.findall(r"limit_req zone=identity burst=(\d+) nodelay", NGINX):
         assert int(burst) + 10 * int(rate) >= 2 * 5_000
+
+
+def test_the_edge_cuts_slow_requests_and_caps_the_api_requests_in_flight() -> None:
+    """Every client shares one address at the edge, so the cap holds for the whole stack: above
+    the bot swarm's 100 HTTP connections per process at 10 processes."""
+    assert _directive("client_header_timeout") == ["10s"]
+    assert _directive("client_body_timeout") == ["10s"]
+    (zone,) = _directive("limit_conn_zone")
+    assert zone == "$binary_remote_addr zone=api_conn:10m"
+    (api,) = re.findall(r"location /api/ \{(.*?)\n        \}", NGINX, re.DOTALL)
+    (cap,) = re.findall(r"^            limit_conn api_conn (\d+);", api, re.MULTILINE)
+    assert int(cap) >= 10 * 100
+    assert _directive("limit_conn api_conn") == [cap]  # never on /ws, whose sockets the nodes cap
+
+
+def test_the_edge_drops_a_stalled_reader_but_leaves_a_socket_to_its_node() -> None:
+    """A socket whose client stops reading misses its pong: its node drops it within two
+    heartbeats, before nginx's write timeout on that socket."""
+    (ws,) = re.findall(r"location = /ws \{(.*?)\n        \}", NGINX, re.DOTALL)
+    assert _directive("send_timeout") == ["10s", "60s"]
+    (timeout,) = re.findall(r"^\s*send_timeout (\d+)s;", ws, re.MULTILINE)
+    assert int(timeout) * 1000 > 2 * Settings.model_fields["heartbeat_ms"].default
 
 
 def test_a_node_redirect_stays_under_the_api_prefix_and_port() -> None:
