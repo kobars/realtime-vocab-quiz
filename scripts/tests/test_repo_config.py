@@ -74,7 +74,7 @@ GATE_FAILS = "- if: contains(needs.*.result, 'failure') || contains(needs.*.resu
 @pytest.mark.parametrize(
     ("workflow", "gate", "needs"),
     [
-        ("ci.yml", "ci-required", "[check, integration, coverage, guards, review-budget]"),
+        ("ci.yml", "ci-required", "[check, integration, ui, coverage, guards, review-budget]"),
         (
             "security.yml",
             "security-required",
@@ -186,6 +186,35 @@ def test_pull_request_checks_read_the_whole_history_of_the_pr_head(job: str) -> 
     assert "if: github.event_name == 'pull_request'" in lines
     assert "ref: ${{ github.event.pull_request.head.sha }}" in lines
     assert "fetch-depth: 0" in lines
+
+
+def test_ui_specs_run_in_the_playwright_image_of_the_locked_version_pinned_by_digest() -> None:
+    # The baselines render in this image: its browser must be the one @playwright/test drives.
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    image = re.search(r"^PLAYWRIGHT_IMAGE = (\S+)$", makefile, re.MULTILINE)
+    assert image is not None
+    pinned = re.fullmatch(
+        r"mcr\.microsoft\.com/playwright:v([\d.]+)-noble@sha256:[0-9a-f]{64}", image[1]
+    )
+    assert pinned is not None, image[1]
+    lock = (ROOT / "web" / "pnpm-lock.yaml").read_text(encoding="utf-8")
+    assert f"  '@playwright/test@{pinned[1]}':" in lock.splitlines()
+    assert "make ui-check" in _run_commands(WORKFLOWS / "ci.yml")
+
+
+def test_ui_container_hands_its_files_back_and_takes_ui_args_from_the_environment() -> None:
+    # The container runs as root on a bind mount: without the chown a Linux host's next build
+    # cannot empty web/dist. UI_ARGS inside the single-quoted sh -c would end the quote at its
+    # first single quote.
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    ui_run = re.search(r"^ui_run = (.*?[^\\])$", makefile, re.MULTILINE | re.DOTALL)
+    assert ui_run is not None
+    chown = 'trap "chown -R $$HOST_IDS dist test-results playwright-report e2e/__screenshots__'
+    assert chown in ui_run[1]
+    assert '-e HOST_IDS="$$(id -u):$$(id -g)"' in ui_run[1]
+    assert "-e UI_ARGS" in ui_run[1]
+    assert 'eval "pnpm exec playwright test $(1) $$UI_ARGS"' in ui_run[1]
+    assert "$(UI_ARGS)" not in makefile
 
 
 @pytest.mark.parametrize("workflow", ["ci.yml", "security.yml", "containers.yml", "codeql.yml"])
@@ -323,6 +352,16 @@ def test_workflow_lint_fails_on_an_action_that_is_not_pinned_to_a_commit(
     )
     assert (result.returncode != 0) is fails, result.stdout + result.stderr
     assert ("unpinned-uses" in result.stdout) is fails
+
+
+def test_make_check_checks_the_test_citations_of_the_docs() -> None:
+    recipe = _block(
+        ROOT / "Makefile", "check: ## Run every check a change must pass", "acceptance:"
+    )
+    steps = [line.split(",")[1] for line in recipe if line.startswith("$(call step,")]
+    assert any("python scripts/check_citations.py)" in line for line in recipe)
+    # The static check reports a doc typo before the minutes of tests, right after pre-commit.
+    assert steps.index("test citations") == steps.index("pre-commit hooks") + 1, steps
 
 
 def _deptry_tools() -> tuple[list[str], list[str]]:

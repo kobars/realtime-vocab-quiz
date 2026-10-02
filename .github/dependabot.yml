@@ -30,7 +30,7 @@ updates:
         update-types: [minor, patch]
   # Updates the base image digests in the Dockerfiles.
   - package-ecosystem: docker
-    directories: [/api, /web, /load]
+    directories: [/api, /web, /load, /infra/dev]
     schedule:
       interval: weekly
     cooldown:

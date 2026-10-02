@@ -21,12 +21,10 @@ def test_quiz_ended_refusal_carries_end_seq() -> None:
     assert DomainError(ErrorCode.QUIZ_ENDED, "ended", end_seq=7).end_seq == 7
 
 
-def test_port_renews_presence_and_marks_dirty() -> None:
+def test_port_renews_presence() -> None:
     assert params(Store.renew_presence) == ["self", "quiz_id", "stale_ms", "pairs"]
     assert get_type_hints(Store.renew_presence)["return"] is Renewed
     assert [f.name for f in fields(Renewed)] == ["status", "removed"]
-    assert params(Store.mark_dirty) == ["self", "quiz_id"]
-    assert get_type_hints(Store.mark_dirty)["return"] is type(None)
 
 
 def test_port_reads_many_ranks_at_one_seq() -> None:

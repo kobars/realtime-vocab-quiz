@@ -33,6 +33,8 @@ uv run --project api pre-commit install    # run the hooks on staged files at ea
 |---|---|
 | `make dev-api` | One API node on `127.0.0.1:8001` (memory store) that allows the client dev server's origins; `DEV_API_PORT` and `DEV_ORIGINS` change them. `pnpm -C web dev` serves the client on :5173 and proxies `/api/*` (prefix dropped) and `/ws` to it, or to `QUIZ_API_URL` |
 | `make up`, `make down` | `make up` starts the development Redis on `127.0.0.1:6381`; `make down` stops it and the full stack, and keeps their data |
+| `make demo`, `make demo-stop` | `make demo` builds the images, starts the full stack, a fresh 60-minute quiz and `BOTS` bots (default 20) on it, and prints the quiz ID and player URL; it writes `.env` with new secrets when there is none. `make demo-stop` removes the bots |
+| `make new-quiz` | Start a fresh 60-minute quiz on the running stack and print its ID and player URL |
 | `make smoke-full` | Smoke-test the running full stack through nginx: health checks on each node, one answer, then stop the node that holds the socket and check the player comes back on the other node (`load/smoke_full.py`) |
 | `make load` | The bot swarm as a container on the stack network against the running full stack, with its options in `LOAD_ARGS` ([load/README.md](load/README.md) explains them and holds the measured runs) |
 | `make test` | The server unit, property and contract tests and the client tests, without Redis |
@@ -53,17 +55,19 @@ In order, stopping at the first failing step:
 1. The client install from the lock file (`pnpm install --frozen-lockfile`).
 2. Every pre-commit hook on every file: ruff lint and format, ESLint, typos, and lychee (in
    Docker) on the relative links and anchors of the tracked Markdown.
-3. actionlint and zizmor on the workflows: zizmor fails on a finding of medium severity or
+3. The test citations: each test that the tracked Markdown cites as a file path, `::` and a
+   test name, outside the AI-LOG entries, exists (`scripts/check_citations.py`).
+4. actionlint and zizmor on the workflows: zizmor fails on a finding of medium severity or
    higher, and `.github/zizmor.yml` requires every action to be pinned to a full commit SHA.
-4. mypy (strict) and import-linter.
-5. deptry: every import in `api/src` is a declared dependency and every runtime dependency is
+5. mypy (strict) and import-linter.
+6. deptry: every import in `api/src` is a declared dependency and every runtime dependency is
    used; `api/tests`, `scripts/` and `load/` import only declared packages.
-6. pytest without the `integration`, `acceptance` and `system` markers, with a unit
+7. pytest without the `integration`, `acceptance` and `system` markers, with a unit
    branch-coverage floor (`UNIT_COVERAGE_FLOOR` in the `Makefile`), then the acceptance tests on
    the memory store.
-7. The contract drift check: the generated schema and types match the server's models.
-8. vue-tsc, then Vitest with coverage thresholds (`web/vitest.config.ts`).
-9. The client build (`pnpm -C web build`).
+8. The contract drift check: the generated schema and types match the server's models.
+9. vue-tsc, then Vitest with coverage thresholds (`web/vitest.config.ts`).
+10. The client build (`pnpm -C web build`).
 
 Each acceptance run writes a JUnit report (into `REPORTS`, else `reports/`), and
 `scripts/check_junit_skips.py` fails the run when a test skips that should run: none on the

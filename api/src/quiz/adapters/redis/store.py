@@ -252,6 +252,3 @@ class RedisStore:
         if reply[0] == "ended":
             return port.Renewed("ended")
         return port.Renewed("renewed", int(reply[1] or 0))
-
-    async def mark_dirty(self, quiz_id: str) -> None:
-        raise NotImplementedError

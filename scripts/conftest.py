@@ -1,5 +1,6 @@
 # AI-ASSISTED: a throwaway git repository for the pull-request check tests.
-"""The ``pr_repo`` fixture of the tests of scripts/check_pr.py and scripts/review_budget.py."""
+"""The ``pr_repo`` fixture of the tests of scripts/check_pr.py, scripts/review_budget.py and
+scripts/check_citations.py: a throwaway repository, also the working folder."""
 
 import os
 import shutil

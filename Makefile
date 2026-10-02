@@ -46,8 +46,22 @@ DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
 # compose reads the whole file in every command, so the full stack's required secrets must be set
 # even to start the development Redis or to stop anything. Placeholders: never start the stack with it.
 COMPOSE_NO_SECRETS = ADMIN_TOKEN="$${ADMIN_TOKEN:-unused}" REDIS_PASSWORD="$${REDIS_PASSWORD:-unused}" docker compose
+# The visual and accessibility specs run in the pinned Playwright image (its version matches @playwright/test in
+# web/pnpm-lock.yaml), always as linux/amd64 like CI, so the baselines and every check render alike. The Linux
+# node_modules live in a volume, which leaves the host's web/node_modules alone. The container runs as root, so on exit
+# it hands the build, the reports and the baselines back to the host user. UI_ARGS adds Playwright arguments, quotes
+# included, for example UI_ARGS="--project=320-light -g 'join-error'".
+PLAYWRIGHT_IMAGE = mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+export UI_ARGS
+ui_run = mkdir -p web/node_modules && docker run --rm --platform linux/amd64 --ipc=host \
+	-e CI -e E2E_SUITE=ui -e UI_ARGS -e HOST_IDS="$$(id -u):$$(id -g)" -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+	-v "$(CURDIR)":/repo -v elsaquiz-ui-node-modules:/repo/web/node_modules -w /repo/web $(PLAYWRIGHT_IMAGE) \
+	sh -c 'trap "chown -R $$HOST_IDS dist test-results playwright-report e2e/__screenshots__ 2>/dev/null || true" EXIT; \
+	corepack enable && pnpm install --frozen-lockfile --store-dir /tmp/pnpm-store && eval "pnpm exec playwright test $(1) $$UI_ARGS"'
+# The bots that make demo starts.
+BOTS ?= 20
 
-.PHONY: help build up down smoke-full dev-api test test-integration test-system test-browser check acceptance load contracts audit audit-python audit-web audit-secrets review-budget
+.PHONY: help build up down demo demo-stop new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -60,6 +74,12 @@ up: ## Start the development Redis
 	$(COMPOSE_NO_SECRETS) up -d --wait redis
 down: ## Stop the development Redis and the full stack
 	$(COMPOSE_NO_SECRETS) --profile '*' down
+demo: build ## Start the full stack, a fresh 60-min quiz and BOTS bots (default 20); print the URLs
+	IMAGE_TAG='$(IMAGE_TAG)' scripts/demo.sh '$(BOTS)'
+demo-stop: ## Stop the demo bots; the stack keeps running
+	$(COMPOSE_NO_SECRETS) rm --stop --force bots
+new-quiz: ## Start a fresh 60-min quiz on the running stack; print its ID and player URL
+	docker compose --progress quiet run --rm -T seed
 smoke-full: ## Smoke-test the running full stack through nginx, stopping one API node
 	uv run --project api --locked python load/smoke_full.py
 dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)
@@ -75,10 +95,15 @@ test-system: ## Run the system tests against a running full stack at STACK_URL
 	$(call step,pytest system,$(STACK_ENV); $(PYTEST) tests/system -m system)
 test-browser: ## Run the browser specs in Chromium against a running full stack at STACK_URL
 	$(call step,playwright,$(STACK_ENV); pnpm -C web exec playwright test)
+ui-check: ## Run the visual and accessibility specs in the pinned Playwright image (Docker; make check needs no browser)
+	$(call step,ui specs,$(call ui_run))
+ui-baselines: ## Regenerate the screenshot baselines that differ or are missing, in the pinned Playwright image
+	$(call step,ui baselines,$(call ui_run,--update-snapshots))
 check: export ACCEPTANCE_STORE = memory
 check: ## Run every check a change must pass
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,pre-commit hooks,uv run --project api --locked pre-commit run --all-files)
+	$(call step,test citations,uv run --project api --locked python scripts/check_citations.py)
 	$(call step,actionlint,uv run --project api --locked actionlint)
 	$(call step,zizmor,$(ZIZMOR))
 	$(call step,mypy,cd api && uv run --locked mypy)

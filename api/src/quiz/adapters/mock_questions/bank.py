@@ -5,6 +5,8 @@ quizzes from a content service or a database, edited in an authoring tool.
 Each file holds one quiz: ``quiz_id``, ``title`` and its questions (``id``, ``word``, four
 distinct ``choices`` and the ``answer`` index). Question IDs are the quiz ID lowercased without
 hyphens, then a two-digit number in serve order: ``VOCAB-42`` has ``vocab42-01`` … ``vocab42-10``.
+A run of a bank quiz, its ID and a run code (``VOCAB-42-7K3Q``), plays that quiz's questions, so
+each demo starts a fresh quiz from the same bank.
 A file that is not JSON or breaks a rule stops the load with a ``ValueError`` that names the file;
 so does a folder with no quiz file. The ``answer`` must be a JSON integer: ``"2"``, ``true`` and
 ``1.0`` are rejected, not coerced.
@@ -104,8 +106,15 @@ class MockQuestionBank:
     def quiz_ids(self) -> tuple[str, ...]:
         return tuple(self._quizzes)
 
+    def _bank_id(self, quiz_id: str) -> str:
+        """The bank quiz that ``quiz_id`` plays: itself, or the quiz that a run code follows."""
+        if quiz_id in self._quizzes:
+            return quiz_id
+        bank_id, _, code = quiz_id.rpartition("-")
+        return bank_id if code else quiz_id
+
     async def questions(self, quiz_id: str) -> tuple[BankQuestion, ...] | None:
-        return self._quizzes.get(quiz_id)
+        return self._quizzes.get(self._bank_id(quiz_id))
 
     async def title(self, quiz_id: str) -> str | None:
-        return self._titles.get(quiz_id)
+        return self._titles.get(self._bank_id(quiz_id))

@@ -102,3 +102,12 @@ async def test_quiz_info_counts_players_without_ranking_them(
     monkeypatch.undo()  # quiz_ended carries the ranked top entries
     await store.end_by_host("VOCAB-42")
     assert (await http.get("/quizzes/VOCAB-42")).json()["status"] == "ended"
+
+
+async def test_a_run_of_a_bank_quiz_starts_beside_the_bank_quiz(http: httpx.AsyncClient) -> None:
+    """``make demo`` starts a fresh run on every call, though the bank quiz itself has started."""
+    for quiz_id in ("VOCAB-42", "VOCAB-42-7K3Q"):
+        body = {"quizId": quiz_id, "windowMs": 3_600_000}
+        assert (await http.post("/admin/quizzes", json=body, headers=TOKEN)).status_code == 201
+    bank, run = [(await http.get(f"/quizzes/{q}")).json() for q in ("VOCAB-42", "VOCAB-42-7K3Q")]
+    assert run == bank | {"quizId": "VOCAB-42-7K3Q"}

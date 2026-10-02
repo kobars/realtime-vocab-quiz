@@ -20,8 +20,22 @@ which test now checks the fix and which review ran.
 
 ## Try it with Docker
 
-This runs the full stack: two API nodes on one Redis behind nginx. You need Docker with
-Compose v2, `make`, `curl` and `openssl`.
+**One command.** With Docker (Compose v2) and `make`:
+
+```bash
+git clone https://github.com/kobars/realtime-vocab-quiz.git
+cd realtime-vocab-quiz
+make demo
+```
+
+`make demo` writes `.env` with new secrets if there is none, builds the images, starts the full
+stack, starts a fresh 60-minute quiz with 20 bots playing it, and prints the quiz ID and the
+player URL. Open that URL in two browser windows and join to play next to the bots.
+`make demo BOTS=200` starts more bots, `make demo-stop` removes them, `make new-quiz` starts
+another quiz on the running stack, and `make down` stops everything.
+
+**Step by step.** This runs the same full stack: two API nodes on one Redis behind nginx. You
+need Docker with Compose v2, `make`, `curl` and `openssl`.
 
 1. Clone the repository and write the two secrets the stack needs into `.env` (the mock
    admin token and the stack Redis password; [`.env.example`](.env.example) lists the other
@@ -112,6 +126,19 @@ pnpm 11.
   acceptance tests always start their own (Docker).
 - `make acceptance`: the black-box acceptance tests over HTTP and the WebSocket alone;
   `ACCEPTANCE_STORE=redis` runs them on Redis.
+- `make ui-check`: the visual and accessibility specs (`web/e2e/visual.spec.ts`,
+  `web/e2e/a11y.spec.ts`) on the production build, with no backend: `web/e2e/fixtures/` mocks the
+  HTTP calls and the quiz socket and pauses the page clock. Eleven screens, from the join form to
+  the final results, run at 320, 768 and 1280 px wide in light and dark with reduced motion (the
+  Leaderboard tab only below 1024 px; wider, the leaderboard sits beside every play screen). Each
+  must match its screenshot baseline in `web/e2e/__screenshots__/` (at most 50 pixels differ) and
+  pass axe for WCAG 2.2 A and AA, with no sideways scroll (also at 640 px, a 1280 px window at
+  200% zoom), controls of at least 44 × 44 px and a visible focus ring at every Tab stop. It runs
+  in the Playwright image pinned in the `Makefile`, always as `linux/amd64`, so every machine
+  renders like CI; it needs Docker, and `make check` needs no browser. `make ui-baselines`
+  regenerates the baselines that changed, in the same image; `UI_ARGS` passes Playwright arguments
+  to both, for example `make ui-check UI_ARGS="--project=320-light -g 'join-error'"`. The CI job
+  `ui` runs it and keeps the report and the screenshot diffs when it fails.
 - The tests below need the running Docker stack, and they create the seeded quizzes themselves:
   the system tests `BIZ-20`, the browser specs `VOCAB-42` and `ACAD-10`. A quiz ID can be
   created only once on the same stack data, so a quiz left by the Docker steps above, the bot
@@ -138,6 +165,9 @@ pnpm 11.
     Without `--admin-token` it plays quizzes that already exist. `make load` runs it as a
     container on the stack network, with its options in `LOAD_ARGS`;
     [load/README.md](load/README.md) explains them and holds the measured load runs.
+- `docker compose --profile test run --rm test`: `make test` and the acceptance tests on the
+  memory store in a container, with no uv or pnpm on the host. It needs `.env` (step 1 above,
+  or `make demo` writes it), as every Compose command does.
 - `make check`: every check a change must pass (lint, types, unit and acceptance tests with
   coverage, the client build, the link check). Run it before you open a pull request; it needs
   Docker.
@@ -202,7 +232,7 @@ its default, and [`.env.example`](.env.example) shows the common ones.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `STORE` | `memory` | `memory` for one process, `redis` for several nodes |
+| `STORE` | `memory`; `redis` in the API image | `memory` for one process, `redis` for several nodes |
 | `REDIS_URL` | `redis://127.0.0.1:6381/0` | The Redis that `make up` starts (`make down` stops it) |
 | `ALLOWED_ORIGINS` | `http://localhost:8080`, `http://127.0.0.1:8080` | Comma-separated origins allowed to open the WebSocket; others get HTTP 403. `make dev-api` sets the client dev server's origins |
 | `QUIZ_PORT` | `8080` | The public port; the default allowed origins use it |
@@ -233,7 +263,8 @@ make down
 - **`set ADMIN_TOKEN in .env`**: Compose refuses to start the stack until `.env` holds both
   secrets (step 1 of the Docker path).
 - **The quiz has ended**: a quiz closes when its window ends, and its ID stays taken (HTTP 409)
-  while its data lives (24 hours). Create another seeded quiz (`BIZ-20` or `ACAD-10`; the test suites
+  while its data lives (24 hours). On the stack, `make new-quiz` starts a fresh 60-minute run
+  of `VOCAB-42` under a new ID. Or create another seeded quiz (`BIZ-20` or `ACAD-10`; the test suites
   then need fresh stack data, see **Run the tests**), pass a
   longer window (`"windowMs": 3600000`, the 60-minute maximum), or start with empty data:
   restart `make dev-api` (memory store), or run `docker compose --profile full down -v` (stack).

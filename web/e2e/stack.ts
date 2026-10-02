@@ -30,8 +30,8 @@ export async function join(page: Page, quizId: string, name: string): Promise<vo
   await expect(page).toHaveURL(`/quiz/${quizId}`)
 }
 
-/** No WCAG 2.1 A or AA rule fails on the page as it is now. */
+/** No WCAG 2.2 A or AA rule (colour contrast included) fails on the page as it is now. */
 export async function expectAccessible(page: Page): Promise<void> {
-  const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+  const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
   expect(violations.map((rule) => `${rule.id}: ${rule.nodes.map((node) => node.target.join(' ')).join(', ')}`)).toEqual([])
 }
