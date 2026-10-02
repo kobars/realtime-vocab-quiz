@@ -81,11 +81,24 @@ they pass, whoever wrote it.
 
 ## Documentation
 
-- [DESIGN.md](DESIGN.md): the system design, from the architecture to the failure modes
-- [docs/spec/](docs/spec/): the domain, protocol, Redis and UI specs
-- [docs/DECISIONS.md](docs/DECISIONS.md): the architecture decision records
-- [CONTRIBUTING.md](CONTRIBUTING.md): running the stack, development, the make targets, troubleshooting
+Design:
+
+- [DESIGN.md](DESIGN.md): the system design; start with its [reading map](DESIGN.md#reading-map)
+- [docs/DECISIONS.md](docs/DECISIONS.md): the decision records, one file per ADR
+- [docs/spec/](docs/spec/README.md): the domain, protocol, Redis and UI specs
+- [docs/capacity.md](docs/capacity.md): the capacity estimate behind the load targets
+
+Evidence:
+
+- [load/README.md](load/README.md): the measured load runs and how to repeat them
+- [docs/ai-log/README.md](docs/ai-log/README.md): how AI was used, one entry per merged PR
+
+Engineering:
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): running the stack, development, the make targets, the [project layout](CONTRIBUTING.md#project-layout) and troubleshooting
+- [AGENTS.md](AGENTS.md): the rules for every change, AI markers included
 - [docs/operations.md](docs/operations.md): ports, endpoints, configuration, metrics and deploying to a VM or to Fly.io
+- [web/packages/clay/README.md](web/packages/clay/README.md): the Clay design system and its gallery
 - [SECURITY.md](SECURITY.md): how to report a vulnerability
 
 ## Quick start
