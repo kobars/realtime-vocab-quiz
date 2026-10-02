@@ -178,7 +178,8 @@ def _admin(deps: HttpDeps) -> APIRouter:
         """MOCK: start the bank quiz ``bankQuizId`` (by default ``quizId``) under ``quizId``; 409
         when ``quizId`` exists."""
         _quiz(request, body.quizId)
-        bank_quiz_id = body.bankQuizId or body.quizId
+        # An existing quiz keeps its bank quiz, so a repeat without bankQuizId still gets the 409.
+        bank_quiz_id = body.bankQuizId or await deps.store.bank_quiz_id(body.quizId)
         if (bank := await deps.bank.questions(bank_quiz_id)) is None:
             raise DomainError(ErrorCode.QUIZ_NOT_FOUND, NOT_FOUND)
         questions = tuple(Question(q.question_id, q.correct_choice) for q in bank)

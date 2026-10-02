@@ -112,6 +112,16 @@ async def test_a_new_quiz_id_can_play_a_bank_quiz(http: httpx.AsyncClient) -> No
     assert run == bank | {"quizId": "DEMO-7K3Q"}
 
 
+async def test_a_run_created_again_without_its_bank_quiz_is_a_conflict(
+    http: httpx.AsyncClient,
+) -> None:
+    """A load run that re-posts an existing run ID learns that it exists, not that it is unknown."""
+    run = {"quizId": "DEMO-7K3Q", "bankQuizId": "VOCAB-42"}
+    assert (await http.post("/admin/quizzes", json=run, headers=TOKEN)).status_code == 201
+    again = await http.post("/admin/quizzes", json={"quizId": "DEMO-7K3Q"}, headers=TOKEN)
+    assert again.status_code == 409
+
+
 @pytest.mark.parametrize(
     "body",
     [{"quizId": "VOCAB-42-7K3Q"}, {"quizId": "DEMO-7K3Q", "bankQuizId": "NOPE-1"}],
