@@ -342,8 +342,13 @@ def test_redis_keeps_its_data_on_a_volume_with_the_compose_durability() -> None:
         "--dir /data/redis",
     ):
         assert option in command
+    # The compose stack's pinned image, by digest alone: flyctl refuses a tag with a digest.
+    image = config["build"]["image"]
+    name, digest = image.split("@")
+    assert name == "docker.io/library/redis"
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
     compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
-    assert config["build"]["image"] in compose  # the same pinned image
+    assert re.search(rf"image: redis:\S+@{digest}$", compose, re.MULTILINE)
 
 
 def _lines(path: Path) -> list[str]:

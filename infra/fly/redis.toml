@@ -5,8 +5,10 @@
 app = "quiz-redis"
 primary_region = "sin"
 
+# redis:8.10-alpine, the compose stack's image, by its digest alone: flyctl refuses a reference
+# that carries both a tag and a digest.
 [build]
-  image = "redis:8.10-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0"
+  image = "docker.io/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0"
 
 [env]
   REDIS_MAXMEMORY = "256mb" # half the Machine: an AOF rewrite forks and copies pages it changes
