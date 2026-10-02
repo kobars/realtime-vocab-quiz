@@ -93,7 +93,8 @@ Host-led stays future work.
 
 The latency, throughput and availability targets are in [§8](#8-non-functional-requirements).
 
-**How the design meets each acceptance criterion.**
+**How the design meets each acceptance criterion.** The acceptance tests in `api/tests/acceptance/`
+number these criteria AC-1 to AC-6, in the order of the table.
 
 | Criterion | How the design meets it |
 |---|---|
@@ -310,7 +311,7 @@ sequenceDiagram
 *Two players on two nodes: join, answer, one tick, both leaderboards.*
 
 A player joins with a ticket, on either node. Each answer is scored once, in one Lua script that
-also marks the quiz dirty. The 200 ms tick publishes the standings over pub/sub, and every node
+marks the quiz dirty when the answer earns points. The 200 ms tick publishes the standings over pub/sub, and every node
 relays them to its own sockets; the numbered steps below give the detail.
 
 ### Join
