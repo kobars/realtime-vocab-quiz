@@ -259,7 +259,7 @@ sequenceDiagram
     participant C as Client
     participant N2 as Other API node
     participant R as Redis
-    Note over C: socket drops (1006); lastSeq = L
+    Note over C: socket drops (1006), lastSeq = L
     C->>C: wait full-jitter backoff
     C->>N2: POST /tickets, then GET /ws?ticket=…
     C->>N2: join {quizId, displayName}
