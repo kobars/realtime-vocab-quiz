@@ -53,7 +53,7 @@ our choice: they make the scale-out claims of §10 real.
 |---|---|---|
 | Latency (C5) | p99 below 500 ms from "answer accepted" to "leaderboard delivered"; frames come from a 200 ms coalescing tick, so the tick spends up to 200 ms of it | The bot swarm (`load/bots.py`) times each answer → leaderboard pair on the client side; the measured runs go in §9 |
 | Throughput | Thousands of concurrent sockets over **two API nodes** behind nginx (a cap of 10,000 per process), and 1,000 answers per second in one quiz of 5,000 players (§9) | Bot swarm runs on one and on two nodes: sockets, messages per second, CPU and memory (§9) |
-| Availability | The service keeps running when one API node stops: its clients reconnect to the other node and resync. A client's first retry comes within 250 ms and each later retry within at most 10 s (full-jitter backoff, protocol §7); a socket that dies silently is detected after 50 s with no inbound message, then the same retries follow. Redis is the single point of failure: while it is down, requests get `UNAVAILABLE` | `make smoke-full` (`load/smoke_full.py`) stops the node that holds a protocol client's socket and requires the client back through nginx, resynced, within 10 s; `/readyz` on each node (503 while Redis is unreachable); the failure table of §11 |
+| Availability | The service keeps running when one API node stops: its clients reconnect to the other node and resync. Retries follow a full-jitter backoff (protocol §7): a client that had stayed joined for 10 s makes its first retry within 250 ms, and each later retry waits at most 10 s (5 s more after an overload close, 1013); a socket that dies silently is detected after 50 s with no inbound message, then the same retries follow. Redis is the single point of failure: while it is down, requests get `UNAVAILABLE` | `make smoke-full` (`load/smoke_full.py`) stops the node that holds a protocol client's socket and requires the client back through nginx, resynced, within 10 s; that client retries every 250 ms on its own, so the browser client's backoff bounds are checked by `web/src/protocol/backoff.test.ts`; `/readyz` on each node (503 while Redis is unreachable); the failure table of §11 |
 
 **How the design meets each acceptance criterion.**
 
@@ -662,9 +662,13 @@ nothing the client sends later can change it. The API's logs and nginx's access 
 path, never the query string that holds the ticket (`adapters/ws/endpoint.py`, nginx's `edge`
 log format). nginx's error log (level `warn`, on its stderr) is the exception: when an upgrade
 fails at a node (a refused connect or a timeout), its line quotes the request line, ticket
-included. That is low risk: the ticket is single use and valid for 30 s, it gives only an
-anonymous mock identity, and the error log is readable only by whoever runs the containers, who
-also holds the stack's secrets in `.env`.
+included. The node that failed may not have redeemed that ticket, so single use does not protect it
+by itself: nginx passes the upgrade on to the other node, which normally redeems it, but if that
+node fails too the ticket stays valid until it expires. That is low risk: the ticket lives 30 s
+and gives only an anonymous mock identity. The log goes to whoever runs the containers, and a
+failed run of the `stack` CI workflow uploads the stack's logs as an artifact; that stack
+listens only on the CI runner, so its tickets cannot be used from outside, and it is gone when
+the job ends.
 
 **Abuse limits.**
 
