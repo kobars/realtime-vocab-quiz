@@ -2,8 +2,7 @@
 <script setup lang="ts">
 import { CircleCheck, CircleX, LoaderCircle } from '@lucide/vue'
 import { computed, nextTick, onMounted, useTemplateRef } from 'vue'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Button, Card } from '@quiz/clay'
 import type { AnswerResult } from '@/protocol/types.generated'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'

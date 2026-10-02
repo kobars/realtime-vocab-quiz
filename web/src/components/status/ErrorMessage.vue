@@ -1,8 +1,7 @@
 <!-- AI-ASSISTED: a short message for the errors the player should see, and the blocking clay card for the store's blocked state: "Use this tab", "Reload", "Try again" or "Back to join" (UI spec §3.7, §4.3). -->
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Button, Card } from '@quiz/clay'
 import { type Blocked, useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 

@@ -4,5 +4,5 @@ pnpm-lock.yaml linguist-generated
 *.generated.ts linguist-generated
 contracts/schema/*.json linguist-generated
 # shadcn-vue writes these components; they are regenerated rather than reviewed line by line.
-web/src/components/ui/** linguist-generated
-web/src/components/ui/**/*.test.ts -linguist-generated
+web/packages/clay/src/components/** linguist-generated
+web/packages/clay/src/components/**/*.test.ts -linguist-generated

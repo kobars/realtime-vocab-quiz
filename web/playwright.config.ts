@@ -1,7 +1,7 @@
-// AI-ASSISTED: Playwright runs the browser specs in e2e/ in Chromium: against a running full stack (on a desktop, and the phone spec on a Pixel 7), or (E2E_SUITE=ui) the visual and accessibility specs against the production build on a mocked backend.
+// AI-ASSISTED: Playwright runs the browser specs in e2e/ in Chromium: against a running full stack (on a desktop, and the phone spec on a Pixel 7), or (E2E_SUITE=ui) the visual and accessibility specs against the production build on a mocked backend and against the design system's component gallery.
 import process from 'node:process'
 import { defineConfig, devices, type PlaywrightTestConfig } from '@playwright/test'
-import { STACK_URL } from './e2e/stack'
+import { GALLERY_URL, STACK_URL } from './e2e/stack'
 
 const UI_SPECS = /(visual|a11y)\.spec\.ts$/
 const PHONE_SPECS = /phone\.spec\.ts$/
@@ -30,10 +30,17 @@ const ui: PlaywrightTestConfig = {
   // The pinned image renders alike on every run, so a few anti-aliased pixels are the only slack: a ratio bound such
   // as 1% would let a whole text colour change through (it touches 0.05–0.4% of a page).
   expect: { toHaveScreenshot: { maxDiffPixels: 50 } },
-  webServer: {
-    command: `pnpm build && pnpm exec vite preview --host 127.0.0.1 --port ${new URL(PREVIEW_URL).port} --strictPort`,
-    url: PREVIEW_URL,
-  },
+  // The app's production build, and the design-system package's component gallery.
+  webServer: [
+    {
+      command: `pnpm build && pnpm exec vite preview --host 127.0.0.1 --port ${new URL(PREVIEW_URL).port} --strictPort`,
+      url: PREVIEW_URL,
+    },
+    {
+      command: `pnpm -C packages/clay build && pnpm -C packages/clay exec vite preview --host 127.0.0.1 --port ${new URL(GALLERY_URL).port} --strictPort`,
+      url: GALLERY_URL,
+    },
+  ],
   use: { baseURL: PREVIEW_URL },
   projects: WIDTHS.flatMap((width) =>
     SCHEMES.map((colorScheme) => ({

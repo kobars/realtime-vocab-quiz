@@ -1,4 +1,6 @@
-# AI-ASSISTED: build-script policy for the client dependencies (vue-demi needs no build) and a release-age floor.
+# AI-ASSISTED: the client workspace (the app at the root, the Clay design system in packages/), its build-script policy (vue-demi needs no build) and a release-age floor.
+packages:
+  - packages/*
 allowBuilds:
   vue-demi: false
 # pnpm installs only versions published at least 7 days (in minutes) ago, Dependabot's cooldown.

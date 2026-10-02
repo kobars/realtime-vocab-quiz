@@ -1,8 +1,7 @@
 <!-- AI-ASSISTED: the 404 page for any unknown path, as a clay card with an icon tile and a way home. -->
 <script setup lang="ts">
 import { MapPinOff } from '@lucide/vue'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Button, Card } from '@quiz/clay'
 import { strings } from '@/strings'
 </script>
 

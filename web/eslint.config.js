@@ -5,7 +5,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 import tseslint from 'typescript-eslint'
 
 export default defineConfig(
-  globalIgnores(['dist/', 'coverage/', 'src/contracts/generated/']),
+  globalIgnores(['**/dist/', '**/coverage/', 'src/contracts/generated/']),
   js.configs.recommended,
   tseslint.configs.strict,
   pluginVue.configs['flat/recommended'],
@@ -17,7 +17,7 @@ export default defineConfig(
   },
   {
     // A type-aware subset, not strictTypeChecked: unhandled union members and lost promises.
-    files: ['src/**/*.{ts,vue}', 'e2e/**/*.ts', '*.config.ts'],
+    files: ['src/**/*.{ts,vue}', 'e2e/**/*.ts', '*.config.ts', 'packages/*/{src,gallery}/**/*.{ts,vue}', 'packages/*/*.config.ts'],
     languageOptions: {
       parserOptions: {
         projectService: true,
@@ -33,8 +33,35 @@ export default defineConfig(
     },
   },
   {
+    // The app reaches the design system only through its public entry points, and never the libraries it wraps.
+    files: ['src/**/*.{ts,vue}', 'e2e/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          {
+            group: ['@quiz/clay/*', '!@quiz/clay/tokens', '!@quiz/clay/testing', '**/packages/*', '**/packages/*/**'],
+            message: 'Import the design system from @quiz/clay (or its /tokens and /testing entries), not from its files.',
+          },
+          {
+            group: ['class-variance-authority', 'clsx', 'reka-ui', 'tailwind-merge', 'vue-sonner', 'vue-sonner/*'],
+            message: 'Use the @quiz/clay component or helper that wraps this library.',
+          },
+        ],
+      }],
+    },
+  },
+  {
+    // A consumer's bundler resolves `@` to its own source, so the package imports its files relatively.
+    files: ['packages/*/{src,gallery}/**/*.{ts,vue}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{ group: ['@/*'], message: 'Import package files relatively; `@` is the app\'s alias.' }],
+      }],
+    },
+  },
+  {
     // Copied in by the shadcn-vue CLI: one-word names and optional props without defaults.
-    files: ['src/components/ui/**/*.vue'],
+    files: ['packages/clay/src/components/**/*.vue'],
     rules: {
       'vue/multi-word-component-names': 'off',
       'vue/require-default-prop': 'off',

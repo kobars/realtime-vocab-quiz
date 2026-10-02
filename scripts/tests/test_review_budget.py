@@ -57,13 +57,13 @@ def test_lock_and_generated_files_are_left_out(pr_repo: Repo) -> None:
             "web/pnpm-lock.yaml": "lock\n",
             "web/src/protocol/types.generated.ts": "export type A = 1\n",
             "contracts/schema/protocol.json": "{}\n",
-            "web/src/components/ui/button/Button.vue": "<template />\n",
-            "web/src/components/ui/ui.test.ts": "test('a', () => {})\n",
+            "web/packages/clay/src/components/button/Button.vue": "<template />\n",
+            "web/packages/clay/src/components/components.test.ts": "test('a', () => {})\n",
         }
     )
     assert list(review_budget.review_input(base, "HEAD")) == [
         "app.py",
-        "web/src/components/ui/ui.test.ts",
+        "web/packages/clay/src/components/components.test.ts",
     ]
 
 

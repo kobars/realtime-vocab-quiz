@@ -1,0 +1,10 @@
+// AI-ASSISTED: the package compiles under the client's strict settings.
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // Only for the shadcn-vue CLI (components.json): the package's own files import relatively, because a consumer's
+    // bundler resolves `@` to its own source.
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "gallery/**/*.ts", "gallery/**/*.vue", "vite.config.ts", "vitest.config.ts"]
+}
