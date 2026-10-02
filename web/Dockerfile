@@ -1,7 +1,7 @@
 # AI-ASSISTED: the web image: pnpm builds the Vue app, then unprivileged nginx serves dist/ as an SPA.
 # Build from the repository root: docker build -f web/Dockerfile .
 
-FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS builder
+FROM node:26-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1 AS builder
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0
