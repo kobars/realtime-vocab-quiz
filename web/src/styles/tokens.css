@@ -1,39 +1,100 @@
-/* AI-ASSISTED: design tokens of direction A "Slate" (docs/spec/ui.md §7.2); the only file that names a color, radius or duration. */
+/* AI-ASSISTED: design tokens of direction "Clay" (docs/spec/ui.md §7.2); the only file that names a color, size, radius, shadow or duration. */
 :root {
-  --background: #F8FAFC;
+  --background: #F9F6FF;
   --card: #FFFFFF;
-  --foreground: #0F172A;
-  --muted-foreground: #475569;
-  --border: #E2E8F0;
-  --input: #64748B;
-  --primary: #4338CA;
+  --foreground: #181233;
+  --muted-foreground: #5C5478;
+  --border: #E5DCFF;
+  --input: #9774FF;
+  --primary: #6441CC;
   --primary-foreground: #FFFFFF;
-  --highlight: #EEF2FF;
-  --ring: #4338CA;
-  --success: #15803D;
-  --success-soft: #F0FDF4;
-  --destructive: #B91C1C;
-  --destructive-soft: #FEF2F2;
-  --warning: #B45309;
+  --primary-hover: #4B3199;
+  --primary-bright: #7D51FF;
+  --highlight: #E3FCF8;
+  --ring: #7D51FF;
+  --mint: #1AEDD5;
+  --cyan: #00C5FF;
+  --sun: #FF9822;
+  --night: #050024;
+  --success: #1F7A3A;
+  --success-soft: #EBF9EF;
+  --destructive: #CC2626;
+  --destructive-foreground: #FFFFFF;
+  --destructive-soft: #FDEEEE;
+  --warning: #A65200;
+  --warning-soft: #FFF3E6;
   /* The rest of the names shadcn-vue components read; --accent is their hover background, not my row's tint. */
-  --card-foreground: #0F172A;
+  --card-foreground: #181233;
   --popover: #FFFFFF;
-  --popover-foreground: #0F172A;
-  --secondary: #F1F5F9;
-  --secondary-foreground: #0F172A;
-  --muted: #F1F5F9;
-  --accent: #F1F5F9;
-  --accent-foreground: #0F172A;
-  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
-  --radius: 0.625rem;
-  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.06), 0 4px 12px rgb(15 23 42 / 0.06);
+  --popover-foreground: #181233;
+  --secondary: #F2EEFF;
+  --secondary-foreground: #4B3199;
+  --muted: #F2EEFF;
+  --accent: #F2EEFF;
+  --accent-foreground: #181233;
+  --gradient-primary: linear-gradient(135deg, var(--primary), var(--primary-bright));
+  --gradient-text: linear-gradient(135deg, #6441CC, #385CEC);
+  /* Strength of the primary tint in the card shadows and of the join screen's decoration. */
+  --clay-tint: 18%;
+  --blob-tint: 16%;
+  --font-sans: "Nunito Variable", ui-rounded, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-size-title: 2rem;
+  --font-size-display: 2.5rem;
+  --radius: 1rem;
+  --radius-card: 1.5rem;
+  --border-clay: 3px;
+  --shadow-clay: 6px 6px 0 color-mix(in srgb, var(--primary) var(--clay-tint), transparent), inset 0 -4px 0 rgb(5 0 36 / 0.06);
+  --shadow-clay-lift: 10px 10px 0 color-mix(in srgb, var(--primary) var(--clay-tint), transparent), inset 0 -4px 0 rgb(5 0 36 / 0.06);
+  --shadow-press: 4px 4px 0 color-mix(in srgb, var(--primary) 30%, transparent), inset 0 -3px 0 rgb(5 0 36 / 0.12);
+  --shadow-press-hover: 6px 6px 0 color-mix(in srgb, var(--primary) 30%, transparent), inset 0 -3px 0 rgb(5 0 36 / 0.12);
+  --shadow-press-active: 2px 2px 0 color-mix(in srgb, var(--primary) 30%, transparent), inset 0 -1px 0 rgb(5 0 36 / 0.12);
+  --shadow-inset: inset 0 2px 4px rgb(5 0 36 / 0.06);
   --motion-fast: 120ms;
   --motion-base: 200ms;
   --motion-slow: 320ms;
   --motion-count: 600ms;
+  --motion-pop: 360ms;
+  --stagger: 120ms;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* The dark theme follows the OS; there is no toggle. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #050024;
+    --card: #171236;
+    --foreground: #F9F6FF;
+    --muted-foreground: #A9A3C7;
+    --border: #322066;
+    --input: #9774FF;
+    --primary: #9774FF;
+    --primary-foreground: #050024;
+    --primary-hover: #B197FF;
+    --primary-bright: #B197FF;
+    --highlight: #123A35;
+    --ring: #B197FF;
+    --success: #60F07F;
+    --success-soft: #0F3A1F;
+    --destructive: #FF8282;
+    --destructive-foreground: #050024;
+    --destructive-soft: #4A1520;
+    --warning: #FFC17A;
+    --warning-soft: #3A2610;
+    --card-foreground: #F9F6FF;
+    --popover: #171236;
+    --popover-foreground: #F9F6FF;
+    --secondary: #1E1A3C;
+    --secondary-foreground: #B197FF;
+    --muted: #1E1A3C;
+    --accent: #1E1A3C;
+    --accent-foreground: #F9F6FF;
+    --gradient-text: linear-gradient(135deg, #B197FF, #00C5FF);
+    --clay-tint: 35%;
+    --blob-tint: 8%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root { --motion-fast: 0ms; --motion-base: 0ms; --motion-slow: 0ms; --motion-count: 0ms; }
+  :root { --motion-fast: 0ms; --motion-base: 0ms; --motion-slow: 0ms; --motion-count: 0ms; --motion-pop: 0ms; --stagger: 0ms; }
 }

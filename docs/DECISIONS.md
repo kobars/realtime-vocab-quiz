@@ -27,6 +27,7 @@ Each decision uses the format below. ADRs are never renumbered; a later ADR supe
 | ADR-007 | Backplane: Redis pub/sub, `seq` and resync (Streams as the next step) | accepted |
 | ADR-008 | One Redis schema for scoring and fan-out | accepted |
 | ADR-009 | Repository layout and the Vue client: `api/`, `web/`, generated `contracts/` | accepted |
+| ADR-010 | A playful design system of our own ("Clay") replaces the neutral look: self-hosted font, OS-driven dark theme, hard tinted shadows | accepted |
 
 ## ADR-001 — Build the real-time quiz service, with a Python and FastAPI server; mock identity, questions and admin
 
@@ -276,5 +277,39 @@ The service has a Python server and a browser client that must agree on every me
 - A protocol change is one PR: edit the Pydantic model, run `make contracts`, and the client sees the new types at compile time (`vue-tsc` in `make check`).
 - Two toolchains to install (uv and pnpm), each with a committed lock file; CI installs both from the locks.
 - shadcn-vue components live in `web/src/components/ui/` as our own code, so we maintain them instead of upgrading a package.
+
+<!-- AI-ASSISTED-END -->
+
+## ADR-010 — A playful design system of our own ("Clay") replaces the neutral look
+
+<!-- AI-ASSISTED-BEGIN: ADR-010 drafted with Claude Code from web/src/styles/tokens.css and docs/spec/ui.md §1, §5 and §7; the contrast ratios are recomputed by web/src/styles/contrast.test.ts. -->
+
+- **Status:** accepted
+- **Date:** 2026-10-02
+
+### Context
+
+The first client used direction "Slate" (`docs/spec/ui.md` §7.1): a neutral slate surface, one indigo accent, the system font, 10 px corners and calm motion. It met every accessibility rule but did not look like a game, and the spec forbade brand colors. Every component reads its look from `web/src/styles/tokens.css` through the Tailwind theme in `web/src/styles/main.css`, so the look can change in one place, but the spec, the tokens and their tests have to change together.
+
+### Decision
+
+- **Our own playful design system, "Clay":** a pale violet page, white cards, a brand violet primary with a brighter violet gradient end, and mint, cyan and sun as role fills that only ever sit under dark text. Shapes are rounded (16 px controls, 24 px cards, pills), outlines are 3 px, and shadows are hard, zero-blur offsets tinted from the primary through `color-mix`, so no grey shadow is left and the dark theme follows the primary.
+- **A self-hosted web font:** Nunito Variable from the `@fontsource-variable/nunito` package, the only new runtime dependency. The content security policy is `default-src 'self'`, which blocks a font host, and one variable file covers weights 500 to 800. Only the latin and latin-ext faces are declared, with `font-display: swap`. Its default figures have equal widths, so the numbers need no second font.
+- **A dark theme that follows the OS:** one `@media (prefers-color-scheme: dark)` block in `tokens.css` redefines the colors. There is no toggle, and Tailwind's `dark:` variant stays bound to a `.dark` ancestor, so the components carry no `dark:` classes.
+- **Motion that answers a touch:** buttons, choices and interactive cards lift and press with a spring easing, the answer feedback pops in once and the podium rises once; all of it sits behind `motion-safe:`, and the reduced-motion block zeroes every duration token. FLIP, fades and the countdown keep the standard easing.
+- **Contrast is a test:** `web/src/styles/contrast.test.ts` computes the WCAG 2.x ratio of every text pair (at least 4.5:1) and of the input outline and the focus ring (at least 3:1) from `tokens.css`, in both themes, and `web/src/styles/tokens.test.ts` checks the spec table against the file.
+
+### Alternatives considered
+
+- **Keep Slate:** the safest contrast margins and no font download, but a look with no character for a game. Rejected.
+- **A font from a font host:** no package to update, but it needs a CSP exception and a third-party request on every visit. Rejected for a self-hosted file.
+- **A theme toggle stored per user:** user choice, but a second source of truth and a flash of the wrong theme before the script runs. Rejected for the OS setting.
+- **Soft blurred shadows:** familiar, but grey blur reads as dirty on a violet page and needs a separate value per theme. Rejected for hard shadows tinted from the primary.
+
+### Consequences
+
+- About 40 kB of font files are served from the app's own origin and cached; text renders in the fallback stack until the font arrives.
+- Every color has a light and a dark value, and a new token needs both rows in the spec table, or `tokens.test.ts` fails.
+- The light input outline (3.14:1 on the page) and focus ring (4.37:1 on the page) pass 3:1 with less margin than Slate's; the contrast test keeps them from slipping below it.
 
 <!-- AI-ASSISTED-END -->
