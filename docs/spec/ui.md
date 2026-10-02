@@ -74,7 +74,7 @@ A panel on every quiz screen (intro, question, feedback, finished).
 
 - **Rows:** rank, display name, score (tabular numerals, right-aligned). At most 50 rows are rendered: the top 50 of the latest `leaderboard` or `snapshot` (frames up to 200 players carry everyone; the client still renders 50).
 - **My row:** highlighted with the `--highlight` tint and "(you)". If I am not in the top 50, a pinned row under the list shows my rank and score.
-- **Where my rank and score come from** (the pinned row and the header): each `snapshot.you` and `quiz_ended.you` sets them, because no `rank_update` follows a join or a reconnect while the standings stay the same (protocol §4). After that, a `leaderboard` frame updates them from its `entries` up to 200 players; above 200, each `rank_update` does.
+- **Where my rank and score come from** (the pinned row and the header): each `snapshot.you` and `quiz_ended.you` sets them, because no `rank_update` follows a join or a reconnect while the standings stay the same (protocol §4). A `snapshot` with `you: null` clears them: the user is not a player. A `quiz_ended` with `you: null` and no row of mine means the node could not read my rank, so the last values stay and the client joins again; the final `snapshot` that a join after the end gets sets them. After that, a `leaderboard` frame updates them from its `entries` up to 200 players; above 200, each `rank_update` does.
 - **Header:** "340 players · 312 online" (`playerCount`, `onlineCount`).
 - Rows are keyed by `userId`, so a rank change moves the row instead of re-drawing it (§5.1). Ties cannot happen: ranks are unique.
 - The list itself is not a live region (§6.3); my rank and score are.
