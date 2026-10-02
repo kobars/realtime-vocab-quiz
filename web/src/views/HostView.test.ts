@@ -150,6 +150,36 @@ describe('picking a question set', () => {
     expect(card.get('a').attributes('href')).toBe('/')
   })
 
+  it('shows that hosting is off when the list is empty', async () => {
+    replies.banks = { status: 200, body: [] }
+    const { wrapper } = await screen()
+    expect(wrapper.get('[data-test="host-unavailable"]').text()).toContain(strings.host.off)
+  })
+
+  it('renders and creates with storage blocked, where even reading sessionStorage throws', async () => {
+    vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new DOMException('denied', 'SecurityError')
+    })
+    const { wrapper, create } = await screen()
+    await create()
+    expect(wrapper.get('[data-test="host-quiz-id"]').text()).toBe(CREATED.quizId)
+  })
+
+  it('keeps a quiz created after the visitor left the page, so /host shows it again', async () => {
+    const { wrapper, router, create } = await screen()
+    let settle: (response: Response) => void = () => {}
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => (settle = resolve)))
+    await create()
+    await router.push('/')
+    await flushPromises()
+    settle(new Response(JSON.stringify(CREATED), { status: 201 }))
+    await flushPromises()
+    expect(JSON.parse(sessionStorage.getItem(HOST_KEY) ?? 'null')).toEqual(HOSTED)
+    await router.push('/host')
+    await flushPromises()
+    expect(wrapper.get('[data-test="host-quiz-id"]').text()).toBe(CREATED.quizId)
+  })
+
   it('offers "Try again" when the list cannot be loaded', async () => {
     replies.banks = { status: 0 }
     const { wrapper } = await screen()
@@ -265,12 +295,15 @@ describe('ending the quiz', () => {
     expect(sessionStorage.getItem(HOST_KEY)).toBeNull()
   })
 
-  it('shows "Ending…" while the request runs', async () => {
+  it('shows "Ending…" while the request runs, with "Keep it open" disabled', async () => {
     replies.end = null
     const { wrapper } = await confirming()
     await wrapper.get('[data-test="confirm"]').trigger('click')
     expect(wrapper.get('[data-test="confirm"]').attributes('aria-busy')).toBe('true')
     expect(wrapper.get('[data-test="confirm"]').text()).toBe(strings.host.ending)
+    expect(wrapper.get('[data-test="keep-open"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="keep-open"]').trigger('click')
+    expect(wrapper.find('[data-test="confirm-end"]').exists()).toBe(true)
   })
 
   it.each([

@@ -67,7 +67,9 @@ function askToEnd(): void {
   void nextTick(() => keepButton.value?.$el.focus())
 }
 
+/** Once "End it now" is sent, the end goes through, so "Keep it open" no longer offers to cancel it. */
 function keepOpen(): void {
+  if (ending.value) return
   confirming.value = false
   void nextTick(() => endButton.value?.$el.focus())
 }
@@ -211,6 +213,7 @@ async function end(): Promise<void> {
           ref="keepButton"
           variant="outline"
           data-test="keep-open"
+          :disabled="ending"
           @click="keepOpen"
         >
           {{ strings.host.keepOpen }}

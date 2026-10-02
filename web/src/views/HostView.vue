@@ -53,10 +53,11 @@ async function create(bank: Bank): Promise<void> {
   notice.value = null
   const result = await createQuiz(bank.id)
   creating.value = null
+  // Saved even after the visitor has left the page, so /host shows the quiz and its host token again.
+  if (result.kind === 'created') saveHostedQuiz(result.quiz)
   if (!mounted) return
   switch (result.kind) {
     case 'created':
-      saveHostedQuiz(result.quiz)
       hosted.value = result.quiz
       return
     case 'rate-limited':

@@ -62,12 +62,13 @@ function call<T>(request: (signal: AbortSignal) => Promise<T | { kind: 'error' }
   return withTimeout(HOSTING_TIMEOUT_MS, request).catch(() => ({ kind: 'error' as const }))
 }
 
-/** The bank quizzes a visitor may host; a 404 means the server does not offer public hosting. */
+/** The bank quizzes a visitor may host; a 404, or an empty list, means the server offers no public hosting. */
 export function fetchBanks(fetchFn = send, base = '/api'): Promise<BanksResult> {
   return call(async (signal) => {
     const response = await fetchFn(`${base}/banks`, { signal })
     if (response.status === 404) return { kind: 'off' }
     const body: unknown = response.ok ? await response.json() : null
+    if (Array.isArray(body) && body.length === 0) return { kind: 'off' }
     const banks = Array.isArray(body) ? body.map(toBank) : []
     return banks.length > 0 && banks.every((bank) => bank !== null) ? { kind: 'ok', banks: banks as Bank[] } : { kind: 'error' }
   })
@@ -115,26 +116,29 @@ export function endQuiz(quiz: HostedQuiz, fetchFn = send, base = '/api'): Promis
   })
 }
 
-/** The quiz this tab hosts; the host token never leaves the tab's sessionStorage. */
-export function readHostedQuiz(storage: Storage = sessionStorage): HostedQuiz | null {
+/**
+ * The quiz this tab hosts; the host token never leaves the tab's sessionStorage. Storage is resolved
+ * inside each `try`, because with storage blocked even reading `sessionStorage` throws.
+ */
+export function readHostedQuiz(storage?: Storage): HostedQuiz | null {
   try {
-    return toHostedQuiz(JSON.parse(storage.getItem(HOST_KEY) ?? 'null'))
+    return toHostedQuiz(JSON.parse((storage ?? sessionStorage).getItem(HOST_KEY) ?? 'null'))
   } catch {
     return null
   }
 }
 
-export function saveHostedQuiz(quiz: HostedQuiz, storage: Storage = sessionStorage): void {
+export function saveHostedQuiz(quiz: HostedQuiz, storage?: Storage): void {
   try {
-    storage.setItem(HOST_KEY, JSON.stringify(quiz))
+    ;(storage ?? sessionStorage).setItem(HOST_KEY, JSON.stringify(quiz))
   } catch {
     // Blocked storage: the controls work until a refresh.
   }
 }
 
-export function clearHostedQuiz(storage: Storage = sessionStorage): void {
+export function clearHostedQuiz(storage?: Storage): void {
   try {
-    storage.removeItem(HOST_KEY)
+    ;(storage ?? sessionStorage).removeItem(HOST_KEY)
   } catch {
     // Nothing was stored.
   }
