@@ -77,7 +77,7 @@ down: ## Stop the development Redis and the full stack
 demo: build ## Start the full stack, a fresh 60-min quiz and BOTS bots (default 20); print the URLs
 	IMAGE_TAG='$(IMAGE_TAG)' scripts/demo.sh '$(BOTS)'
 demo-stop: ## Stop the demo bots; the stack keeps running
-	scripts/demo.sh stop
+	$(COMPOSE_NO_SECRETS) rm --stop --force bots
 new-quiz: ## Start a fresh 60-min quiz on the running stack; print its ID and player URL
 	docker compose --progress quiet run --rm -T seed
 smoke-full: ## Smoke-test the running full stack through nginx, stopping one API node

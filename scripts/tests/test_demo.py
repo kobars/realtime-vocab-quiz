@@ -16,20 +16,14 @@ ROOT = Path(__file__).resolve().parents[2]
 COMPOSE: dict[str, Any] = yaml_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
 SERVICES: dict[str, Any] = COMPOSE["services"]
 
-# The seed prints $SEED_OUTPUT (default: a quiz ID); `rm` fails when $NO_BOTS is set; every other
-# call prints nothing.
+# The seed prints $SEED_OUTPUT (default: a quiz ID); every other call prints nothing.
 FAKE_DOCKER = """#!/usr/bin/env bash
-echo "$* | cap=${PER_IP_CONN_CAP:-}" >> "$DOCKER_LOG"
+echo "$* | cap=${PER_IP_CONN_CAP:-} quiz=${DEMO_QUIZ_ID:-} bots=${DEMO_BOTS:-}" >> "$DOCKER_LOG"
 case "$*" in
   *" run --rm -T seed") printf '%b' "${SEED_OUTPUT-Quiz ID: VOCAB-42-TEST (open for 60 min)\\n}" ;;
-  "rm "*) [[ -z "${NO_BOTS:-}" ]] ;;
 esac
 """
-BOTS_RUN = (
-    "compose --progress quiet --profile load run --detach --build --name elsaquiz-demo-bots"
-    f" --user {os.getuid()}:{os.getgid()} load --quiz-ids VOCAB-42-TEST --bots {{bots}}"
-    " --duration 3600 --origin http://localhost:{port} --label demo | cap={cap}"
-)
+BOTS_UP = "compose --progress quiet up -d --build bots | cap={cap} quiz=VOCAB-42-TEST bots={bots}"
 
 
 def _demo(
@@ -70,12 +64,10 @@ def test_a_fresh_clone_gets_secrets_the_stack_a_fresh_quiz_and_its_bots(tmp_path
     assert all(re.fullmatch(r"[0-9a-f]{48}", value) for value in secrets.values())
     assert secrets["ADMIN_TOKEN"] != secrets["REDIS_PASSWORD"]
     assert calls == [
-        "compose --profile full up -d --wait --wait-timeout 120 | cap=1000",
-        "compose --progress quiet run --rm -T seed | cap=1000",
-        "rm --force elsaquiz-demo-bots | cap=1000",  # the bots of an earlier make demo
-        BOTS_RUN.format(bots=20, port=8080, cap=1000),
+        "compose --profile full up -d --wait --wait-timeout 120 | cap=1000 quiz= bots=",
+        "compose --progress quiet run --rm -T seed | cap=1000 quiz= bots=",
+        BOTS_UP.format(cap=1000, bots=20),
     ]
-    assert (repo / "load" / "results").is_dir()  # owned by the user, as the bots run as the user
     assert "Quiz ID: VOCAB-42-TEST (open for 60 min)" in out
     assert "20 playing VOCAB-42-TEST" in out
 
@@ -84,17 +76,17 @@ def test_a_fresh_clone_gets_secrets_the_stack_a_fresh_quiz_and_its_bots(tmp_path
 def test_the_connection_cap_stays_far_above_the_bots(tmp_path: Path, bots: str, cap: str) -> None:
     code, calls, out, _ = _demo(tmp_path, bots, env_file="ADMIN_TOKEN=a\nREDIS_PASSWORD=b\n")
     assert code == 0, out
-    assert calls[-1] == BOTS_RUN.format(bots=bots, port=8080, cap=cap)
+    assert calls[-1] == BOTS_UP.format(cap=cap, bots=bots)
 
 
 def test_a_cap_set_in_env_or_the_shell_is_kept(tmp_path: Path) -> None:
     env_file = "ADMIN_TOKEN=a\nREDIS_PASSWORD=b\nPER_IP_CONN_CAP=300\n"
     code, calls, _, repo = _demo(tmp_path, env_file=env_file)
     assert code == 0
-    assert all(call.endswith("| cap=") for call in calls)  # compose reads it from .env
+    assert all("| cap= " in call for call in calls)  # compose reads it from .env
     assert (repo / ".env").read_text() == env_file
     code, calls, _, _ = _demo(tmp_path / "shell", PER_IP_CONN_CAP="400")
-    assert all(call.endswith("| cap=400") for call in calls)
+    assert all("| cap=400 " in call for call in calls)
 
 
 @pytest.mark.parametrize("bots", ["0", "-5", "ten", "1e3"])
@@ -112,7 +104,7 @@ def test_no_bots_start_when_the_seed_prints_no_quiz_id(tmp_path: Path) -> None:
     code, calls, out, _ = _demo(tmp_path, SEED_OUTPUT="")
     assert code == 1
     assert "the seed printed no quiz ID" in out
-    assert not [call for call in calls if "elsaquiz-demo-bots" in call]
+    assert not [call for call in calls if " bots |" in call]
 
 
 def test_the_seed_runs_from_the_api_image_on_the_stack_network() -> None:
@@ -126,20 +118,16 @@ def test_the_seed_runs_from_the_api_image_on_the_stack_network() -> None:
     assert seed["environment"]["ADMIN_TOKEN"].startswith("${ADMIN_TOKEN:?")
 
 
-def test_the_bots_send_the_origin_of_the_port_in_env(tmp_path: Path) -> None:
-    env_file = "ADMIN_TOKEN=a\nREDIS_PASSWORD=b\nQUIZ_PORT=9090\n"
-    code, calls, _, _ = _demo(tmp_path, env_file=env_file)
-    assert code == 0
-    assert calls[-1] == BOTS_RUN.format(bots=20, port=9090, cap=1000)
-
-
-@pytest.mark.parametrize(("no_bots", "said"), [("", "Removed the demo bots."), ("1", "No demo")])
-def test_stop_removes_the_bots_and_nothing_else(tmp_path: Path, no_bots: str, said: str) -> None:
-    code, calls, out, repo = _demo(tmp_path, "stop", NO_BOTS=no_bots)
-    assert code == 0
-    assert said in out
-    assert calls == ["rm --force elsaquiz-demo-bots | cap="]
-    assert not (repo / ".env").exists()
+def test_the_bots_are_the_bot_swarm_on_the_demo_quiz_with_an_allowed_origin() -> None:
+    bots, load = SERVICES["bots"], SERVICES["load"]
+    assert bots["profiles"] == ["demo"]
+    assert (bots["build"], bots["networks"]) == (load["build"], load["networks"])
+    assert bots["environment"] == load["environment"]  # through nginx on the stack network
+    assert bots["volumes"] == []  # the result file stays in a tmpfs: no host folder to own
+    assert "/app/results" in bots["tmpfs"]
+    flags = dict(arg.removeprefix("--").split("=", 1) for arg in bots["command"])
+    assert (flags["quiz-ids"], flags["bots"]) == ("${DEMO_QUIZ_ID:-}", "${DEMO_BOTS:-20}")
+    assert flags["origin"] == "http://localhost:${QUIZ_PORT:-8080}"  # the API's default origin
 
 
 def test_the_test_profile_runs_the_unit_and_acceptance_tests_from_a_fresh_build() -> None:

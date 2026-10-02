@@ -1,6 +1,6 @@
 # AI-ASSISTED: the development Redis (profile dev), the full stack (profile full): two API nodes on
 # one Redis behind nginx, the only service that publishes a port; the bot swarm (profile load), the
-# demo's seed (profile demo) and the tests (profile test), none of which needs uv or pnpm on the host.
+# demo's seed and bots (profile demo) and the tests (profile test), none needing uv or pnpm on the host.
 name: elsaquiz
 
 x-hardened: &hardened
@@ -102,7 +102,7 @@ services:
         condition: service_healthy
 
   # The bot swarm (make load); it reaches the full stack through nginx on the stack network.
-  load:
+  load: &load
     <<: *hardened # its nofile limit gives one descriptor per bot socket
     profiles: [load]
     build:
@@ -124,6 +124,20 @@ services:
       ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env}
       QUIZ_PORT: ${QUIZ_PORT:-8080}
     command: ["python", "/opt/seed.py"]
+
+  # make demo: the bot swarm plays DEMO_QUIZ_ID with DEMO_BOTS bots until its window ends; make
+  # demo-stop removes it. Its result file stays in the container, so it writes as any user.
+  bots:
+    <<: *load
+    profiles: [demo]
+    volumes: []
+    tmpfs: [/tmp, /app/results]
+    command:
+      - --quiz-ids=${DEMO_QUIZ_ID:-}
+      - --bots=${DEMO_BOTS:-20}
+      - --duration=3600
+      - --origin=http://localhost:${QUIZ_PORT:-8080} # an origin the API allows
+      - --label=demo
 
   # docker compose --profile test run --rm test: make test and the acceptance tests on the memory
   # store, in the repository image of infra/dev/Dockerfile, rebuilt from the checkout on every run.

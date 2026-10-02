@@ -1,20 +1,9 @@
 #!/usr/bin/env bash
 # AI-ASSISTED: make demo: starts the full stack, a fresh 60-minute quiz and the bots that play it.
-# Usage: scripts/demo.sh [bots]   (make demo BOTS=200; default 20), or scripts/demo.sh stop
-# (make demo-stop). Needs Docker with Compose v2; make demo builds the images first.
+# Usage: scripts/demo.sh [bots]   (make demo BOTS=200; default 20). Needs Docker with Compose v2;
+# make demo builds the images first.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-
-# The bots are the bot swarm of make load, in a container of this name.
-bots_container=elsaquiz-demo-bots
-if [[ "${1:-}" == stop ]]; then
-  if docker rm --force "$bots_container" >/dev/null 2>&1; then
-    echo "Removed the demo bots."
-  else
-    echo "No demo bots to remove."
-  fi
-  exit 0
-fi
 
 bots="${1:-20}"
 if [[ ! "$bots" =~ ^[1-9][0-9]*$ ]]; then
@@ -45,14 +34,7 @@ if [[ -z "$quiz_id" ]]; then
   exit 1
 fi
 echo "Building the bots image and starting $bots bots..."
-# The API allows the Origin of QUIZ_PORT, which compose reads from the shell, else from .env.
-port="${QUIZ_PORT:-$(sed -n 's/^QUIZ_PORT=\([0-9]*\).*/\1/p' .env)}"
-# As make load: the host user owns the result file that the bots write when the quiz ends.
-mkdir -p load/results
-docker rm --force "$bots_container" >/dev/null 2>&1 || true
-docker compose --progress quiet --profile load run --detach --build --name "$bots_container" \
-  --user "$(id -u):$(id -g)" load --quiz-ids "$quiz_id" --bots "$bots" --duration 3600 \
-  --origin "http://localhost:${port:-8080}" --label demo >/dev/null
+DEMO_QUIZ_ID="$quiz_id" DEMO_BOTS="$bots" docker compose --progress quiet up -d --build bots
 
 echo
 echo "$seeded"
