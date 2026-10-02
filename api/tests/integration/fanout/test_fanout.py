@@ -6,6 +6,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from itertools import pairwise
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -131,7 +132,7 @@ async def test_the_tick_runs_only_while_the_quiz_has_local_sockets(
     quiz_id = await quiz_with(store, "a")
     sink, registry = Sink(), Registry(store, 0)  # no grace: a dropped player leaves at once
     registry.watcher = ticker_of(store, sink)
-    sender = cast("Sender", object())  # the registry only stores it here
+    sender = cast("Sender", SimpleNamespace(close_code=None))  # the registry only stores it
     first, second = Connection("c1", "a", quiz_id), Connection("c2", "b", quiz_id)
     await asyncio.sleep(0.3)
     assert sink.frames == []  # no local socket: no tick
