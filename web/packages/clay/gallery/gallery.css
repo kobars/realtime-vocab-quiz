@@ -1,0 +1,20 @@
+/*
+ * AI-ASSISTED: the gallery's Tailwind entry: the Clay theme, with the hover, active and focus-visible variants also
+ * matching a data-preview attribute, so the page can show every state of a component at rest.
+ */
+@import 'tailwindcss' source(none);
+@import '../src/styles/theme.css';
+@source '.';
+
+@custom-variant hover {
+  @media (hover: hover) { &:hover { @slot; } }
+  &[data-preview~='hover'] { @slot; }
+}
+@custom-variant active {
+  &:active { @slot; }
+  &[data-preview~='active'] { @slot; }
+}
+@custom-variant focus-visible {
+  &:focus-visible { @slot; }
+  &[data-preview~='focus'] { @slot; }
+}
