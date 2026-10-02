@@ -114,6 +114,14 @@ it('hides the icons of the preview card and of a field message from assistive te
   expect(wrapper.findAll('form svg').length).toBeGreaterThanOrEqual(2)
 })
 
+it('keeps both fields out of password managers and keeps their autocomplete hints', async () => {
+  const { id, name } = await screen()
+  for (const field of [id, name]) {
+    expect(field.attributes()).toMatchObject({ 'data-1p-ignore': '', 'data-lpignore': 'true', 'data-bwignore': '', 'data-form-type': 'other' })
+  }
+  expect([id.attributes('autocomplete'), name.attributes('autocomplete')]).toEqual(['off', 'nickname'])
+})
+
 describe('validation', () => {
   it('upper-cases the quiz ID as it is typed and puts no native length limit on the name', async () => {
     const { id, name } = await screen()

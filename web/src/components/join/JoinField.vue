@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: one labelled field of the join form, with its hint and its message (with a decorative alert icon) linked by aria-describedby, keeping the caret when the parent rewrites the value. -->
+<!-- AI-ASSISTED: one labelled field of the join form, with its hint and its message (with a decorative alert icon) linked by aria-describedby, keeping the caret when the parent rewrites the value, and kept out of password managers. -->
 <script setup lang="ts">
 import { CircleAlert } from '@lucide/vue'
 import { computed, useTemplateRef, watch } from 'vue'
@@ -35,6 +35,7 @@ watch(model, () => {
 </script>
 
 <template>
+  <!-- Neither field is a login: the data- attributes keep 1Password, LastPass, Bitwarden and Dashlane from offering to fill it, which autocomplete alone does not. -->
   <div class="flex flex-col gap-2">
     <label
       :for="id"
@@ -47,6 +48,10 @@ watch(model, () => {
       v-bind="$attrs"
       :aria-invalid="error === null ? undefined : 'true'"
       :aria-describedby="describedBy"
+      data-1p-ignore
+      data-lpignore="true"
+      data-bwignore
+      data-form-type="other"
     />
     <p
       v-if="hint"
