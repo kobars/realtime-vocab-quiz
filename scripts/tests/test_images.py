@@ -178,6 +178,13 @@ def test_api_runtime_holds_only_the_venv_and_the_source_and_runs_as_10001() -> N
     assert any(line.startswith("HEALTHCHECK") for line in runtime)
 
 
+def test_api_image_defaults_to_the_redis_store() -> None:
+    """A replica started without STORE would otherwise keep quizzes and tickets of its own."""
+    _, runtime = _stages(ROOT / "api" / "Dockerfile")
+    envs = [line for line in runtime if line.startswith("ENV ")]
+    assert any(re.search(r"(^ENV | )STORE=redis( |$)", line) for line in envs), envs
+
+
 def _server_config() -> uvicorn.Config:
     """The config that ``python -m quiz``, the image's command, runs uvicorn with."""
     assert _api_cmd() == ["python", "-m", "quiz"]
