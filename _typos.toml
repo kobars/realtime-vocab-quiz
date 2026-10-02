@@ -6,3 +6,5 @@ extend-ignore-re = ["\\b[0-9a-f]{7,40}\\b", "U\\+[0-9A-F]{4}(-[0-9A-F]{4})?"]
 [default.extend-words]
 # "Café" in a Unicode normalization test.
 caf = "caf"
+# 6PN, Fly.io's private IPv6 network.
+PN = "PN"

@@ -16,6 +16,8 @@
 **/.coverage*
 **/htmlcov
 **/.env
+# make fly-launch: the Fly.io deploy's secrets
+**/.env.fly
 # make prod-backup and make prod-restore: secrets and TLS private keys
 .env.before-restore
 backups

@@ -1,0 +1,51 @@
+# AI-ASSISTED: the API on Fly.io (scripts/deploy/fly.sh; docs/operations.md, "Deploy to Fly.io"):
+# two Machines of the API image behind a private Flycast address, never public. fly.sh passes the
+# app name, the region, the image (or the Dockerfile to build) and ALLOWED_ORIGINS; it sets
+# REDIS_URL and ADMIN_TOKEN as secrets.
+app = "quiz-api"
+primary_region = "sin"
+
+[env]
+  STORE = "redis"
+  ADMIN_MOCK = "1"
+  PUBLIC_HOSTING = "1"
+  # nginx reaches the nodes through the Flycast address, so each connection arrives from Fly's
+  # proxy, in this range, carrying nginx's X-Forwarded-For. Only Machines in the organization's
+  # private network can reach that address.
+  TRUSTED_PROXIES = "172.16.0.0/16"
+  REDIS_MAX_CONNECTIONS = "100" # each served quiz holds one subscription
+
+# Raw TCP (no handlers): Fly's proxy passes nginx's requests and WebSockets through untouched and
+# balances each new connection across the healthy Machines, skipping one whose /readyz fails.
+[[services]]
+  protocol = "tcp"
+  internal_port = 8000
+  auto_stop_machines = "off" # a live quiz must never wait for a cold start
+  auto_start_machines = false
+  min_machines_running = 2
+
+  [[services.ports]]
+    port = 8000
+    handlers = []
+
+  # Per Machine: MAX_CONNECTIONS is 10,000 per node; above the soft limit the proxy prefers the
+  # other node.
+  [services.concurrency]
+    type = "connections"
+    soft_limit = 5000
+    hard_limit = 10000
+
+  [[services.http_checks]]
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "10s"
+    method = "get"
+    path = "/readyz"
+    protocol = "http"
+
+[[restart]]
+  policy = "always"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

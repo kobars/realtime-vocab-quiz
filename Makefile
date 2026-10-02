@@ -67,7 +67,7 @@ BOTS ?= 20
 # built here.
 PROD_COMPOSE = scripts/deploy/ops.sh compose
 
-.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines clay check acceptance load contracts audit audit-python audit-web audit-secrets review-budget prod-up prod-down prod-logs prod-demo prod-update prod-backup prod-restore do-deploy do-destroy
+.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines clay check acceptance load contracts audit audit-python audit-web audit-secrets review-budget prod-up prod-down prod-logs prod-demo prod-update prod-backup prod-restore do-deploy do-destroy fly-launch fly-deploy fly-demo fly-status fly-destroy
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -108,6 +108,18 @@ do-deploy: ## Create a DigitalOcean Droplet that installs the stack, with doctl 
 	scripts/deploy/droplet.sh deploy $(if $(DOMAIN),--domain '$(DOMAIN)') $(if $(REGION),--region '$(REGION)') $(if $(SIZE),--size '$(SIZE)') $(if $(DRY_RUN),--dry-run)
 do-destroy: ## Delete the Droplet, firewall and DNS record that make do-deploy created, after a prompt (DRY_RUN=1)
 	scripts/deploy/droplet.sh destroy $(if $(DRY_RUN),--dry-run)
+# Fly.io (docs/operations.md, "Deploy to Fly.io"): FLY_APP, FLY_REGION and FLY_ORG reach the script from
+# the command line or the environment, else from .env.fly, which make fly-launch writes.
+fly-launch: ## Create the Fly.io apps (prefix FLY_APP), the Redis volume, secrets and addresses (DRY_RUN=1)
+	scripts/deploy/fly.sh launch $(if $(DRY_RUN),--dry-run)
+fly-deploy: ## Deploy Redis, the two API Machines and the web edge to Fly.io (FLY_IMAGE_TAG, BUILD=1, DRY_RUN=1)
+	scripts/deploy/fly.sh deploy $(if $(BUILD),--build) $(if $(FLY_IMAGE_TAG),--tag '$(FLY_IMAGE_TAG)') $(if $(DRY_RUN),--dry-run)
+fly-demo: ## Start a fresh 60-min quiz on the Fly.io stack; print its HTTPS player URL
+	scripts/deploy/fly.sh demo
+fly-status: ## Show the Fly.io apps' Machines and checks
+	scripts/deploy/fly.sh status
+fly-destroy: ## Delete the three Fly.io apps and the Redis data, after you type the prefix (DRY_RUN=1)
+	scripts/deploy/fly.sh destroy $(if $(DRY_RUN),--dry-run)
 smoke-full: ## Smoke-test the running full stack through nginx, stopping one API node
 	uv run --project api --locked python load/smoke_full.py
 dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)
