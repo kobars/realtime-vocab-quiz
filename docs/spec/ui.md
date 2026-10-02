@@ -23,7 +23,7 @@ Switching the look later still means replacing the token values in one file (§7
 | Route | Screen |
 |---|---|
 | `/` | Landing and join (§3.1) |
-| `/quiz/:quizId` | Everything after the join: intro, question, feedback, finished and results, chosen by the client state (§4). Without a join to this quiz (a direct load, a refresh, another ID) it redirects to `/?quiz=:quizId` |
+| `/quiz/:quizId` | Everything after the join: intro, question, feedback, finished and results, chosen by the client state (§4). Without a join to this quiz (a direct load, a refresh, another ID) it redirects to `/?quiz=:quizId`. A refresh of the quiz this tab last joined also starts that join again with the same name: the join screen shows "Joining…" and `joined` returns to `/quiz/:quizId`. The join is saved in `sessionStorage` only as the page unloads (not after "This quiz is open in another tab" or "This quiz is no longer available") and read once by the next page, so a duplicated tab, which copies `sessionStorage` while this page stays open, does not join and take the session |
 | `/q/:quizId` | Short share link; redirects to `/?quiz=:quizId`, the join screen with the quiz ID filled in |
 | any other path | "Page not found" with a link back to `/` |
 
@@ -40,9 +40,11 @@ Switching the look later still means replacing the token values in one file (§7
 - The quiz ID field upper-cases what is typed and accepts `^[A-Z0-9-]{3,16}$`. The display name is 1–32 characters after trim and NFC normalization, like the server counts it, and the field has no native length limit. Both are checked on blur and on submit; the message sits under the field, linked with `aria-describedby`.
 - A link `/?quiz=VOCAB-42` fills the quiz ID and puts the focus in the name field. The last display name is remembered in the tab (`sessionStorage`).
 - A valid quiz ID (on blur, from a link, or on submit) is looked up with `GET /quizzes/{id}`, and a preview card shows the title, the question count, the player count and whether the quiz is open or ended. A 404 with the error code `QUIZ_NOT_FOUND` puts "No quiz with this ID" under the quiz ID field, where it stays until the ID is edited, and the join is not sent. An ended quiz reads "This quiz has ended. You can still see the final results." and the button reads "See results". A failed lookup (network, 5xx, an unexpected body, any other 404, or no answer within 3 s) shows no preview and does not block the join: the socket `join` decides. A share link opened while a join is in progress is ignored.
-- On submit: the button shows a spinner and "Joining…", the fields stay readable. The client creates the mock session once (`POST /sessions`), fetches a ticket, opens the socket and sends `join` (protocol §8). `joined` routes to `/quiz/:quizId`.
+- On submit: the button shows a spinner and "Joining…", the fields stay readable. The client creates the mock session once (`POST /sessions`), fetches a ticket, opens the socket and sends `join` (protocol §8). `joined` routes to `/quiz/:quizId`. An `UNAVAILABLE` reply keeps the spinner and adds "Server busy, retrying" under the fields while the client sends the `join` again after the backoff.
 - `QUIZ_NOT_FOUND` puts "No quiz with this ID" under the quiz ID field; the user may try again. A join after the quiz ended gets the final `snapshot` first, then `QUIZ_ENDED` (protocol §7), and routes to the results screen at `/quiz/:quizId` (§3.6).
-- Any other join failure (another `error` reply to the `join`, a final close before `joined`, or a client that cannot start) unlocks the form and shows "Could not join, try again" above the button; the user may try again. A `reconnecting` link keeps the spinner.
+- A join that ends in a blocked state (`UNSUPPORTED_VERSION`, close 1008, close 4001, or 10 connects without a `joined`) unlocks the form and shows the blocking card of §3.7 above it, with its action ("Reload", "Use this tab" or "Try again"); "Use this tab" and "Try again" join again from this screen.
+- Any other join failure (another `error` reply to the `join`, another final close before `joined`, or a client that cannot start) unlocks the form and shows "Could not join, try again" above the button; the user may try again. A `reconnecting` link keeps the spinner.
+- After the wordmark leads here from a quiz that is still joined (the socket stays open), a "Resume quiz VOCAB-42" link goes back to `/quiz/:quizId`. Joining another quiz closes the old socket.
 
 ### 3.2 Intro
 
@@ -50,7 +52,7 @@ Shown after `joined` when `cursor = −1` (no question served yet).
 
 - The quiz ID, the number of questions (`questionCount`), the time per question (`timeLimitMs`), how much time the quiz has left (`quizRemainingMs`, counted down), and the scoring rule in one line: "Correct answers score 100–150 points, more when faster; wrong or late answers score 0."
 - The live leaderboard is already visible (desktop) or one tab away (phone), with the player count.
-- One primary button, "Start", which has the focus. It sends `next {questionIndex: 0}`; the question clock starts only now (domain §3.2).
+- One primary button, "Start", which has the focus. It sends `next {questionIndex: 0}`; the question clock starts only now (domain §3.2). From the click until the `question` (or a final error) it shows a spinner and `aria-busy="true"`.
 - After a rejoin with `cursor ≥ 0` and the question at `cursor` closed, the same screen shows "Continue" instead. It sends `next {questionIndex: cursor + 1}`; when `cursor = N − 1` that is `N`, which finishes the quiz (domain §5.1). It never sends `cursor` or 0, which would re-serve a closed question or get `INVALID_STATE`.
 
 ### 3.3 Question
@@ -66,7 +68,7 @@ Shown on `answer_result`.
 
 - The chosen choice is marked correct (success color, check icon, "Correct") or wrong (danger color, cross icon, "Wrong"), and the correct choice is always marked with the check icon and "Correct answer". Color is never the only signal: each state has an icon and a word.
 - `late: true` reads "Too late: 0 points"; otherwise "+133 points" counts up (§5.2), and the total score in the header counts up with it.
-- One primary button, "Next question" (or "See my result" after the last question), which has the focus; Enter or Space presses it. It sends `next {questionIndex: i + 1}` (or `N`).
+- One primary button, "Next question" (or "See my result" after the last question), which has the focus; Enter or Space presses it. It sends `next {questionIndex: i + 1}` (or `N`), and is busy like "Start" until the reply. While the socket is not usable (any connection state but `resyncing` and `live`) it has `aria-disabled="true"` and sends nothing; while the connection is `connecting`, `joining` or `reconnecting` the note "Waiting for the connection…" shows under it.
 - There is no auto-advance: the quiz is self-paced and the clock of the next question starts only when the player asks for it.
 
 ### 3.5 Live leaderboard
@@ -108,6 +110,7 @@ Two kinds, by how much they interrupt:
   | "A new version is available" | `UNSUPPORTED_VERSION` | "Reload" |
   | "Can't connect to this quiz" | Close 1008 (policy violation) | "Reload", and a link back to `/` |
   | "Still can't connect" | 10 reconnect attempts in a row without a `joined` | "Try again" (resets the attempts) |
+  | "This quiz is no longer available" | `QUIZ_NOT_FOUND` after `joined` (the quiz was removed during play) | "Back to join" (routes to `/`) |
 
   A refused upgrade never reaches the client as a message. A wrong `Origin` (HTTP 403, `FORBIDDEN`), a bad ticket (401, `UNAUTHORIZED`) and a full node or IP cap (503, 429) all look like close 1006 to a browser (protocol §7). The client treats each as a failed open: a new ticket and a reconnect with backoff, which ends at "Still can't connect" after 10 attempts.
 
@@ -134,8 +137,8 @@ stateDiagram-v2
     resyncing --> reconnecting: close that reconnects, or 50 s silence
     live --> reconnecting: close that reconnects, or 50 s silence
     joining --> blocked: close 4001 / 1008, UNSUPPORTED_VERSION
-    resyncing --> blocked: close 4001 / 1008, UNSUPPORTED_VERSION
-    live --> blocked: close 4001 / 1008, UNSUPPORTED_VERSION
+    resyncing --> blocked: close 4001 / 1008, UNSUPPORTED_VERSION, QUIZ_NOT_FOUND
+    live --> blocked: close 4001 / 1008, UNSUPPORTED_VERSION, QUIZ_NOT_FOUND
     reconnecting --> connecting: backoff elapsed, new ticket
     reconnecting --> blocked: 10 attempts without joined
     live --> closed: user leaves (client closes 1000)
@@ -144,7 +147,7 @@ stateDiagram-v2
 
 A close that reconnects is 1006 (also a failed open), 1009, 1011, 1012 or 1013. The connected states are `joining`, `resyncing` and `live`: the socket is open in each, so every edge for a close, an error or silence starts from all three.
 
-`connecting`, `joining`, `resyncing` and `reconnecting` show the calm pill; `blocked` shows the card; `live` shows nothing. `resyncing` is a healthy socket: protocol §3 buffers only broadcasts until the `snapshot`, so requests (Start, Continue, an answer, Next, Skip, "Show all players") are sent at once, and the choices stay enabled. Requests made while the connection is `connecting`, `joining` or `reconnecting` are not queued, except one pending `answer`, which is resent with the same `submissionId` once the connection is `live` again (the server replays the same result).
+`connecting`, `joining`, `resyncing` and `reconnecting` show the calm pill; `blocked` shows the card; `live` shows nothing. `resyncing` is a healthy socket: protocol §3 buffers only broadcasts until the `snapshot`, so requests (Start, Continue, an answer, Next, Skip, "Show all players") are sent at once, and the choices stay enabled. Requests made while the connection is `connecting`, `joining` or `reconnecting` are not queued, except one pending `answer`, which is resent with the same `submissionId` once the connection is `live` again (the server replays the same result): Start, Continue, Next question, "See my result" and Skip have `aria-disabled="true"` and send nothing in every state but `resyncing` and `live`. `QUIZ_NOT_FOUND` from `joining` goes to `idle` only on the first join; on a rejoin after `joined` it goes to `blocked` like the edges from `resyncing` and `live`.
 
 ### 4.2 Phase
 
@@ -168,7 +171,7 @@ stateDiagram-v2
     finished --> results: quiz_ended
 ```
 
-After a reconnect, the new `joined` keeps the current screen when it agrees with it: feedback stays on feedback when `cursor` is the answered question and it is closed, and finished stays finished. When `cursorOpen` is true the client sends `next {questionIndex: cursor}` and the re-served `question` resets the ring. Only a disagreement (for example `finished: true` while the client shows a question) moves the phase, by the arrows above.
+After a reconnect, the new `joined` keeps the current screen when it agrees with it: feedback stays on feedback when `cursor` is the answered question and it is closed, and finished stays finished. When `cursorOpen` is true the client sends `next {questionIndex: cursor}` and the re-served `question` resets the ring; until it arrives, a screen with no question yet shows a "Loading the question…" card, announced by a `role="status"` region that stays in the page. Only a disagreement (for example `finished: true` while the client shows a question) moves the phase, by the arrows above.
 
 ### 4.3 Every message, error and close code
 
@@ -188,14 +191,14 @@ After a reconnect, the new `joined` keeps the current screen when it agrees with
 | `UNSUPPORTED_VERSION` | — | → `blocked` | "A new version is available" |
 | `MESSAGE_TOO_LARGE` | — | → `reconnecting` (close 1009) | Calm pill |
 | `UNAUTHORIZED`, `FORBIDDEN`, HTTP 503 or 429 | — | `connecting` → `reconnecting` with a new ticket | Calm pill. Never a message: a refused upgrade looks like close 1006 (§3.7) |
-| `QUIZ_NOT_FOUND` | stays join | `joining` → `idle` | Message under the quiz ID field |
+| `QUIZ_NOT_FOUND` | stays join; after `joined`, stays | `joining` → `idle`; after `joined` (and before the end) → `blocked` | Message under the quiz ID field; after `joined`, "This quiz is no longer available" |
 | `NOT_JOINED` | — | `resyncing`, `live` → `joining` | None; `join`, then the request again |
 | `QUESTION_NOT_OPEN`, `INVALID_STATE` | — | `resyncing`, `live` → `joining` | None; rejoin reads `cursor` and §4.2 picks the screen |
 | `ALREADY_ANSWERED` | per §4.2 after the rejoin | `resyncing`, `live` → `joining` | The choices unlock and the spinner goes; the first result stands, and the rejoin reads `cursor` and `score` |
 | `QUIZ_ENDED` | → results | `joining` → `live` after a join (the socket may still send `get_leaderboard` and `resync`); otherwise it stays | Podium from the final `snapshot` that came before it (on a join) or from the `quiz_ended` broadcast (on a write) |
 | `RATE_LIMITED` | — | — | None; the request is retried after 1 s |
 | `SESSION_REPLACED` | — | → `blocked` | "This quiz is open in another tab" |
-| `UNAVAILABLE` | — | stays; with close 1013 → `reconnecting` | "Server busy, retrying"; the request is retried after the backoff, an `answer` with the same `submissionId` |
+| `UNAVAILABLE` | — | stays (also on a first `join`); with close 1013 → `reconnecting` | "Server busy, retrying" (on the join screen, under the fields); the request is retried after the backoff, an `answer` with the same `submissionId` |
 | `INTERNAL` | — | → `reconnecting` (close 1011) | Calm pill |
 | Close 1000 | — | `live` → `closed` | None (the user left) |
 | Close 1006, 1009, 1011, 1012 | — | → `reconnecting` | Calm pill |
