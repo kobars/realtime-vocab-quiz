@@ -1,12 +1,15 @@
-# AI-ASSISTED: the VM install script and the cloud-init user data, run against stub commands.
+# AI-ASSISTED: the VM install script, the update rollback, backup and restore, and the cloud-init
+# user data, run against stub commands.
 """``scripts/deploy/install.sh`` is sourced (sourcing runs nothing) to call one helper at a time,
-with stubs first on ``PATH`` for curl, getent, ss and docker. One test runs the whole install
-with ``--dry-run`` in an offline ``ubuntu:24.04`` container, when Docker is available."""
+with stubs first on ``PATH`` for curl, getent, ss, docker, git and make; ``scripts/deploy/ops.sh``
+runs in a copy of the scripts. One test runs the whole install with ``--dry-run`` in an offline
+``ubuntu:24.04`` container, when Docker is available."""
 
 import os
 import re
 import shutil
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -173,6 +176,119 @@ def test_the_env_gets_new_secrets_once_and_keeps_them(tmp_path: Path) -> None:
     for domain, expected in (("", "a.sslip.io"), ("quiz.example.com", "quiz.example.com")):
         _sourced(tmp_path, render, str(env), domain)
         assert _env(env) == {**first, "DOMAIN": expected}
+
+
+OLD_ENV = "DOMAIN=quiz.example.com\nADMIN_TOKEN=old\n"
+# The checkout is at the commit in $STATE; make fails on $BAD_UP and readyz on $BAD_READY.
+FAKE_GIT = """echo "git $*" >> "$LOG"
+case "$1" in
+  rev-parse) cat "$STATE" ;;
+  pull) [[ -z ${PULL_FAILS:-} ]] || exit 1; echo new > "$STATE" ;;
+  reset) echo "$3" > "$STATE" ;;
+esac"""
+FAKE_MAKE = 'echo "make $* @ $(cat "$STATE")" >> "$LOG"; [[ $(cat "$STATE") != "${BAD_UP:-}" ]]'
+FAKE_READY = '[[ $(cat "$STATE") != "${BAD_READY:-}" ]]'
+
+
+# compose's Redis counts one more save after each BGSAVE; each cp writes a file.
+FAKE_DOCKER = """echo "docker $*" >> "$LOG"
+saves="$(cat "$LOG.saves" 2>/dev/null || echo 0)"
+case "$*" in
+  *"redis-cli BGSAVE") echo $((saves + 1)) > "$LOG.saves" ;;
+  *"redis-cli INFO persistence")
+    printf '%s\\r\\n' rdb_bgsave_in_progress:0 "rdb_saves:$saves" rdb_last_bgsave_status:ok ;;
+  *" cp stack-redis:/data/dump.rdb "*) echo REDIS > "${@: -1}" ;;
+  *" cp caddy:/data "*) mkdir -p "${@: -1}/caddy" && echo KEY > "${@: -1}/caddy/key.pem" ;;
+esac"""
+
+
+def _ops(tmp_path: Path, *args: str, **env: str) -> tuple[int, list[str], str, Path]:
+    """Run ops.sh from a copy; return its exit code, the stubs' calls, its output and the copy."""
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True, exist_ok=True)
+    shutil.copytree(DEPLOY, repo / "scripts" / "deploy", dirs_exist_ok=True)
+    if not (repo / ".env").exists():
+        (repo / ".env").write_text(OLD_ENV, encoding="utf-8")
+    state, log = tmp_path / "state", tmp_path / "calls.log"
+    if not state.exists():
+        state.write_text("old\n", encoding="utf-8")
+    log.write_text("", encoding="utf-8")
+    bin_dir = _stubs(tmp_path, git=FAKE_GIT, make=FAKE_MAKE, curl=FAKE_READY, docker=FAKE_DOCKER)
+    result = _run(
+        ["bash", str(repo / "scripts" / "deploy" / "ops.sh"), *args],
+        bin_dir,
+        cwd=tmp_path,
+        STATE=str(state),
+        LOG=str(log),
+        READY_TIMEOUT="0",
+        COPYFILE_DISABLE="1",  # macOS tar: no ._ files
+        **env,
+    )
+    return (
+        result.returncode,
+        log.read_text(encoding="utf-8").splitlines(),
+        result.stdout + result.stderr,
+        repo,
+    )
+
+
+@pytest.mark.parametrize(
+    ("env", "calls", "message"),
+    [
+        ({}, ["make prod-up @ new"], "Updated old -> new"),
+        (
+            {"BAD_UP": "new"},
+            ["make prod-up @ new", "git reset --keep old", "make prod-up @ old"],
+            "rolled back to old, which is ready again",
+        ),
+        (
+            {"BAD_READY": "new"},
+            ["make prod-up @ new", "git reset --keep old", "make prod-up @ old"],
+            "rolled back to old, which is ready again",
+        ),
+        (
+            {"BAD_UP": "new", "BAD_READY": "old"},
+            ["make prod-up @ new", "git reset --keep old", "make prod-up @ old"],
+            "old is not ready either",
+        ),
+        ({"PULL_FAILS": "1"}, [], "nothing changed, the stack still runs old"),
+    ],
+)
+def test_an_update_that_does_not_get_ready_rolls_back_to_the_commit_that_ran(
+    tmp_path: Path, env: dict[str, str], calls: list[str], message: str
+) -> None:
+    code, log, out, _ = _ops(tmp_path, "update", **env)
+    assert code == (0 if env == {} else 1), out
+    assert [c for c in log if not c.startswith(("git rev-parse", "git pull"))] == calls
+    assert message in out
+
+
+def test_a_backup_holds_the_redis_snapshot_the_certificates_and_env_and_restores(
+    tmp_path: Path,
+) -> None:
+    code, log, out, repo = _ops(tmp_path, "backup", "out/b.tar.gz")
+    assert code == 0, out
+    backup = repo / "out" / "b.tar.gz"  # relative to the checkout
+    assert backup.stat().st_mode & 0o077 == 0  # it holds the secrets and the private keys
+    with tarfile.open(backup) as tar:
+        assert {m.name for m in tar.getmembers() if m.isfile()} == {
+            ".env",
+            "redis/dump.rdb",
+            "caddy/caddy/key.pem",
+        }
+    assert any(c.endswith("redis-cli BGSAVE") for c in log)
+
+    fresh = "DOMAIN=quiz.example.com\nADMIN_TOKEN=fresh\n"
+    (repo / ".env").write_text(fresh, encoding="utf-8")
+    code, log, out, _ = _ops(tmp_path, "restore", str(backup))
+    assert code == 0, out
+    assert (repo / ".env").read_text(encoding="utf-8") == OLD_ENV
+    assert (repo / ".env.before-restore").read_text(encoding="utf-8") == fresh
+    runs = [c for c in log if " run --rm --no-deps --user 0 " in c]
+    services = [re.findall(r"-v (\S+):/backup:ro --entrypoint sh (\S+) -c", run) for run in runs]
+    assert [found[0][1] for found in services] == ["stack-redis", "caddy"]
+    assert all(found[0][0].endswith(("/redis", "/caddy")) for found in services)
+    assert log[-1] == "make prod-up @ old"
 
 
 @pytest.mark.skipif(DOCKER is None, reason="needs Docker")
