@@ -103,9 +103,13 @@ async def _host(deps: HttpDeps, hosting: Hosting, bank_id: str) -> tuple[str, st
                 host_token_hash=token_hash(token),
             )
         except DomainError as error:
-            await deps.store.release_hosted(quiz_id)
             if error.code is not ErrorCode.INVALID_STATE:  # anything but "taken meanwhile"
+                await deps.store.release_hosted(quiz_id)
                 raise
+            # Taken meanwhile: a self-hosted winner held the same member before its create, so
+            # the place is its own; the member is this request's alone only otherwise.
+            if await deps.store.host_token_hash(quiz_id) is None:
+                await deps.store.release_hosted(quiz_id)
             continue
         return quiz_id, token, created.deadline_ms
     raise DomainError(ErrorCode.UNAVAILABLE, "no free run code; retry")

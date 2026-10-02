@@ -103,6 +103,34 @@ async def test_a_run_code_already_taken_is_drawn_again(
     assert (resp.status_code, resp.json()["error"]) == (503, "UNAVAILABLE")
 
 
+# A self-hosted winner keeps its place (cap 2: its run and the loser's next one fill it); the
+# member of a winner without a host token was the loser's alone and is released (cap 1).
+@pytest.mark.parametrize(("winner", "cap"), [("hosted", 2), ("admin", 1)])
+async def test_a_run_code_taken_meanwhile_keeps_only_the_winners_place(
+    now: list[int], monkeypatch: pytest.MonkeyPatch, winner: str, cap: int
+) -> None:
+    app = app_with(now, hosting_max_open=cap)
+    store = services_of(app).store
+    async with client_of(app) as http:
+        monkeypatch.setattr(hosting, "run_code", lambda: "AAAA")
+        if winner == "hosted":
+            assert (await host(http)).status_code == 201
+        else:
+            taken = {"quizId": "VOCAB-42-AAAA", "bankQuizId": "VOCAB-42"}
+            assert (await http.post("/admin/quizzes", json=taken, headers=ADMIN)).status_code == 201
+        codes = iter(["AAAA", "BBBB"])
+        monkeypatch.setattr(hosting, "run_code", lambda: next(codes))
+
+        async def unseen(_quiz_id: str) -> None:  # the winner's create lands after this read
+            return None
+
+        monkeypatch.setattr(store, "read_seq", unseen)
+        assert (await host(http)).json()["quizId"] == "VOCAB-42-BBBB"
+        monkeypatch.setattr(hosting, "run_code", lambda: "CCCC")
+        full = await host(http)
+        assert (full.status_code, full.json()["error"]) == (503, "HOSTING_FULL")
+
+
 async def test_a_bank_quiz_left_out_of_hosting_banks_cannot_be_hosted(now: list[int]) -> None:
     async with client_of(app_with(now, hosting_banks="BIZ-20")) as http:
         assert [b["id"] for b in (await http.get("/banks")).json()] == ["BIZ-20"]
