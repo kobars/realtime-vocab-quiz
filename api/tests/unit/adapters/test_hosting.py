@@ -8,6 +8,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
+from quiz.adapters.http import hosting
 from quiz.config import Settings
 from quiz.main import create_app, services_of
 from quiz.obs import logs
@@ -89,6 +90,19 @@ async def test_a_bad_hosting_body_is_invalid(http: httpx.AsyncClient, body: obje
     assert (resp.status_code, resp.json()["error"]) == (422, "INVALID_MESSAGE")
 
 
+async def test_a_run_code_already_taken_is_drawn_again(
+    http: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    taken = {"quizId": "VOCAB-42-AAAA", "bankQuizId": "VOCAB-42"}
+    assert (await http.post("/admin/quizzes", json=taken, headers=ADMIN)).status_code == 201
+    codes = iter(["AAAA", "BBBB"])
+    monkeypatch.setattr(hosting, "run_code", lambda: next(codes))
+    assert (await host(http)).json()["quizId"] == "VOCAB-42-BBBB"
+    monkeypatch.setattr(hosting, "run_code", lambda: "AAAA")  # every draw taken
+    resp = await host(http)
+    assert (resp.status_code, resp.json()["error"]) == (503, "UNAVAILABLE")
+
+
 async def test_a_bank_quiz_left_out_of_hosting_banks_cannot_be_hosted(now: list[int]) -> None:
     async with client_of(app_with(now, hosting_banks="BIZ-20")) as http:
         assert [b["id"] for b in (await http.get("/banks")).json()] == ["BIZ-20"]
@@ -136,7 +150,7 @@ async def test_a_quiz_past_its_window_cannot_be_ended(
     assert (resp.status_code, resp.json()["error"]) == (409, "QUIZ_ENDED")
 
 
-async def test_ending_needs_the_quizs_own_host_token(http: httpx.AsyncClient) -> None:
+async def test_ending_needs_the_host_token_of_that_quiz(http: httpx.AsyncClient) -> None:
     hosted, other = (await host(http)).json(), (await host(http)).json()
     admin = {"quizId": "ADMIN-RUN", "bankQuizId": "VOCAB-42"}
     assert (await http.post("/admin/quizzes", json=admin, headers=ADMIN)).status_code == 201

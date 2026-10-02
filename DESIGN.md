@@ -177,8 +177,8 @@ composition root alone wires them is a convention, not a check.
 | Contracts (`quiz/contracts/`) | The wire protocol, defined once | Pydantic models of every message and the codec; the source of the generated JSON Schema and TypeScript types | Used by the use cases, the gateway and the client (generated types) |
 | App (`quiz/app/`) | The use cases | `QuizService`: join, next, answer, ping, resync, leaderboard pages; turns store results into replies and errors | The ports (`Store`, `QuestionBank`, `Clock`) |
 | Ports (`quiz/ports/`) | The interfaces the core depends on | `Store`, `Clock`, `QuestionBank`, `TicketStore` | Implemented by the adapters |
-| Store (`quiz/adapters/redis/`, `quiz/adapters/memory/`) | Atomic quiz state | The Redis adapter: key names, script loading and every Lua script of [redis spec §3](docs/spec/redis.md#3-scripts) (`create_quiz`, `join`, `serve_question`, `score_answer`, `publish_leaderboard`, `leave`, `end_quiz`, `renew_presence` and the read-only `read_standings`); the memory twin for unit tests, with an injected clock | Redis (scripts, `TIME`) |
-| Gateway (`quiz/adapters/ws/`, `quiz/adapters/http/`) | The edge of a node | The `/ws` endpoint, the upgrade checks (origin, ticket, caps), limits before parsing, heartbeat and send buffers; `POST /sessions`, `POST /tickets`, `GET /quizzes/{quizId}`, `/healthz`, `/readyz`, `/metrics`; the mock admin `POST /admin/quizzes` and `POST /admin/quizzes/{quizId}/end` (only with `ADMIN_MOCK=1` and the `X-Admin-Token` header, else 404) | Clients through nginx; the use cases; the ticket store, the store and the question bank |
+| Store (`quiz/adapters/redis/`, `quiz/adapters/memory/`) | Atomic quiz state | The Redis adapter: key names, script loading and every Lua script of [redis spec §3](docs/spec/redis.md#3-scripts) (`create_quiz`, `join`, `serve_question`, `score_answer`, `publish_leaderboard`, `leave`, `end_quiz`, `renew_presence`, `hold_hosted` and the read-only `read_standings`); the memory twin for unit tests, with an injected clock | Redis (scripts, `TIME`) |
+| Gateway (`quiz/adapters/ws/`, `quiz/adapters/http/`) | The edge of a node | The `/ws` endpoint, the upgrade checks (origin, ticket, caps), limits before parsing, heartbeat and send buffers; `POST /sessions`, `POST /tickets`, `GET /quizzes/{quizId}`, `/healthz`, `/readyz`, `/metrics`; the mock admin `POST /admin/quizzes` and `POST /admin/quizzes/{quizId}/end` (only with `ADMIN_MOCK=1` and the `X-Admin-Token` header, else 404); self-service hosting `GET /banks`, `POST /quizzes` and `POST /quizzes/{quizId}/end` with the `X-Host-Token` header (only with `PUBLIC_HOSTING`, else 404) | Clients through nginx; the use cases; the ticket store, the store and the question bank |
 | Fan-out (`quiz/fanout/`) | Leaderboard delivery across nodes | The 200 ms tick loop per served quiz, the pub/sub subscription, relay to local sockets, snapshots after a resubscribe | Redis (tick script, pub/sub); the gateway's sockets |
 | Mock identity (`quiz/adapters/mock_auth/`) | Stands in for an identity provider | Sessions and single-use tickets (Redis, or memory in tests), display-name rules | Redis |
 | Mock question bank (`quiz/adapters/mock_questions/`) | Stands in for a content service | Seed quizzes in `data/*.json`, validated at start | Local files |
@@ -307,12 +307,29 @@ client wait 0–250 ms and resync; a lower `seq` (the store restarted) makes it 
 a `pong` whose `seq` is above the last one applied makes it check again after 1 s and resync if
 no frame arrived, which finds a lost last frame.
 
+**Hosting a quiz.** Any visitor can start a quiz without the admin token (`PUBLIC_HOSTING`,
+on by default).
+
+1. The host page lists the bank quizzes (`GET /api/banks`) and posts `POST /api/quizzes
+   {bankQuizId}`. `adapters/http/hosting.py` checks the `Origin` (403 from another site), the
+   client address's creation limit (429 `RATE_LIMITED`), then draws a run ID such as
+   `VOCAB-42-7K3Q`.
+2. `hold_hosted.lua` counts the run in `quiz:hosted`, one sorted set for every node, unless
+   `HOSTING_MAX_OPEN` runs are open (503 `HOSTING_FULL`). `create_quiz.lua` then writes the quiz
+   with the SHA-256 of a fresh 32-byte host token in its `meta`. The token goes to the host's
+   tab once, in the reply, and to no log.
+3. Players join the share path `/q/<quizId>` as above. The host ends the quiz early with
+   `POST /api/quizzes/{quizId}/end` and the `X-Host-Token` header: the node compares the
+   token's hash with the stored one in constant time (403 on a mismatch), then runs the host
+   end below and takes the run out of `quiz:hosted`.
+
 **Quiz end.**
 
 1. At the deadline there is no timer: once `TIME` passes it, `publish_leaderboard.lua` returns
    `ended`, and the first write refused at the deadline (a join, a serve or an answer gets
    `QUIZ_ENDED`) also leads the use case to call `end_quiz.lua` with the reason `deadline`.
-2. The mock host end (`POST /admin/quizzes/{quizId}/end`) runs `RedisStore.end_by_host`: an end
+2. The mock host end (`POST /admin/quizzes/{quizId}/end`, or the host token's
+   `POST /quizzes/{quizId}/end`) runs `RedisStore.end_by_host`: an end
    mark, `WAITAOF 1 0 2000` until the mark is on disk (else 503 `UNAVAILABLE`, retry), then
    `end_quiz.lua` with the reason `host`.
 3. `end_quiz.lua` announces once: it increments `seq`, stores it as `endSeq` and publishes
