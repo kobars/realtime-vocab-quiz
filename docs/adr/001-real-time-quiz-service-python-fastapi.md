@@ -15,7 +15,7 @@ The product needs one real-time quiz service built for real; identity, questions
 
 - **Built for real:** the real-time quiz service end to end: the Vue client, the WebSocket gateway, the use cases, the Redis scoring scripts, the coalescing tick and the pub/sub fan-out across two API nodes behind nginx.
 - **Mocked, behind ports:** identity and tickets (`TicketStore`: anonymous sessions and single-use tickets kept in Redis) and the question bank (`QuestionBank`: seed quizzes from JSON files). Quiz admin is a token-gated mock admin API (`POST /admin/quizzes`, only with `ADMIN_MOCK=1`) and one host action ("end now"). Each mock module says `MOCK:` in its docstring.
-- **Server stack:** Python 3.14 with FastAPI on uvicorn, Pydantic v2 for the wire models and settings, redis-py with hiredis, managed with uv. The wire messages are defined once, as Pydantic models in `api/src/quiz/contracts/`; the JSON Schema and the client's TypeScript types are generated from them (ADR-009).
+- **Server stack:** Python 3.14 with FastAPI on uvicorn, Pydantic v2 for the wire models and settings, redis-py with hiredis, managed with uv. The wire messages are defined once, as Pydantic models in `api/src/quiz/contracts/`; the JSON Schema and the client's TypeScript types are generated from them ([ADR-009](009-repository-layout-and-vue-client.md)).
 
 ## Alternatives considered
 
@@ -27,7 +27,7 @@ The product needs one real-time quiz service built for real; identity, questions
 ## Consequences
 
 - The mocks sit behind ports, so a real identity provider or content service replaces one adapter without touching the domain or the use cases; import-linter enforces the layers in `make check`.
-- A Python process runs one event loop on one core: JSON encoding and send work per frame cost CPU, so a node holds fewer sockets than a Go server would. The design scales by adding processes behind nginx, and the coalescing tick bounds sends per connection (ADR-004); the load runs measure the limit (DESIGN §9).
+- A Python process runs one event loop on one core: JSON encoding and send work per frame cost CPU, so a node holds fewer sockets than a Go server would. The design scales by adding processes behind nginx, and the coalescing tick bounds sends per connection ([ADR-004](004-wire-protocol-standings-and-tick.md)); the load runs measure the limit (DESIGN §9).
 - One source of truth for the protocol: a contract change regenerates the schema and the client types, and `make check` fails on drift.
 
 <!-- AI-ASSISTED-END -->

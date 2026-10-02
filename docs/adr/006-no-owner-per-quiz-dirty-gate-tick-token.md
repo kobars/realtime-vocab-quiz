@@ -9,7 +9,7 @@
 
 ## Context
 
-The leaderboard is coalesced into at most one frame per 200 ms (ADR-004), and players of one quiz are spread over several nodes. Something must decide, every 200 ms, whether a frame goes out and who sends it, without two nodes sending the same frame and without a gap in `seq`.
+The leaderboard is coalesced into at most one frame per 200 ms ([ADR-004](004-wire-protocol-standings-and-tick.md)), and players of one quiz are spread over several nodes. Something must decide, every 200 ms, whether a frame goes out and who sends it, without two nodes sending the same frame and without a gap in `seq`.
 
 ## Decision
 
@@ -26,6 +26,6 @@ No node owns a quiz. Every node that holds sockets of a quiz calls `publish_lead
 - A node can die at any point without a failover step: the script ran entirely or not at all, and another node publishes within about one tick.
 - At most one frame per quiz per 200 ms, whatever the number of nodes; the worst-case delay of a score is one token lifetime plus delivery.
 - Each node calls the script about 5 times per second per active quiz, even when nothing changed.
-- A host-led mode would need an owner lease (ADR-002); this ADR would be superseded for that mode.
+- A host-led mode would need an owner lease ([ADR-002](002-self-paced-quiz-and-integer-scoring.md)); this ADR would be superseded for that mode.
 
 <!-- AI-ASSISTED-END -->

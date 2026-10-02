@@ -26,7 +26,7 @@ A second channel per quiz, `quiz:{<quizId>}:control`, carries `session_replaced`
 ## Consequences
 
 - Frames reach each node in `seq` order, because Redis serves one subscription connection in publish order.
-- A lost frame costs one snapshot per affected client, never a wrong board: frames are full standings (ADR-004).
+- A lost frame costs one snapshot per affected client, never a wrong board: frames are full standings ([ADR-004](004-wire-protocol-standings-and-tick.md)).
 - After a Redis data loss `seq` can go back; clients treat a lower `seq` as a restart and resync.
 - Each node subscribes to two channels per quiz it serves. Session replacement works across nodes without node-to-node messages, and stays correct when a control message is lost.
 

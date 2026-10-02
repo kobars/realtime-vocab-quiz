@@ -9,7 +9,7 @@
 
 ## Context
 
-Clay (ADR-010) lived inside the app: the tokens and the Tailwind theme in `web/src/styles/`, the components in `web/src/components/ui/`. Nothing but review stopped a screen from importing a component's internals, wrapping reka-ui itself or writing a raw colour, there was no page that showed the components and their states side by side, and the design system could not be versioned or reused apart from the app.
+Clay ([ADR-010](010-clay-design-system.md)) lived inside the app: the tokens and the Tailwind theme in `web/src/styles/`, the components in `web/src/components/ui/`. Nothing but review stopped a screen from importing a component's internals, wrapping reka-ui itself or writing a raw colour, there was no page that showed the components and their states side by side, and the design system could not be versioned or reused apart from the app.
 
 ## Decision
 
