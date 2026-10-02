@@ -1,5 +1,5 @@
 // AI-ASSISTED: every screen the visual and accessibility specs check, each reached on the mocked backend.
-import { expect, type Page } from '@playwright/test'
+import { expect, type Page, test } from '@playwright/test'
 import { strings } from '../../src/strings'
 import { CORRECT, ME, QUESTION_COUNT, QUIZ_ID } from './frames'
 import { mockBackend, type Scenario } from './server'
@@ -69,11 +69,13 @@ export const SCREENS: Screen[] = [
   { name: 'feedback-correct', reach: (page) => answer(page, CORRECT) },
   { name: 'feedback-wrong', reach: (page) => answer(page, (CORRECT + 1) % 4) },
   {
-    // Phones and tablets: the Leaderboard tab; desktop: the two columns.
+    // Phones and tablets: the Leaderboard tab. On a desktop the leaderboard sits beside every play screen above, so this
+    // screen would be the intro again.
     name: 'leaderboard',
     reach: async (page) => {
+      test.skip((page.viewportSize()?.width ?? 0) >= WIDE_PX, 'the play screens already show the leaderboard column')
       await intro(page)
-      if ((page.viewportSize()?.width ?? 0) < WIDE_PX) await page.getByRole('tab', { name: strings.leaderboard.title }).click()
+      await page.getByRole('tab', { name: strings.leaderboard.title }).click()
       await expect(page.getByTestId('pinned')).toBeVisible()
     },
   },

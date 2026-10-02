@@ -202,6 +202,21 @@ def test_ui_specs_run_in_the_playwright_image_of_the_locked_version_pinned_by_di
     assert "make ui-check" in _run_commands(WORKFLOWS / "ci.yml")
 
 
+def test_ui_container_hands_its_files_back_and_takes_ui_args_from_the_environment() -> None:
+    # The container runs as root on a bind mount: without the chown a Linux host's next build
+    # cannot empty web/dist. UI_ARGS inside the single-quoted sh -c would end the quote at its
+    # first single quote.
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    ui_run = re.search(r"^ui_run = (.*?[^\\])$", makefile, re.MULTILINE | re.DOTALL)
+    assert ui_run is not None
+    chown = 'trap "chown -R $$HOST_IDS dist test-results playwright-report e2e/__screenshots__'
+    assert chown in ui_run[1]
+    assert '-e HOST_IDS="$$(id -u):$$(id -g)"' in ui_run[1]
+    assert "-e UI_ARGS" in ui_run[1]
+    assert 'eval "pnpm exec playwright test $(1) $$UI_ARGS"' in ui_run[1]
+    assert "$(UI_ARGS)" not in makefile
+
+
 @pytest.mark.parametrize("workflow", ["ci.yml", "security.yml", "containers.yml", "codeql.yml"])
 def test_only_a_newer_pull_request_run_cancels_an_older_one(workflow: str) -> None:
     concurrency = _section(WORKFLOWS / workflow, "concurrency", 0)
