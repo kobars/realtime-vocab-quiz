@@ -187,21 +187,12 @@ flowchart LR
 
 ### Walk-through
 
-The client gets a mock session once (`POST /sessions`) and a single-use,
-30 s ticket before every connect (`POST /tickets`); the `/api` prefix is dropped before the
-API. It opens
-`GET /ws?ticket=…` with the subprotocol `quiz.v1`; nginx sends the socket to either node, and
-the node checks the origin, the ticket and the connection caps before the upgrade. Each
-write request (`join`, `next`, `answer`) becomes one Lua script in Redis, which checks the
-deadline on Redis `TIME` and writes atomically; for `answer` the script also checks the two
-idempotency keys (the `submissionId` and "already answered"). A `resync` runs one
-read-only script that returns the standings at one `seq` and writes nothing. The reply goes back
-on the same socket. A scoring answer sets the quiz's `dirty` flag. Every node that serves the quiz
-calls the tick script about every 200 ms; the one that wins the tick token increments `seq` and
-publishes one `leaderboard` frame on `quiz:{<quizId>}:events`, and every node relays it to its
-own sockets. Redis is the only database: the mock identity keeps its sessions and tickets
-there, so a ticket made on one node works on the other. The mock question bank is read from
-JSON files when a node starts.
+The client gets a mock session once and a single-use ticket before every connect, then opens one
+WebSocket (`GET /ws?ticket=…`, subprotocol `quiz.v1`) that nginx sends to either node. Each write
+(`join`, `next`, `answer`) is one Lua script in Redis on Redis `TIME`; a scoring answer sets the
+quiz's dirty flag. Every 200 ms, if the flag is set, the node that takes the tick token publishes
+one `leaderboard` frame over pub/sub, and every node relays it to its own sockets. [§5](#join)
+gives each step with the code that runs it.
 
 ### Deployment
 
@@ -221,17 +212,8 @@ network ([ADR-014](docs/adr/014-flyio-second-target.md);
 
 ## 4. Components
 
-The server is one Python package, `quiz` (`api/src/quiz/`), split into layers. The
-import-linter contracts in `api/pyproject.toml`, run by `make check`, enforce these rules: the
-domain imports no other part of the package and none of Pydantic, FastAPI, Starlette, uvicorn,
-redis-py, structlog or the Prometheus client; the ports and the use cases never import the
-adapters, the fan-out, the settings, the composition root (`quiz/main.py`), redis-py or the web
-framework; the ports never import the use cases; the memory, Redis, mock identity, mock question
-bank and HTTP adapters never import each other, and all but the HTTP adapter never import the
-use cases, the fan-out, the settings or the web framework; and no module imports the
-composition root. The WebSocket gateway and the fan-out are outside these contracts, and no
-contract stops a module other than `quiz/main.py` from building an adapter: that the
-composition root alone wires them is a convention, not a check.
+The server is one Python package, `quiz` (`api/src/quiz/`), split into layers; the table gives
+each component, its role and what it talks to.
 
 | Component | Role | Owns | Talks to |
 |---|---|---|---|
@@ -255,11 +237,16 @@ composition root alone wires them is a convention, not a check.
 
 ### Maintainability
 
-What keeps the code easy to change, and the check behind each point (the wiring that the
-paragraph above calls a convention is the one exception):
+What keeps the code easy to change, and the check behind each point:
 
-- **Layers.** The domain, ports, use cases and adapters follow the import rules above, and the
-  import-linter contracts in `api/pyproject.toml` fail `make check` when an import crosses them.
+- **Layers.** The import-linter contracts in `api/pyproject.toml` fail `make check` when an
+  import crosses a layer:
+  - the domain imports nothing else in the package and no framework or I/O library;
+  - the ports and the use cases never import the adapters, the fan-out, the settings or the web
+    framework;
+  - the memory, Redis, mock and HTTP adapters never import each other (the WebSocket gateway and
+    the fan-out are outside the contracts);
+  - wiring happens only in `quiz/main.py`, by convention: no contract checks it.
 - **One protocol source.** The wire messages are Pydantic models in `quiz/contracts/`;
   `scripts/gen_contracts.py` generates the JSON Schema (`contracts/schema/protocol.json`) and the
   client's TypeScript types (`web/src/protocol/types.generated.ts`) from them, and its `--check`
@@ -273,9 +260,8 @@ paragraph above calls a convention is the one exception):
   layers ([CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests)). CI fails below 95% combined Python
   coverage or 90% of a PR's changed lines; `make check` keeps a unit floor of 84% and Vitest
   thresholds of its own.
-- **Gates and boundaries.** `make check` runs before every push and CI runs it again, with the
-  Redis, stack, container and security workflows
-  ([CONTRIBUTING.md](CONTRIBUTING.md#continuous-integration)). The design system is the
+- **Gates and boundaries.** `make check` runs before every push and again in CI
+  ([what it runs](CONTRIBUTING.md#what-make-check-runs)). The design system is the
   workspace package `@quiz/clay` (ADR-013), and an ESLint rule lets the client import it only
   through its entry points.
 
