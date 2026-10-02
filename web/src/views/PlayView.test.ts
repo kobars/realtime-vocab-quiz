@@ -116,6 +116,15 @@ it('a choice shows one focus indicator: the focus outline hugs its own outline, 
   expect(stackedFocusClasses(choice(w, 0).classes())).toEqual([])
 })
 
+it('the tab track draws the one outline: the selected tab adds a fill and a shadow, never an outline of its own', async () => {
+  phone()
+  const w = await playing()
+  expect(w.get('[role="tablist"]').classes()).toEqual(expect.arrayContaining(['border-clay', 'bg-background']))
+  const selected = w.get('[role="tab"][aria-selected="true"]').classes()
+  expect(selected).toEqual(expect.arrayContaining(['aria-selected:bg-card', 'aria-selected:shadow-press']))
+  expect(selected.filter((c) => c.startsWith('aria-selected:border-'))).toEqual([])
+})
+
 it('intro: Start has the focus and asks for question 0; after a rejoin on a closed question it reads Continue', async () => {
   const w = await playing({ type: 'leaderboard', seq: 4, rebase: false, playerCount: 2, onlineCount: 2, entries: [] })
   expect(document.activeElement?.textContent?.trim()).toBe('Start')
