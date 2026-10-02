@@ -477,3 +477,9 @@ it('a second reply to a resent next is timed from the resend, not from the first
   socket.receive(question(0, 19_000))
   expect(store.question?.deadlineAt).toBe(25_000)
 })
+
+it('final standings with you: null set my score from my row, even when their seq is below my last answer', async () => {
+  const { store, socket } = await answered()
+  socket.receive({ type: 'quiz_ended', seq: 2, playerCount: 2, entries: [rival, { ...me, score: 60 }], you: null })
+  expect([store.phase, store.myScore, myRow(store)?.score]).toEqual(['results', 60, 60])
+})

@@ -254,7 +254,8 @@ export const useQuizStore = defineStore('quiz', () => {
   function standings(seq: number, rows: Entry[], players: number, online: number, you?: You | null, replace = false): boolean {
     const row = rows.find((entry) => entry.userId === s.quiz?.userId)
     const mine = you ?? row
-    if (mine) Object.assign(s, { myRank: mine.rank, myScore: you ? mine.score : ownScore(seq, mine.score) })
+    // Only live `leaderboard` rows (no `you` field) can predate my last answer; a snapshot or the final standings set it.
+    if (mine) Object.assign(s, { myRank: mine.rank, myScore: you === undefined ? ownScore(seq, mine.score) : mine.score })
     const entries = row && row.score !== s.myScore ? rows.map((entry) => (entry === row ? { ...row, score: s.myScore } : entry)) : rows
     Object.assign(s, { seq, entries, playerCount: players, onlineCount: online })
     if (replace) s.replacements += 1
