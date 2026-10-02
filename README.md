@@ -32,7 +32,7 @@ cases, each mapped to the requirement it proves, with the latest verification re
 
 Built for real: the real-time quiz service end to end (the Vue client, the WebSocket gateway,
 scoring in Redis and the fan-out across two API nodes) and self-service hosting. Mocked: sign-in,
-the question bank, and the admin API that `make new-quiz` and `make demo-end` call
+the question bank, and the admin API that `make demo`, `make new-quiz` and `make demo-end` call
 ([DESIGN.md §14](DESIGN.md#14-implemented-and-mocked)).
 
 ## How it works
