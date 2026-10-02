@@ -1,0 +1,47 @@
+# AI-ASSISTED: the public edge on Fly.io (scripts/deploy/fly.sh; docs/operations.md, "Deploy to
+# Fly.io"): one Machine of the web image, whose nginx serves the built client and runs the edge
+# config of nginx.conf.template; Fly's proxy terminates HTTPS on <prefix>-web.fly.dev. fly.sh
+# passes the app name, the region, the image (or the Dockerfile to build) and QUIZ_API_HOST, the
+# API app's Flycast name.
+app = "quiz-web"
+primary_region = "sin"
+
+# The image's entrypoint renders the template into /tmp/fly/ (QUIZ_API_HOST only) when the command
+# starts with nginx.
+[env]
+  NGINX_ENVSUBST_OUTPUT_DIR = "/tmp"
+  NGINX_ENVSUBST_FILTER = "^QUIZ_API_HOST$"
+
+[[files]]
+  guest_path = "/etc/nginx/templates/fly/nginx.conf.template"
+  local_path = "nginx.conf.template"
+
+[experimental]
+  cmd = ["nginx", "-c", "/tmp/fly/nginx.conf", "-g", "daemon off;"]
+
+[http_service]
+  internal_port = 8081
+  force_https = true
+  auto_stop_machines = "off" # a live quiz must never wait for a cold start
+  auto_start_machines = false
+  min_machines_running = 1
+
+  # Each WebSocket holds a connection; nginx has 16,384 per worker, two per proxied socket.
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 6000
+    hard_limit = 8000
+
+  [[http_service.checks]]
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "5s"
+    method = "GET"
+    path = "/"
+
+[[restart]]
+  policy = "always"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

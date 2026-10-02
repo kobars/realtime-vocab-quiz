@@ -1,0 +1,43 @@
+# AI-ASSISTED: the stack's Redis on Fly.io (scripts/deploy/fly.sh; docs/operations.md, "Deploy to
+# Fly.io"): one Machine of the pinned Redis image with a volume, private to the organization's
+# network, where the API Machines reach it at <prefix>-redis.internal (IPv6). fly.sh passes the
+# app name and region, so the values here are defaults.
+app = "quiz-redis"
+primary_region = "sin"
+
+[build]
+  image = "redis:8.10-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0"
+
+[env]
+  REDIS_MAXMEMORY = "256mb" # half the Machine: an AOF rewrite forks and copies pages it changes
+
+# The same durability as the compose stack's Redis: AOF everysec, a password and noeviction (when
+# full it refuses writes rather than evict a quiz's keys). It listens on IPv4 and IPv6: .internal
+# names resolve to 6PN addresses only. A Fly volume's root holds lost+found, which stops the
+# image's entrypoint from handing /data to the redis user, so the data lives in a folder of its
+# own; the entrypoint still drops root before the server starts. No service: no public or Flycast
+# address.
+[experimental]
+  cmd = [
+    "sh", "-c",
+    "mkdir -p /data/redis && chown redis:redis /data/redis && cd /data/redis && exec docker-entrypoint.sh redis-server --dir /data/redis --bind '* ::*' --appendonly yes --appendfsync everysec --maxmemory \"$REDIS_MAXMEMORY\" --maxmemory-policy noeviction --requirepass \"$REDIS_PASSWORD\"",
+  ]
+
+[[mounts]]
+  source = "redis_data"
+  destination = "/data"
+
+[checks]
+  [checks.redis]
+    type = "tcp"
+    port = 6379
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "10s"
+
+[[restart]]
+  policy = "always"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

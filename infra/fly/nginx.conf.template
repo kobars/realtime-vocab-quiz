@@ -1,0 +1,131 @@
+# AI-ASSISTED: the edge on Fly.io (infra/fly/web.toml): infra/nginx/nginx.conf with Fly's proxy
+# in front and both API Machines behind one Flycast address. The image's entrypoint renders this
+# template into /tmp/fly/nginx.conf, filling in QUIZ_API_HOST only. scripts/tests/test_fly.py pins
+# every line that differs from infra/nginx/nginx.conf.
+worker_processes auto;
+worker_rlimit_nofile 65536;
+pid /tmp/nginx.pid;
+# An error line quotes the request line, ticket included; a ticket is single use and lives 30 s.
+error_log /dev/stderr warn;
+
+events {
+    worker_connections 16384; # each proxied socket holds two: the client's and the node's
+}
+
+http {
+    proxy_temp_path /tmp/proxy_temp;
+    client_body_temp_path /tmp/client_temp;
+    fastcgi_temp_path /tmp/fastcgi_temp;
+    uwsgi_temp_path /tmp/uwsgi_temp;
+    scgi_temp_path /tmp/scgi_temp;
+
+    server_tokens off;
+    client_max_body_size 16k;
+    # A client that stalls between two reads of its request, or two writes of the response, is cut
+    # (408, or the connection closes): a slow request cannot hold an edge connection for long.
+    client_header_timeout 10s;
+    client_body_timeout 10s;
+    send_timeout 10s;
+
+    # $uri, never $request or $request_uri: the WebSocket ticket is in the query string.
+    log_format edge '$remote_addr [$time_local] "$request_method $uri $server_protocol" '
+                    '$status $body_bytes_sent $request_time $upstream_addr';
+    access_log /dev/stdout edge;
+
+    # Fly's proxy terminates TLS and names the client in Fly-Client-IP, which only a connection
+    # from the proxy's own range may set: other Machines of the organization reach nginx over IPv6
+    # (6PN), where it does not listen.
+    set_real_ip_from 172.16.0.0/16;
+    real_ip_header Fly-Client-IP;
+
+    # Fly's private DNS, which answers for .flycast and .internal names.
+    resolver [fdaa::3] valid=5s ipv6=on;
+
+    # The API app's Flycast address: Fly's proxy balances each connection across the healthy API
+    # Machines and keeps the address when a Machine restarts or is replaced. No passive failure
+    # marking: there is one server, and a 503 comes from the Redis both nodes share.
+    upstream api {
+        zone api 64k;
+        server ${QUIZ_API_HOST}:8000 resolve max_fails=0;
+    }
+
+    # The web image's own site (web/nginx.conf), in this nginx: the built client on 8080.
+    include /etc/nginx/conf.d/default.conf;
+
+    upstream web {
+        zone web 64k;
+        server 127.0.0.1:8080;
+    }
+
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        "" close;
+    }
+
+    # One key for every request: the two zones below are ceilings for the whole stack, also behind
+    # Caddy, where $remote_addr names each client. The nodes limit each address.
+    map "" $whole_stack {
+        default stack;
+    }
+
+    # A flood ceiling, above a load run's joins.
+    limit_req_zone $whole_stack zone=identity:10m rate=1000r/s;
+    limit_req_status 429;
+    # A cap on the stack's API requests in flight (503 above it), above the bot swarm's 100 HTTP
+    # connections per process at 10 processes.
+    limit_conn_zone $whole_stack zone=api_conn:10m;
+
+    server {
+        listen 8081;
+        server_name _;
+        absolute_redirect off;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        # The client's own address, never one it sent: the nodes trust this header from nginx.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_connect_timeout 2s;
+        proxy_next_upstream error timeout http_503;
+
+        # The web app sends the security headers itself.
+        location / {
+            proxy_pass http://web;
+            add_header Strict-Transport-Security "max-age=31536000" always;
+        }
+
+        location /api/ {
+            include /etc/nginx/security-headers.conf;
+            proxy_pass http://api/;
+            proxy_redirect http://$http_host/ /api/; # a node's slash redirect keeps the prefix
+            limit_conn api_conn 2000;
+
+            location = /api/metrics {
+                return 404;
+            }
+
+            location = /api/sessions {
+                limit_req zone=identity burst=2000 nodelay;
+                proxy_pass http://api/sessions;
+            }
+
+            location = /api/tickets {
+                limit_req zone=identity burst=2000 nodelay;
+                proxy_pass http://api/tickets;
+            }
+        }
+
+        location = /ws {
+            include /etc/nginx/security-headers.conf;
+            proxy_pass http://api;
+            proxy_next_upstream error timeout; # a refused upgrade may have used its one-time ticket
+            proxy_buffering off;
+            # Above the 25 s server heartbeat, whose pings keep a quiet socket open. A client that
+            # stops reading misses a pong, and its node drops it within 50 s, before send_timeout.
+            proxy_read_timeout 60s;
+            proxy_send_timeout 60s;
+            send_timeout 60s;
+        }
+    }
+}

@@ -25,6 +25,7 @@ reports/
 # Local environment and work trees
 .env
 .env.before-restore
+.env.fly
 backups/
 .worktrees/
 
