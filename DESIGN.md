@@ -802,7 +802,8 @@ tick publishes, so one node's counter can stay flat on a healthy stack); `ws_con
 
 **Diagnosis: "the leaderboard is slow".**
 
-1. Check `/readyz` on both nodes (`docker compose exec api-1 …`, README): a 503 means Redis.
+1. Check `/readyz` on both nodes (`docker compose exec api-1 …`, see
+   [docs/operations.md](docs/operations.md#metrics)): a 503 means Redis.
 2. Check that frames are published: the sum of `leaderboard_frames_total` over both nodes must
    grow while correct answers arrive (each node counts only the frames it published itself, so read
    both). If it does not, look for `tick of quiz … store unreachable` or `fan-out of quiz … failed`
