@@ -10,7 +10,7 @@ from quiz.adapters.redis.keys import QuizKeys, quiz_keys
 from quiz.adapters.redis.scripts import Reply, Scripts
 from quiz.ports.store import QUIZ_TTL_MS
 
-IDS, ANSWERS = ["q0", "q1"], [2, 0]
+IDS, ANSWERS, BANK = ["q0", "q1"], [2, 0], "VOCAB-42"
 
 
 @pytest.fixture
@@ -26,12 +26,16 @@ def keys(redis_prefix: str) -> QuizKeys:
 
 
 async def create(
-    scripts: Scripts, keys: QuizKeys, shape: tuple[list[str], Sequence[object], int], window_ms: int
+    scripts: Scripts,
+    keys: QuizKeys,
+    shape: tuple[list[str], Sequence[object], int],
+    window_ms: int,
+    bank: str = BANK,
 ) -> Reply:
-    """Call with the four ARGV of docs/spec/redis.md §3; the TTL is the script's own constant."""
+    """Call with the five ARGV of docs/spec/redis.md §3; the TTL is the script's own constant."""
     ids, answers, limit_ms = shape
     return await scripts.call(
-        "create_quiz", keys, json.dumps(ids), json.dumps(answers), limit_ms, window_ms
+        "create_quiz", keys, json.dumps(ids), json.dumps(answers), limit_ms, window_ms, bank
     )
 
 
@@ -68,6 +72,13 @@ async def test_invalid_quiz_shape_is_rejected(
     assert not await redis_client.exists(keys.meta, keys.key, keys.seq)
 
 
+async def test_an_empty_bank_quiz_id_is_rejected(
+    scripts: Scripts, redis_client: Redis, keys: QuizKeys
+) -> None:
+    assert await create(scripts, keys, GOOD, 60_000, bank="") == ["INVALID_MESSAGE"]
+    assert not await redis_client.exists(keys.meta, keys.key, keys.seq)
+
+
 async def test_create_twice_is_invalid_state(scripts: Scripts, keys: QuizKeys) -> None:
     await create(scripts, keys, GOOD, 60_000)
     assert await create(scripts, keys, GOOD, 60_000) == ["INVALID_STATE"]
@@ -78,8 +89,16 @@ async def test_create_writes_meta_key_and_seq_with_ttl(
 ) -> None:
     status, start_ms, deadline_ms = await create(scripts, keys, GOOD, 60_000)
     assert (status, deadline_ms) == ("ok", int(start_ms or 0) + 60_000)
-    fields = ("questionCount", "timeLimitMs", "windowMs", "startMs", "deadlineMs", "questionIds")
-    meta = ["2", "20000", "60000", str(start_ms), str(deadline_ms), '["q0", "q1"]']
+    fields = (
+        "questionCount",
+        "timeLimitMs",
+        "windowMs",
+        "startMs",
+        "deadlineMs",
+        "questionIds",
+        "bankQuizId",
+    )
+    meta = ["2", "20000", "60000", str(start_ms), str(deadline_ms), '["q0", "q1"]', BANK]
     assert await redis_client.hmget(keys.meta, fields) == meta
     assert await redis_client.hgetall(keys.key) == {"0": "2", "1": "0"}
     assert await redis_client.get(keys.seq) == "0"

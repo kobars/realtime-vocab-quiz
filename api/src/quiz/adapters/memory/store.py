@@ -39,6 +39,7 @@ MAX_QUESTIONS, CHOICES = 100, 4
 class _Quiz:
     state: s.QuizState
     deadline_ms: int  # as created; a host mark moves only state.deadline_ms
+    bank_quiz_id: str
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     names: dict[str, str] = field(default_factory=dict)
     present: dict[str, str] = field(default_factory=dict)  # user id -> connection id
@@ -125,7 +126,13 @@ class MemoryStore:
             feed.put_nowait(message)
 
     async def create_quiz(
-        self, quiz_id: str, questions: tuple[s.Question, ...], *, window_ms: int, time_limit_ms: int
+        self,
+        quiz_id: str,
+        questions: tuple[s.Question, ...],
+        *,
+        window_ms: int,
+        time_limit_ms: int,
+        bank_quiz_id: str | None = None,
     ) -> Created:
         now = self._clock()
         for idle in [q for q, quiz in self._quizzes.items() if self._idle(q, quiz, now)]:
@@ -147,8 +154,13 @@ class MemoryStore:
             )
         except ValueError as error:
             raise DomainError(ErrorCode.INVALID_MESSAGE, str(error)) from error
-        self._quizzes[quiz_id] = _Quiz(state, state.deadline_ms, last_write_ms=now)
+        bank = bank_quiz_id or quiz_id
+        self._quizzes[quiz_id] = _Quiz(state, state.deadline_ms, bank, last_write_ms=now)
         return Created(state.start_ms, state.deadline_ms)
+
+    async def bank_quiz_id(self, quiz_id: str) -> str:
+        quiz = self._held(quiz_id)
+        return quiz_id if quiz is None else quiz.bank_quiz_id
 
     async def join(self, quiz_id: str, user_id: str, display_name: str, conn_id: str) -> Joined:
         quiz = self._quiz(quiz_id)

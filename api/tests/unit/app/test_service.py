@@ -100,6 +100,27 @@ async def test_question_answer_and_finish(service: QuizService) -> None:
     assert finished == m.Finished(atSeq=0, score=150, rank=1, playerCount=1)
 
 
+async def test_a_quiz_serves_the_bank_quiz_it_was_created_from() -> None:
+    store, asked = SpyStore(), []
+    questions = tuple(Question(f"q{i}", 1) for i in range(N))
+    await store.create_quiz(
+        "DEMO-1", questions, window_ms=60_000, time_limit_ms=20_000, bank_quiz_id=QUIZ
+    )
+
+    class OneQuiz(Bank):
+        @override
+        async def questions(self, quiz_id: str) -> tuple[BankQuestion, ...] | None:
+            asked.append(quiz_id)
+            return await super().questions(quiz_id) if quiz_id == QUIZ else None
+
+    service = QuizService(store, OneQuiz(), lambda: store.now[0])
+    conn = Connection("c-a", "a")
+    await send(service, conn, m.Join(quizId="DEMO-1", displayName="A"))
+    [first] = await send(service, conn, m.Next(questionIndex=0))
+    [second] = await send(service, conn, m.Next(questionIndex=1))
+    assert (first.prompt, second.prompt, asked) == ("word 0?", "word 1?", [QUIZ, QUIZ])
+
+
 async def test_join_errors_and_requests_before_join(service: QuizService) -> None:
     conn, unknown = Connection("c-a", "a"), m.Join(quizId="NOPE-1", displayName="A")
     page, resync = m.GetLeaderboard(offset=0, limit=10), m.Resync(lastSeq=0)

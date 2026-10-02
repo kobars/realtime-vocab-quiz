@@ -39,6 +39,7 @@ class Connection:  # what one socket knows: its user (from the ticket) and its q
     present: bool = False  # joined while open: holds the presence that its leave removes
     time_limit_ms: int = 0
     last_resync_ms: int | None = None
+    bank_quiz_id: str | None = None  # the bank quiz it plays, read at the first serve
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,8 +234,10 @@ class QuizService:
             return m.Finished(
                 atSeq=s.at_seq, score=s.total, rank=s.rank, playerCount=s.player_count
             )
-        if (questions := await self._bank.questions(quiz_id)) is None:
-            text = f"the question bank has no quiz {quiz_id}"
+        if conn.bank_quiz_id is None:
+            conn.bank_quiz_id = await self._store.bank_quiz_id(quiz_id)
+        if (questions := await self._bank.questions(conn.bank_quiz_id)) is None:
+            text = f"the question bank has no quiz {conn.bank_quiz_id}"
             raise LookupError(text)
         q = questions[s.question_index]
         return m.Question(

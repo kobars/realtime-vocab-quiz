@@ -60,14 +60,9 @@ async def test_unknown_quiz_is_none() -> None:
     assert await MockQuestionBank.load().questions("NOPE-1") is None
 
 
-async def test_a_run_of_a_bank_quiz_plays_its_questions_under_its_own_id() -> None:
-    bank = MockQuestionBank.load()
-    assert await bank.questions("VOCAB-42-7K3Q") == await bank.questions("VOCAB-42")
-    assert await bank.title("VOCAB-42-7K3Q") == await bank.title("VOCAB-42")
-
-
-@pytest.mark.parametrize("quiz_id", ["VOCAB-4", "VOCAB-42-", "VOCAB-42-7K3Q-AB", "NOPE-1-7K3Q"])
-async def test_only_the_bank_id_and_one_run_code_resolve(quiz_id: str) -> None:
+@pytest.mark.parametrize("quiz_id", ["VOCAB-4", "VOCAB-42-", "VOCAB-42-7K3Q"])
+async def test_only_a_bank_quiz_id_resolves(quiz_id: str) -> None:
+    """A quiz that plays a bank quiz under another ID is mapped by the store, not by its ID."""
     bank = MockQuestionBank.load()
     assert await bank.questions(quiz_id) is None
     assert await bank.title(quiz_id) is None
