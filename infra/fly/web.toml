@@ -12,9 +12,11 @@ primary_region = "sin"
   NGINX_ENVSUBST_OUTPUT_DIR = "/tmp"
   NGINX_ENVSUBST_FILTER = "^QUIZ_API_HOST$"
 
+# flyctl reads local_path from the directory it deploys (the repository root, where fly.sh runs
+# it), not from this file's folder.
 [[files]]
   guest_path = "/etc/nginx/templates/fly/nginx.conf.template"
-  local_path = "nginx.conf.template"
+  local_path = "infra/fly/nginx.conf.template"
 
 [experimental]
   cmd = ["nginx", "-c", "/tmp/fly/nginx.conf", "-g", "daemon off;"]

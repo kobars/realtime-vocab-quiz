@@ -318,8 +318,10 @@ def test_the_web_edge_is_public_over_https_and_checked_through_nginx() -> None:
     assert [check["path"] for check in service["checks"]] == ["/"]
     assert config["files"] == [
         {"guest_path": "/etc/nginx/templates/fly/nginx.conf.template",
-         "local_path": "nginx.conf.template"},
+         "local_path": "infra/fly/nginx.conf.template"},
     ]  # fmt: skip
+    # From the repository root, where fly.sh runs flyctl deploy.
+    assert (ROOT / config["files"][0]["local_path"]).is_file()
     assert config["experimental"]["cmd"][:3] == ["nginx", "-c", RENDERED]
 
 
