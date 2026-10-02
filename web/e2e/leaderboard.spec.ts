@@ -1,4 +1,4 @@
-// AI-ASSISTED: two players in two browser contexts: one scores, the other's leaderboard shows it live; and with more than 10 players the board shows the top 10 and "Show all players" lists each player once.
+// AI-ASSISTED: two players in two browser contexts: one scores, the other's leaderboard shows it live; and with more than 10 players the board shows the top 10, the first player in place and the last one pinned under them, and "Show all players" lists each player once.
 import { expect, test } from '@playwright/test'
 import { strings } from '../src/strings'
 import { answerKey, CROWDED_QUIZ, join, OPEN_QUIZ, uniqueName } from './stack'
@@ -27,12 +27,20 @@ test('with more than 10 players the board shows the top 10, and "Show all player
   try {
     // Each tab of one context is a player of its own (the identity lives in the tab's sessionStorage).
     const others = Array.from({ length: 10 }, () => uniqueName('Gus'))
-    for (const name of others) await join(await context.newPage(), CROWDED_QUIZ, name)
+    const firstPage = await context.newPage()
+    await join(firstPage, CROWDED_QUIZ, others[0] ?? '')
+    for (const name of others.slice(1)) await join(await context.newPage(), CROWDED_QUIZ, name)
     const name = uniqueName('Gus')
     const page = await context.newPage()
     await join(page, CROWDED_QUIZ, name)
+    // With no score yet, the earlier join ranks first: the first player is #1 in place, the last one #11, pinned.
+    const first = firstPage.getByRole('region', { name: strings.leaderboard.title })
+    await expect(first.locator('[aria-current="true"]')).toContainText(`#1${others[0] ?? ''}`)
+    await expect(first.getByTestId('pinned')).toHaveCount(0)
     const board = page.getByRole('region', { name: strings.leaderboard.title })
     await expect(board.getByRole('listitem')).toHaveCount(10)
+    await expect(board.getByTestId('pinned')).toContainText(`#11${name}`)
+    await expect(board.getByRole('listitem').filter({ hasText: name })).toHaveCount(0)
     await board.getByRole('button', { name: strings.leaderboard.showAll }).click()
     await expect(board.getByTestId('page-range')).toHaveText(strings.leaderboard.range(1, 11, 11))
     for (const player of [...others, name]) await expect(board.getByRole('listitem').filter({ hasText: player })).toHaveCount(1)

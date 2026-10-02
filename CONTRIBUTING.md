@@ -125,7 +125,8 @@ layers need more:
   to both, for example `make ui-check UI_ARGS="--project=320-light -g 'join-error'"`. The CI job
   `ui` runs it and keeps the report and the screenshot diffs when it fails.
 - The tests below need the running Docker stack, and they create the seeded quizzes themselves:
-  the system tests `BIZ-20`, the browser specs `VOCAB-42` and `ACAD-10`. A quiz ID can be
+  the system tests `BIZ-20`, the browser specs `VOCAB-42`, `ACAD-10` and `VOCAB-42-CROWD` (a
+  run of the `VOCAB-42` bank for the spec that needs more than 10 players). A quiz ID can be
   created only once on the same stack data, so an earlier run of them, or a seeded quiz you
   created by hand, makes them fail with HTTP 409 (the IDs of `make demo` and `make new-quiz`
   never collide). The `make demo` stack does not suit them either: it raises the connection

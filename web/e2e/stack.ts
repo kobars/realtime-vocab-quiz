@@ -12,8 +12,13 @@ export const GALLERY_URL = 'http://127.0.0.1:4174'
 /** Open for the whole run (global setup starts it), and one the setup has ended. */
 export const OPEN_QUIZ = 'VOCAB-42'
 export const ENDED_QUIZ = 'ACAD-10'
-/** Also open for the whole run: the spec that needs more players than the top 10 fills it, and the other specs' boards stay short. */
-export const CROWDED_QUIZ = 'BIZ-20'
+/**
+ * Also open for the whole run, a run of the `VOCAB-42` bank under its own ID: the spec that needs more players than the
+ * top 10 fills it, and the other specs' boards stay short. The system tests keep `BIZ-20`; the run codes of the hosting
+ * API and `make demo` (four characters, no O) never make this ID.
+ */
+export const CROWDED_QUIZ = 'VOCAB-42-CROWD'
+export const CROWDED_BANK = 'VOCAB-42'
 
 /** The index of the correct choice of each question of a quiz, from the API's mock question bank. */
 export function answerKey(quizId: string): number[] {
