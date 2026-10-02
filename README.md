@@ -109,6 +109,9 @@ pnpm 11.
   container (Docker), or uses `REDIS_URL` when it is set.
 - `make acceptance`: the black-box acceptance tests over HTTP and the WebSocket;
   `ACCEPTANCE_STORE=redis` runs them on Redis.
+- `make smoke-full`: against the running Docker stack, checks `/healthz` and `/readyz` on each
+  node, plays one question through nginx, stops the API node that holds the socket, and checks
+  that the player is back on the other node within 10 s with its score (`load/smoke_full.py`).
 - The bot swarm (`load/bots.py`) plays quizzes against the running Docker stack and reports
   the answer → leaderboard latency, for example 10 bots for 30 seconds:
   `uv run --project api python load/bots.py --admin-token "$ADMIN_TOKEN" --bots 10 --duration 30`.

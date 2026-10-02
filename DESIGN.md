@@ -278,7 +278,8 @@ sequenceDiagram
 1. A socket drops (close 1006), or a side stops hearing the other: the client closes and
    reconnects after 50 s with no inbound message, and the server closes a socket that missed the
    pong of its 25 s heartbeat ping (`adapters/ws/heartbeat.py`). The registry starts a 10 s grace
-   timer; then `leave.lua` removes the presence only if this connection still holds it.
+   timer; then `leave.lua` removes the presence only if this connection still holds it. If the
+   node itself died, another node's presence renew (`fanout/presence.py`) drops the entry.
 2. The client waits a full-jitter backoff (`protocol/backoff.ts`), gets a new ticket with the
    same session token (so the same user ID), and connects again, to either node.
 3. `join.lua` finds the player and keeps the cursor and the score; the new connection ID takes
@@ -577,12 +578,12 @@ Test paths are under `api/tests/` (server) or `web/src/` (client). "Not tested" 
 
 | Failure | Detection | System behavior | User-visible effect | Mitigation | Proving test |
 |---|---|---|---|---|---|
-| API node crash or SIGTERM | The socket closes (1006); nginx's connect to the dead node fails | No graceful drain: the node's sockets drop; nginx sends new connects to the other node; the player's presence stays until its grace timer, which died with the node (see the limits below) | "Reconnecting", then play resumes on the other node with the same score and cursor | Client backoff (full jitter, at most 10 s), new ticket, `join`, `resync` | `web/src/protocol/client.test.ts` (reconnect with backoff); `integration/test_join_script.py::test_reconnect_keeps_player_state_and_replaces_old_connection`. The stop of a node in the full stack is not tested: no automated two-node test runs the Compose stack |
+| API node crash or SIGTERM | The socket closes (1006); nginx's connect to the dead node fails | No graceful drain: the node's sockets drop; nginx sends new connects to the other node; the dead node's grace timers die with it, and another node's presence renew drops its entries 13–16 s later | "Reconnecting", then play resumes on the other node with the same score and cursor | Client backoff (full jitter, at most 10 s), new ticket, `join`, `resync` | `integration/test_two_nodes.py::test_a_player_who_moves_to_the_other_node_within_the_grace_keeps_presence`; `integration/fanout/test_presence.py::test_another_nodes_renew_drops_presence_that_no_live_node_renews`; `web/src/protocol/client.test.ts` (reconnect with backoff). `make smoke-full` (`load/smoke_full.py`) stops the node that holds its socket in the running stack and checks that the player is back through nginx within 10 s with its score; it needs the stack, so it is not part of `make check` |
 | Redis down | A store call raises a connection error; `/readyz` returns 503 | Every request that needs Redis gets `UNAVAILABLE`; ticket redeem fails, so new sockets get HTTP 503; ticks log and retry | Errors and "reconnecting" until Redis is back | The client retries with backoff; restore Redis (a replica with failover is the next step, §10) | `integration/http/test_endpoints.py::test_readyz_and_requests_report_an_unreachable_redis`; `integration/ws/test_gateway.py::test_an_unreachable_ticket_store_answers_503`; `unit/app/test_service.py::test_redis_faults_are_unavailable_and_ping_answers_null` |
 | Redis restart (AOF loss window) | The client sees a lower `seq` on the next frame, or a gap | AOF `everysec`: the last second of writes can be lost, acknowledged answers included; a host end is announced only after its mark is on disk | A score can step back by the answers of that second; standings repair on the resync | `WAITAOF` before the host end; the client resyncs on `seq < lastSeq` | `integration/test_deadline.py::test_host_end_announces_only_after_the_mark_is_fsynced`; `web/src/protocol/seq.test.ts` (a lower `seq` resyncs at once). The loss itself is not tested: it needs a Redis killed between a write and its fsync |
 | Slow consumer | The socket's send buffer passes 64 KiB, then 256 KiB | Above 64 KiB, leaderboards are skipped and the newest one is sent with `rebase: true`; above 256 KiB, `error`, then close 1013 | A slow client sees fewer frames; past the hard limit it reconnects after 5 s plus the backoff | Per-socket buffer limits; one writer per socket | `integration/ws/test_connections.py::test_a_client_that_never_reads_is_conflated_then_closed_with_1013`, `::test_a_conflated_client_gets_rebase_true_and_sends_no_resync` |
 | Network drop (silent) | Server: no pong to its 25 s ping; client: no inbound message for 50 s | The server closes the socket and starts the 10 s grace; the client closes and reconnects | "Reconnecting", then resync | Heartbeat both ways; grace before the player counts as gone | `integration/ws/test_connections.py::test_the_server_pings_and_drops_a_socket_that_never_pongs`, `::test_a_drop_leaves_after_the_grace_unless_the_player_comes_back`; `web/src/protocol/client.test.ts` (reconnects after 50 s without an inbound message) |
-| Pub/sub disconnect | redis-py's subscription connection fails | redis-py reconnects and subscribes again when Redis answers; frames published meanwhile are lost. The node sends no snapshots after it (planned, not built); if the reconnect fails, that node stops relaying the quiz while its tick continues | Players on that node miss frames until their client finds the gap | The client resyncs on the next frame's gap, or on a `pong.seq` above its last `seq` within one 25 s ping | Not tested: it needs Redis to drop one connection while the others stay up |
+| Pub/sub disconnect | The feed raises, also when redis-py reconnected on its own (a new `subscribe` confirmation); or the tick fails | The node's loop for the quiz (`fanout/tick.py`) logs `fan-out of quiz … failed: subscribing again`, subscribes again after a full-jitter backoff (250 ms base, 10 s cap), then sends each local player a snapshot from one read at one `seq` before it relays again | Players on that node miss frames for the length of the drop, then get the snapshot | Snapshots after the resubscribe; the client also resyncs on a gap or on a `pong.seq` ahead | `integration/test_two_nodes.py::test_a_dropped_subscription_gets_each_local_socket_a_snapshot`; `unit/fanout/test_tick_faults.py::test_another_refusal_logs_its_traceback_and_the_loop_subscribes_again_with_a_snapshot`, `::test_the_backoff_grows_until_a_tick_goes_through` |
 | Duplicate answer | The stored `submissionId`, or the "already answered" field | The same `submissionId` returns the stored result; a new one for an answered question is `ALREADY_ANSWERED`; the score does not change | None: the retry gets the same `answer_result` | Two idempotency checks in `score_answer.lua` | `contract/test_store_contract.py::test_replay_returns_same_result`; `integration/test_scoring_concurrency.py::test_concurrent_copies_of_one_answer_score_once` |
 | Late answer | Elapsed time on Redis `TIME` above `T` | Recorded with 0 points; not an error | `answer_result` with 0 points and the correct choice | One clock in the script | `unit/test_scoring.py::test_late_by_one_ms_scores_zero`; `integration/test_score_script.py::test_writes_after_the_deadline_write_nothing_and_a_replay_still_answers` |
 | Replayed ticket | The ticket store redeems a ticket once | The second upgrade gets HTTP 401 | The client gets a fresh ticket on its next connect | Single use, 30 s | `unit/adapters/test_mock_auth.py::test_ticket_redeems_once`, `::test_ticket_expires_after_30_s` |
@@ -595,9 +596,11 @@ Test paths are under `api/tests/` (server) or `web/src/` (client). "Not tested" 
 **Known limits.**
 
 - **A crash leaves stale presence.** The 10 s grace timer lives in the node; when the node dies,
-  `leave` never runs, and the presence sweep (`renew_presence`) is specified but not built
-  ([redis spec §3](docs/spec/redis.md#3-scripts)). The online count stays too high until the
-  quiz's keys expire. Scores and standings are not affected.
+  `leave` never runs. Every node renews its own players' presence every 3 s, and that call drops
+  the entries no node renewed for 13 s (`fanout/presence.py`, `renew_presence.lua`), so another
+  node that serves the quiz clears them 13–16 s later. If no other node serves the quiz, they
+  stay until one does or the keys expire. Until then the online count is too high; scores and
+  standings are not affected.
 - **No epoch on a Redis failover.** `seq` can go back after a failover or a restore; a client
   resyncs on a lower `seq`, but a counter that climbs past its `lastSeq` first goes unnoticed
   until the next gap. The fix is a `seq` epoch (§10).
@@ -674,14 +677,14 @@ p99 above 500 ms (from client-side timings, which this build does not export); t
 
 1. Check `/readyz` on both nodes (`docker compose exec api-1 …`, README): a 503 means Redis.
 2. Check that frames are published: `leaderboard_frames_total` must grow while answers arrive.
-   If it does not, look for `tick of quiz … store unreachable` or `fan-out of quiz … stopped`
+   If it does not, look for `tick of quiz … store unreachable` or `fan-out of quiz … failed`
    in the logs.
 3. Check the tick time: a high `tick_duration_seconds` points at Redis (`SLOWLOG GET`,
    `INFO commandstats` for the scripts; a quiz above 200 players ranks every scorer in the tick).
 4. Check the sockets: many 1013 closes, or conflated frames, mean slow clients or a saturated
    node (CPU of the node's one event loop; `ws_connections`).
-5. Check the client: a client that keeps resyncing (gaps) points at lost frames, for example a
-   pub/sub reconnect on its node (§11).
+5. Check the client: a client that keeps resyncing (gaps) points at lost frames, for example
+   repeated pub/sub drops on its node (§11).
 6. Reproduce with the bot swarm against the stack and compare its answer → leaderboard
    percentiles with §9.
 
