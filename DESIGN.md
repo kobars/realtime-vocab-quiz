@@ -776,29 +776,28 @@ total, with missing and timed-out samples counted as misses.
 - `/healthz`: liveness, 200 `{"status":"ok"}` while the process answers HTTP.
 - `/readyz`: readiness, 200 `{"status":"ready"}`, or 503 `{"status":"unavailable"}` when Redis is
   unreachable.
-- `/metrics` (Prometheus text format, `obs/metrics.py`): `ws_connections` (sockets holding a
-  connection cap slot, from the cap check until the slot is freed), `ws_pending_close` (those of
-  them whose close frame the sender gave up on, waiting for the peer to read or go),
-  `ws_closes_total{code}` (closes by close code: 1013 for a slow client, 1008 for abuse; a code
-  a peer picks outside the ones the service and browsers use counts as `other`, so a client
-  cannot add series), `ws_send_delay_seconds` (histogram, observed by each socket's sender on
-  each frame it writes: the time from queueing the frame to the end of its write),
-  `event_loop_lag_seconds` (how late the node's event loop ran its latest 100 ms timer),
-  `answers_total{result}` (correct, wrong, late), `leaderboard_frames_total` (frames this node
-  published), `leaderboard_publish_lag_seconds` (histogram, observed by the tick on each frame
-  it publishes: the time from the first change the frame carries, an answer that scored, a join
-  or a leave, to its publication, on the Redis clock), `leaderboard_frames_conflated_total`
-  (frames a slow socket's send queue dropped for a newer one), `resyncs_total` (resync requests
-  answered with a snapshot), `tick_duration_seconds` (histogram of one tick),
-  `feed_subscribe_failures_total` (by `reason`: `limit`, joins refused because every
-  subscription connection is taken; `error`, subscribe attempts that failed),
-  `ws_errors_total{request,code}` (the `error` replies of the use cases, by request type and
-  error code), `redis_clock_step_total` (answers scored at elapsed 0 after a Redis clock step
-  back) and `log_lines_dropped_total` (log lines lost because the queue to the log writer was
-  full or the output stream was closed or broken).
 - JSON logs (`obs/logs.py`, structlog): one `http_request` line per request with the path,
   status and duration; a line when a socket closes, with its code; each line carries the
   `request_id` (a socket's connection ID) and the `quiz_id`. No API log line holds a ticket.
+- `/metrics` (Prometheus text format, `obs/metrics.py`): the metrics in the table below.
+
+| Metric | Type | What it tells you |
+|---|---|---|
+| `ws_connections` | gauge | Sockets holding a connection cap slot, from the cap check until the slot is freed |
+| `ws_pending_close` | gauge | Those of them whose close frame the sender gave up on, waiting for the peer to read or go |
+| `ws_closes_total{code}` | counter | Closes by close code: 1013 for a slow client, 1008 for abuse; a code a peer picks outside the ones the service and browsers use counts as `other`, so a client cannot add series |
+| `ws_send_delay_seconds` | histogram | Observed by each socket's sender on each frame it writes: the time from queueing the frame to the end of its write |
+| `event_loop_lag_seconds` | gauge | How late the node's event loop ran its latest 100 ms timer |
+| `answers_total{result}` | counter | Scored answers: correct, wrong, late |
+| `leaderboard_frames_total` | counter | Frames this node published |
+| `leaderboard_publish_lag_seconds` | histogram | Observed by the tick on each frame it publishes: the time from the first change the frame carries (an answer that scored, a join or a leave) to its publication, on the Redis clock |
+| `leaderboard_frames_conflated_total` | counter | Frames a slow socket's send queue dropped for a newer one |
+| `resyncs_total` | counter | Resync requests answered with a snapshot |
+| `tick_duration_seconds` | histogram | The time of one tick |
+| `feed_subscribe_failures_total{reason}` | counter | `limit`: joins refused because every subscription connection is taken; `error`: subscribe attempts that failed |
+| `ws_errors_total{request,code}` | counter | The `error` replies of the use cases, by request type and error code |
+| `redis_clock_step_total` | counter | Answers scored at elapsed 0 after a Redis clock step back |
+| `log_lines_dropped_total` | counter | Log lines lost because the queue to the log writer was full or the output stream was closed or broken |
 
 **The server's part of the SLO.** `leaderboard_publish_lag_seconds` covers the store part of C5:
 from "answer accepted" to the frame leaving Redis. Its p99 over all nodes:
@@ -814,18 +813,29 @@ after the publish, a frame's wait in a socket's send queue and its write, is
 delivery still needs client-side timings, which this build does not export; the bot swarm
 measures them in load runs.
 
-**Alerts a production setup would add.** `/readyz` failing on any node; the p99 of
-`leaderboard_publish_lag_seconds` above 300 ms (the store part leaves 200 ms of the 500 ms budget
-for delivery), and the client-observed answer → leaderboard p99 above 500 ms once clients report
-timings; the p99 of
-`tick_duration_seconds` above 50 ms; `sum(rate(leaderboard_frames_total))` over all nodes at 0
-while `sum(rate(answers_total{result="correct"}))` grows (only a correct answer on time scores
-and sets `dirty`, so wrong and late answers alone publish nothing; and only the node that wins a
-tick publishes, so one node's counter can stay flat on a healthy stack); `ws_connections` near the
-10,000 cap, or a growing `ws_pending_close`; the p99 of `ws_send_delay_seconds` above 100 ms;
-`event_loop_lag_seconds` above 50 ms for minutes; any increase of `redis_clock_step_total` or
-`feed_subscribe_failures_total`; a rise in `ws_closes_total{code="1013"}` or
-`ws_closes_total{code="1008"}`.
+**Alerts a production setup would add.** Each condition, its threshold and why:
+
+- `/readyz` failing on any node: Redis is unreachable from it.
+- The p99 of `leaderboard_publish_lag_seconds` above 300 ms: the store part then leaves less than
+  200 ms of the 500 ms budget for delivery.
+- The client-observed answer → leaderboard p99 above 500 ms, once clients report timings: C5 is
+  missed.
+- The p99 of `tick_duration_seconds` above 50 ms: the tick nears its 200 ms budget, which points
+  at Redis.
+- `sum(rate(leaderboard_frames_total))` over all nodes at 0 while
+  `sum(rate(answers_total{result="correct"}))` grows: scores change but no frame goes out. Only a
+  correct answer on time scores and sets `dirty`, so wrong and late answers alone publish
+  nothing; and only the node that wins a tick publishes, so one node's counter can stay flat on
+  a healthy stack.
+- `ws_connections` near the 10,000 cap, or a growing `ws_pending_close`: the node is filling up
+  or peers stop reading.
+- The p99 of `ws_send_delay_seconds` above 100 ms: slow clients or a saturated node.
+- `event_loop_lag_seconds` above 50 ms for minutes: the node's one event loop runs late, so every
+  socket waits.
+- Any increase of `redis_clock_step_total` or `feed_subscribe_failures_total`: the Redis clock
+  stepped back, or a node refused or failed a subscription.
+- A rise in `ws_closes_total{code="1013"}` or `ws_closes_total{code="1008"}`: more slow clients,
+  or abuse.
 
 **Diagnosis: "the leaderboard is slow".**
 
