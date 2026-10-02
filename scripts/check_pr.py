@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-# AI-ASSISTED: pull-request guards: frozen test paths, size limit, commit rules and AI-LOG entry.
+# AI-ASSISTED: pull-request guards: frozen test paths, size limit, commit rules and AI-LOG entry;
+# Dependabot PRs skip the AI rules.
 """Check a pull request against the rules of AGENTS.md.
 
-    check_pr.py --base SHA --head SHA --pr N [--labels LABEL ...]
+    check_pr.py --base SHA --head SHA --pr N [--author LOGIN] [--labels LABEL ...]
 
 1. Frozen paths: the PR changes api/tests/acceptance/, api/tests/conftest.py or the
    [tool.pytest.ini_options] table of api/pyproject.toml only with the label acceptance-change.
@@ -11,6 +12,9 @@
 3. Commits: every commit but a merge has the AI-Assisted: trailer, and a subject of at most
    100 characters that does not start with fixup!, squash!, amend! or the word WIP.
 4. The AI-LOG entry docs/ai-log/PR-<n>.md exists at the head commit.
+
+A PR whose author is dependabot[bot] skips the trailer of rule 3 and rule 4: those rules
+document AI-written code, and a bot writes these PRs. Every other rule still applies.
 
 Every failure is printed as a GitHub error annotation. Exit status: 0 clean, 1 failures.
 """
@@ -32,6 +36,7 @@ BAD_SUBJECT = re.compile(r"(fixup|squash|amend)!|WIP\b")
 FROZEN_FOLDER = "api/tests/acceptance/"
 FROZEN_FILE = "api/tests/conftest.py"
 PYPROJECT = "api/pyproject.toml"
+DEPENDABOT = "dependabot[bot]"
 
 
 def _show(commit: str, path: str) -> str | None:
@@ -59,7 +64,7 @@ def changed_lines(diff: Sequence[Change]) -> int:
     return sum(change.lines or 0 for change in diff if not change.generated)
 
 
-def commit_problems(start: str, head: str) -> list[str]:
+def commit_problems(start: str, head: str, *, need_trailer: bool) -> list[str]:
     log = git(
         "log",
         "-z",
@@ -70,7 +75,7 @@ def commit_problems(start: str, head: str) -> list[str]:
     problems: list[str] = []
     for record in filter(None, log.split("\0")):
         sha, subject, trailer = record.split("\x1f")
-        if not trailer.strip():
+        if need_trailer and not trailer.strip():
             problems.append(f"commit {sha} has no AI-Assisted: trailer")
         if BAD_SUBJECT.match(subject):
             problems.append(f"commit {sha} is a fixup, squash, amend or WIP commit: {subject}")
@@ -84,6 +89,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--base", required=True, help="the commit the PR merges into")
     parser.add_argument("--head", required=True, help="the PR's head commit")
     parser.add_argument("--pr", required=True, type=int, help="the PR number")
+    parser.add_argument("--author", default="", help="the login of the PR's author")
     parser.add_argument("--labels", nargs="*", default=[], help="the PR's labels")
     args = parser.parse_args(argv)
 
@@ -98,9 +104,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{lines} changed lines, over {MAX_CHANGED_LINES} (generated files not counted);"
             f" split the PR or add the {SIZE_LABEL} label"
         )
-    failures += commit_problems(start, args.head)
+    ai_rules = args.author != DEPENDABOT
+    failures += commit_problems(start, args.head, need_trailer=ai_rules)
     entry = f"docs/ai-log/PR-{args.pr}.md"
-    if _show(args.head, entry) is None:
+    if ai_rules and _show(args.head, entry) is None:
         failures.append(f"the AI-LOG entry {entry} is missing")
 
     for failure in failures:

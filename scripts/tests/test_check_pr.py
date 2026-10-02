@@ -12,8 +12,12 @@ PR = 7
 ENTRY = {f"docs/ai-log/PR-{PR}.md": "## PR-7 — Test\n"}
 
 
-def _check(base: str, capsys: pytest.CaptureFixture[str], *labels: str) -> tuple[int, str]:
-    status = check_pr.main(["--base", base, "--head", "HEAD", "--pr", str(PR), "--labels", *labels])
+def _check(
+    base: str, capsys: pytest.CaptureFixture[str], *labels: str, author: str = "octocat"
+) -> tuple[int, str]:
+    status = check_pr.main(
+        ["--base", base, "--head", "HEAD", "--pr", str(PR), "--author", author, "--labels", *labels]
+    )
     return status, capsys.readouterr().out
 
 
@@ -157,3 +161,35 @@ def test_the_ai_log_entry_must_exist(
     status, out = _check(base, capsys)
     assert status == 1
     assert f"::error title=PR guards::the AI-LOG entry docs/ai-log/PR-{PR}.md is missing" in out
+
+
+def test_a_dependabot_pr_needs_no_trailer_and_no_ai_log_entry(
+    pr_repo: Repo, base: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pr_repo.commit({"api/uv.lock": "x\n"}, "Bump uv-build in /api")
+    assert _check(base, capsys, author=check_pr.DEPENDABOT)[0] == 0
+    status, out = _check(base, capsys)
+    assert status == 1
+    assert "has no AI-Assisted: trailer" in out
+    assert "the AI-LOG entry docs/ai-log/PR-7.md is missing" in out
+
+
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        (({"app.py": "x\n" * (check_pr.MAX_CHANGED_LINES + 1)}, "Bump"), "changed lines, over"),
+        (({"api/tests/conftest.py": "import pytest\n"}, "Bump"), "frozen paths changed"),
+        (({"app.py": "x = 1\n"}, "a" * (check_pr.MAX_SUBJECT + 1)), "has a subject over"),
+    ],
+)
+def test_a_dependabot_pr_still_meets_the_other_rules(
+    pr_repo: Repo,
+    base: str,
+    capsys: pytest.CaptureFixture[str],
+    change: tuple[dict[str, str], str],
+    problem: str,
+) -> None:
+    pr_repo.commit(*change)
+    status, out = _check(base, capsys, author=check_pr.DEPENDABOT)
+    assert status == 1
+    assert problem in out
