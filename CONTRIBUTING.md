@@ -1,8 +1,9 @@
-<!-- AI-ASSISTED: developer workflow: setup, make targets, what make check and CI run, pull requests. -->
+<!-- AI-ASSISTED: developer workflow: setup, running the stack, development, tests, make targets, what make check and CI run, layout, troubleshooting, pull requests. -->
 # Contributing
 
-This page is the developer workflow: the tools, the make targets, what `make check` runs and
-what CI runs on a pull request. The rules for every change (branch names, PR size, tests,
+This page is the developer workflow: the tools, running the stack and developing without
+Docker, the tests and make targets, what `make check` and CI run, the layout and
+troubleshooting. The rules for every change (branch names, PR size, tests,
 AI-LOG entries) are in [AGENTS.md](AGENTS.md).
 
 ## Set up
@@ -25,9 +26,129 @@ uv run --project api pre-commit install    # run the hooks on staged files at ea
 | Client tests and quality | Vitest (v8 coverage), @vue/test-utils, happy-dom, Playwright, axe-core, ESLint, vue-tsc |
 | Infra | Docker Compose, nginx, Caddy (HTTPS on a public host) |
 
+## Run the full stack
+
+`make demo` does all of this in one command (see the [README](README.md#quick-start)). Step by
+step, the same stack is two API nodes on one Redis behind nginx; you need Docker with Compose v2,
+`make`, `curl` and `openssl`.
+
+1. Write the two secrets the stack needs into `.env`: the mock admin token and the stack Redis
+   password ([`.env.example`](.env.example) lists the other settings):
+
+   ```bash
+   printf 'ADMIN_TOKEN=%s\nREDIS_PASSWORD=%s\n' "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" > .env
+   ```
+
+2. Build the images and start the stack. The second command returns once every service is
+   healthy:
+
+   ```bash
+   make build
+   docker compose --profile full up -d --wait
+   ```
+
+3. Check that nginx reaches the API nodes. Both print HTTP 200:
+
+   ```bash
+   curl -s -w ' %{http_code}\n' http://localhost:8080/api/healthz   # {"status":"ok"} 200
+   curl -s -w ' %{http_code}\n' http://localhost:8080/api/readyz    # {"status":"ready"} 200
+   ```
+
+4. `make new-quiz` starts a fresh 60-minute quiz under a new ID and prints its player URL. Open
+   it in two browser windows and join with another name in each: each tab is its own player.
+5. `make down` stops the stack and keeps the Redis data; `docker compose --profile full down -v`
+   also deletes it.
+
+## Develop without Docker
+
+One API node with an in-memory store, and the client's dev server, which reloads the page when
+a client file changes. The API does not reload: restart it after a server change, and the quizzes
+in its memory store are lost with it.
+
+1. Install the dependencies (see [Set up](#set-up)).
+2. Start the API on `127.0.0.1:8001`, with the mock admin API turned on so you can create a quiz
+   (pick any token):
+
+   ```bash
+   ADMIN_MOCK=1 ADMIN_TOKEN=dev-token make dev-api
+   ```
+
+3. In a second terminal, start the client on port 5173: `pnpm -C web dev`.
+4. In a third terminal, create a quiz with the same token. `VOCAB-42` is one of the seeded
+   quizzes (`BIZ-20` and `ACAD-10` are the others); it stays open for 10 minutes:
+
+   ```bash
+   ADMIN_TOKEN=dev-token
+   curl -X POST http://127.0.0.1:8001/admin/quizzes \
+     -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"quizId": "VOCAB-42"}'
+   ```
+
+5. Open <http://localhost:5173/q/VOCAB-42> in two browser windows and play. Press Ctrl+C in
+   the API and client terminals to stop.
+
+To run the development API on Redis instead: `make up`, then
+`STORE=redis ADMIN_MOCK=1 ADMIN_TOKEN=dev-token make dev-api`, and `make down` afterwards.
+
+## Run the tests
+
+- `make test`: the server unit, property and contract tests, and the client tests (no
+  Redis needed).
+- `make test-integration`: the tests that need Redis, then the acceptance tests on Redis. The
+  integration tests use `REDIS_URL` when it is set, else a Redis container of their own; the
+  acceptance tests always start their own (Docker).
+- `make acceptance`: the black-box acceptance tests over HTTP and the WebSocket alone;
+  `ACCEPTANCE_STORE=redis` runs them on Redis.
+- `make ui-check`: the visual and accessibility specs (`web/e2e/visual.spec.ts`,
+  `web/e2e/a11y.spec.ts`) on the production build, with no backend: `web/e2e/fixtures/` mocks the
+  HTTP calls and the quiz socket and pauses the page clock. Eleven screens, from the join form to
+  the final results, run at 320, 768 and 1280 px wide in light and dark with reduced motion (the
+  Leaderboard tab only below 1024 px; wider, the leaderboard sits beside every play screen). Each
+  must match its screenshot baseline in `web/e2e/__screenshots__/` (at most 50 pixels differ) and
+  pass axe for WCAG 2.2 A and AA, with no sideways scroll (also at 640 px, a 1280 px window at
+  200% zoom), controls of at least 44 × 44 px and a visible focus ring at every Tab stop. It runs
+  in the Playwright image pinned in the `Makefile`, always as `linux/amd64`, so every machine
+  renders like CI; it needs Docker, and `make check` needs no browser. `make ui-baselines`
+  regenerates the baselines that changed, in the same image; `UI_ARGS` passes Playwright arguments
+  to both, for example `make ui-check UI_ARGS="--project=320-light -g 'join-error'"`. The CI job
+  `ui` runs it and keeps the report and the screenshot diffs when it fails.
+- The tests below need the running Docker stack, and they create the seeded quizzes themselves:
+  the system tests `BIZ-20`, the browser specs `VOCAB-42` and `ACAD-10`. A quiz ID can be
+  created only once on the same stack data, so an earlier run of them, or a seeded quiz you
+  created by hand, makes them fail with HTTP 409 (the IDs of `make demo` and `make new-quiz`
+  never collide). Start from fresh stack data first:
+
+  ```bash
+  docker compose --profile full down -v
+  docker compose --profile full up -d --wait
+  ```
+
+  Then run the system tests, the browser specs and `make smoke-full`, in that order.
+  `make smoke-full` reuses the browser specs' `VOCAB-42` while it is open (10 minutes); after
+  that, start from fresh stack data again.
+  - `make test-system`: system tests through nginx (`api/tests/system/`): a score on one node
+    reaches a socket on the other, the origin check, the connection cap, the security headers.
+  - `make test-browser`: browser specs in Chromium with an accessibility scan (`web/e2e/`,
+    Playwright); once before the first run: `pnpm -C web exec playwright install chromium`.
+  - `make smoke-full`: checks `/healthz` and `/readyz` on each node, plays one question through
+    nginx, stops the API node that holds the socket, and checks that the player is back on the
+    other node within 10 s with its score (`load/smoke_full.py`).
+  - The bot swarm (`load/bots.py`) plays quizzes and reports the answer → leaderboard latency,
+    for example 10 bots for 30 seconds:
+    `uv run --project api python load/bots.py --admin-token "$ADMIN_TOKEN" --bots 10 --duration 30`.
+    Without `--admin-token` it plays quizzes that already exist. `make load` runs it as a
+    container on the stack network, with its options in `LOAD_ARGS`;
+    [load/README.md](load/README.md) explains them and holds the measured load runs.
+- `docker compose --profile test run --rm test`: `make test` and the acceptance tests on the
+  memory store in a container, with no uv or pnpm on the host. It needs `.env` (step 1 of
+  [Run the full stack](#run-the-full-stack), or `make demo` writes it), as every Compose command
+  does.
+- `make check`: every check a change must pass (see [below](#what-make-check-runs)). Run it
+  before you open a pull request; it needs Docker.
+
 ## Make targets
 
-`make help` lists them.
+`make help` lists them with one line each.
 
 | Target | What it does |
 |---|---|
@@ -44,11 +165,12 @@ uv run --project api pre-commit install    # run the hooks on staged files at ea
 | `make acceptance` | The acceptance tests alone; `ACCEPTANCE_STORE=redis` runs them on Redis |
 | `make test-system` | The system tests (`api/tests/system/`) against a running full stack at `STACK_URL` (default `http://localhost:$QUIZ_PORT`), with the `ADMIN_TOKEN` from `.env` |
 | `make test-browser` | The Playwright browser specs (`web/e2e/`, with an axe accessibility scan) in Chromium against the same stack |
+| `make ui-check`, `make ui-baselines` | The visual and accessibility specs in the pinned Playwright image (Docker), and the regeneration of their screenshot baselines ([Run the tests](#run-the-tests)) |
 | `make check` | Every check a change must pass; it stops at the first failing step |
 | `make contracts` | Regenerate the JSON Schema and the client's TypeScript types from the server's models |
 | `make build` | Build the images `elsaquiz-api` and `elsaquiz-web` (tag `IMAGE_TAG`, default `dev`) |
 | `make review-budget` | Count the branch's review input (the diff plus the full changed files) in tokens, against `BASE_SHA` or `origin/main` |
-| `make audit` | The dependency audits (`pip-audit`, `pnpm audit`) and the gitleaks scan of the whole history; needs the network, a full clone and gitleaks 8.25 or later |
+| `make audit` | The dependency audits (`pip-audit`, `pnpm audit`) and the gitleaks scan of the whole history (also alone: `make audit-python`, `make audit-web`, `make audit-secrets`); needs the network, a full clone and gitleaks 8.25 or later |
 
 ## What `make check` runs
 
@@ -133,6 +255,35 @@ uv lock --project api                                     # keeps those versions
 
 The second command matters: `uv.lock` records the cut-off, and `uv run --locked` without the
 same option then reports the lock as out of date.
+
+## Project layout
+
+```text
+api/        the server: FastAPI app, Lua scripts, tests (unit, property, contract, integration, acceptance, system)
+web/        the Vue 3 client and its tests
+contracts/  the JSON Schema of the wire protocol, generated from the server's models
+infra/      the nginx and Caddy configuration of the full stack
+load/       the bot swarm, the smoke test and the measured load runs
+scripts/    the demo and seed scripts, repository checks and generators
+docs/       specs, decisions, operations and the AI log
+```
+
+## Troubleshooting
+
+- **Port already in use** (`bind: address already in use`): another program holds 8080, 8001,
+  5173 or 6381. Stop it, or set `QUIZ_PORT` in `.env` (the stack). To move the development
+  API, start it with `DEV_API_PORT` and point the client dev server at it, for example
+  `DEV_API_PORT=8002 ADMIN_MOCK=1 ADMIN_TOKEN=dev-token make dev-api` and
+  `QUIZ_API_URL=http://127.0.0.1:8002 pnpm -C web dev`.
+- **Docker is not running** (`Cannot connect to the Docker daemon`): start Docker Desktop or
+  the Docker service; `make demo`, `make build`, the stack, `make test-integration` and
+  `make check` need it.
+- **`set ADMIN_TOKEN in .env`**: Compose refuses to start the stack until `.env` holds both
+  secrets (`make demo` writes them, or step 1 of [Run the full stack](#run-the-full-stack)).
+- **The quiz has ended**: a quiz closes when its window ends, and its ID stays taken (HTTP 409)
+  while its data lives (24 hours). On the stack, `make new-quiz` starts a fresh 60-minute quiz
+  under a new ID. On the development API, pass a longer window (`"windowMs": 3600000`, the
+  60-minute maximum) or restart `make dev-api` to start with empty data.
 
 ## Pull requests
 
