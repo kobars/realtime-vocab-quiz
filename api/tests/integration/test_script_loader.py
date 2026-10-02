@@ -5,8 +5,9 @@ import pytest
 from redis.asyncio import Redis
 from redis.exceptions import NoScriptError
 
-from quiz.adapters.redis.keys import NO_QUIZ_TTL, QUIZ_TTL_MS, QuizKeys, quiz_keys
+from quiz.adapters.redis.keys import NO_QUIZ_TTL, QuizKeys, quiz_keys
 from quiz.adapters.redis.scripts import Scripts, compose
+from quiz.ports.store import QUIZ_TTL_MS
 
 ARGS = ('["q0"]', "[0]", 20_000, 60_000)
 

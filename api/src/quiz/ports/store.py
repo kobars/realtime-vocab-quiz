@@ -16,6 +16,8 @@ from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.events import AnswerScored
 from quiz.domain.session import Question
 
+QUIZ_TTL_MS = 24 * 60 * 60 * 1000  # a quiz is dropped this long after its last write (redis.md §2)
+
 
 @dataclass(frozen=True, slots=True)
 class Limits:

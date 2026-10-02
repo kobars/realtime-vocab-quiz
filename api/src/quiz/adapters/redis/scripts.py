@@ -8,7 +8,8 @@ from importlib.resources.abc import Traversable
 from redis.asyncio import Redis
 from redis.exceptions import NoScriptError
 
-from quiz.adapters.redis.keys import NO_QUIZ_TTL, QUIZ_TTL_MS, QuizKeys
+from quiz.adapters.redis.keys import NO_QUIZ_TTL, QuizKeys
+from quiz.ports.store import QUIZ_TTL_MS
 
 _LUA = files("quiz.adapters.redis") / "lua"
 
@@ -26,7 +27,7 @@ type Reply = list[str | int | None]
 
 
 def _constants() -> str:
-    """``K``, ``DATA_KEYS`` and ``QUIZ_TTL_MS`` for Lua, from keys.py.
+    """``K``, ``DATA_KEYS`` and ``QUIZ_TTL_MS`` for Lua, from keys.py and the store port.
 
     The standings limits are settings, not constants: the store passes them through ARGV."""
     index = {name: i for i, name in enumerate(QuizKeys._fields, 1)}

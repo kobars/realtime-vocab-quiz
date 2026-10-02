@@ -6,8 +6,9 @@ from collections.abc import Sequence
 import pytest
 from redis.asyncio import Redis
 
-from quiz.adapters.redis.keys import QUIZ_TTL_MS, QuizKeys, quiz_keys
+from quiz.adapters.redis.keys import QuizKeys, quiz_keys
 from quiz.adapters.redis.scripts import Reply, Scripts
+from quiz.ports.store import QUIZ_TTL_MS
 
 IDS, ANSWERS = ["q0", "q1"], [2, 0]
 

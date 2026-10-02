@@ -1,5 +1,8 @@
 # AI-ASSISTED: the in-memory store: the domain state machine behind the store and feed ports.
-"""The Redis store's single-process twin: per quiz, one lock, one clock read per command."""
+"""The Redis store's single-process twin: per quiz, one lock, one clock read per command.
+
+Like the Redis keys, a quiz is dropped ``QUIZ_TTL_MS`` after its last write, unless a feed of
+it is open; the lookup drops an idle quiz it finds, and ``create_quiz`` drops every one."""
 
 import asyncio
 import json
@@ -17,7 +20,7 @@ from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.standings import standings
 from quiz.ports import store as port
 from quiz.ports.clock import Clock
-from quiz.ports.store import Answered, Created, Finished, Joined, Limits, Row, Served
+from quiz.ports.store import QUIZ_TTL_MS, Answered, Created, Finished, Joined, Limits, Row, Served
 
 MAX_QUESTIONS, CHOICES = 100, 4
 
@@ -34,6 +37,11 @@ class _Quiz:
     tick_until_ms: int = 0  # the tick token, limits.tick_ms long
     end_seq: int | None = None  # the seq of quiz_ended, once announced
     scored: set[str] = field(default_factory=set)  # who scored since the last broadcast
+    last_write_ms: int = 0
+    # The rankings of one state: every change replaces the state, so its identity keys them.
+    ranked_for: s.QuizState | None = None
+    ranked: list[Row] = field(default_factory=list)
+    index: dict[str, Row] = field(default_factory=dict)  # user id -> its row in ranked
 
     def fence(self, user_id: str, conn_id: str) -> None:
         if (held := self.present.get(user_id)) is None:
@@ -42,11 +50,20 @@ class _Quiz:
             raise DomainError(ErrorCode.SESSION_REPLACED, f"{conn_id} was replaced")
 
     def rows(self) -> list[Row]:
-        ranked = standings(player.standing for player in self.state.players.values())
-        return [
-            Row(r.rank, r.standing.user_id, self.names[r.standing.user_id], r.standing.total)
-            for r in ranked
-        ]
+        """The standings of the current state, ranked once per state; callers never mutate it."""
+        if self.ranked_for is not self.state:
+            ranked = standings(player.standing for player in self.state.players.values())
+            self.ranked = [
+                Row(r.rank, r.standing.user_id, self.names[r.standing.user_id], r.standing.total)
+                for r in ranked
+            ]
+            self.index = {row.user_id: row for row in self.ranked}
+            self.ranked_for = self.state
+        return self.ranked
+
+    def row(self, user_id: str | None) -> Row | None:
+        self.rows()
+        return None if user_id is None else self.index.get(user_id)
 
 
 async def _drain(feed: asyncio.Queue[str]) -> AsyncGenerator[str]:
@@ -61,8 +78,20 @@ class MemoryStore:
         self._quizzes: dict[str, _Quiz] = {}
         self._feeds: dict[str, set[asyncio.Queue[str]]] = {}  # per quiz id, one per subscriber
 
+    def _idle(self, quiz_id: str, quiz: _Quiz, now: int) -> bool:
+        return quiz.last_write_ms + QUIZ_TTL_MS <= now and quiz_id not in self._feeds
+
+    def _held(self, quiz_id: str) -> _Quiz | None:
+        """The quiz, or None; an idle quiz is dropped here."""
+        if (quiz := self._quizzes.get(quiz_id)) is not None and self._idle(
+            quiz_id, quiz, self._clock()
+        ):
+            del self._quizzes[quiz_id]
+            return None
+        return quiz
+
     def _quiz(self, quiz_id: str) -> _Quiz:
-        if (quiz := self._quizzes.get(quiz_id)) is None:
+        if (quiz := self._held(quiz_id)) is None:
             raise DomainError(ErrorCode.QUIZ_NOT_FOUND, f"no quiz {quiz_id}")
         return quiz
 
@@ -81,6 +110,9 @@ class MemoryStore:
     async def create_quiz(
         self, quiz_id: str, questions: tuple[s.Question, ...], *, window_ms: int, time_limit_ms: int
     ) -> Created:
+        now = self._clock()
+        for idle in [q for q, quiz in self._quizzes.items() if self._idle(q, quiz, now)]:
+            del self._quizzes[idle]
         if quiz_id in self._quizzes:
             raise DomainError(ErrorCode.INVALID_STATE, f"quiz {quiz_id} exists")
         ids = {q.question_id for q in questions}
@@ -94,11 +126,11 @@ class MemoryStore:
             raise DomainError(ErrorCode.INVALID_MESSAGE, msg)
         try:
             state = s.new_quiz(
-                questions, start_ms=self._clock(), window_ms=window_ms, time_limit_ms=time_limit_ms
+                questions, start_ms=now, window_ms=window_ms, time_limit_ms=time_limit_ms
             )
         except ValueError as error:
             raise DomainError(ErrorCode.INVALID_MESSAGE, str(error)) from error
-        self._quizzes[quiz_id] = _Quiz(state, state.deadline_ms)
+        self._quizzes[quiz_id] = _Quiz(state, state.deadline_ms, last_write_ms=now)
         return Created(state.start_ms, state.deadline_ms)
 
     async def join(self, quiz_id: str, user_id: str, display_name: str, conn_id: str) -> Joined:
@@ -116,6 +148,7 @@ class MemoryStore:
                 quiz.replaced.add(replaced)
             quiz.present[user_id], quiz.seen_ms[user_id] = conn_id, now
             quiz.state = state = replace(step.state, dirty=True)  # onlineCount may change
+            quiz.last_write_ms = now
             return Joined(
                 state.seq,
                 player.cursor,
@@ -135,8 +168,9 @@ class MemoryStore:
             if quiz.present.get(user_id) != conn_id:
                 return False
             del quiz.present[user_id], quiz.seen_ms[user_id]
-            if quiz.state.is_open(self._clock()):
+            if quiz.state.is_open(now := self._clock()):
                 quiz.state = replace(quiz.state, dirty=True)
+            quiz.last_write_ms = now
             return True
 
     async def serve_next(
@@ -148,14 +182,13 @@ class MemoryStore:
             if quiz.state.is_open(now):
                 quiz.fence(user_id, conn_id)
             step = s.transition(quiz.state, s.ServeNext(user_id, question_index), now)
-            quiz.state, seq = step.state, step.state.seq
+            quiz.state, seq, quiz.last_write_ms = step.state, step.state.seq, now
             match step.reply:
                 case ev.QuestionServed(question_index=i, question_id=qid, remaining_ms=left):
                     return Served(seq, i, qid, left)
                 case ev.PlayerFinished(total=total):
-                    rows = quiz.rows()
-                    rank = next(row.rank for row in rows if row.user_id == user_id)
-                    return Finished(seq, total, rank, len(rows))
+                    quiz.rows()
+                    return Finished(seq, total, quiz.index[user_id].rank, len(quiz.index))
                 case reply:
                     raise TypeError(reply)
 
@@ -180,21 +213,21 @@ class MemoryStore:
             step = s.transition(quiz.state, command, now)
             if not isinstance(result := step.reply, ev.AnswerScored):
                 raise TypeError(result)
-            quiz.state = step.state
+            quiz.state, quiz.last_write_ms = step.state, now
             if not replay and result.points > 0:
                 quiz.scored.add(user_id)
             return Answered(result, step_back, replay)
 
     async def read_seq(self, quiz_id: str) -> int | None:
-        quiz = self._quizzes.get(quiz_id)
+        quiz = self._held(quiz_id)
         return None if quiz is None else quiz.state.seq
 
     async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> port.Ranks:
         quiz = self._quiz(quiz_id)
         async with quiz.lock:
-            rows = {row.user_id: row for row in quiz.rows()}
-            asked = {user_id: rows.get(user_id) for user_id in user_ids}
-            return port.Ranks(quiz.state.seq, self._status(quiz), len(rows), asked)
+            asked = {user_id: quiz.row(user_id) for user_id in user_ids}  # none asked: no ranking
+            count = len(quiz.state.players)
+            return port.Ranks(quiz.state.seq, self._status(quiz), count, asked)
 
     async def standings_page(self, quiz_id: str, offset: int, limit: int) -> port.Page:
         if offset < 0 or not 1 <= limit <= FULL_LIST_MAX:
@@ -208,8 +241,7 @@ class MemoryStore:
     async def snapshot(self, quiz_id: str, user_id: str | None) -> port.Snapshot:
         quiz = self._quiz(quiz_id)
         async with quiz.lock:
-            rows = quiz.rows()
-            you = next((row for row in rows if row.user_id == user_id), None)
+            rows, you = quiz.rows(), quiz.row(user_id)
             status = self._status(quiz)
             shown = self._shown(rows)
             online = len(quiz.present)
@@ -229,7 +261,7 @@ class MemoryStore:
             if not quiz.state.dirty:
                 return port.Publish("clean")
             quiz.state = s.transition(quiz.state, s.Tick(), now).state
-            quiz.tick_until_ms = now + tick_ms
+            quiz.tick_until_ms, quiz.last_write_ms = now + tick_ms, now
             rows = quiz.rows()
             shown = self._shown(rows)
             ranks: list[list[str | int]] = [
@@ -259,9 +291,10 @@ class MemoryStore:
             if reason == "host" and not quiz.state.marked:  # refuse writes; announce next call
                 deadline_ms = min(now, quiz.state.deadline_ms)
                 quiz.state = replace(quiz.state, deadline_ms=deadline_ms, marked=True, dirty=False)
+                quiz.last_write_ms = now
                 return port.End("marked")
             quiz.state = s.transition(quiz.state, s.End(), now).state
-            quiz.end_seq = quiz.state.seq
+            quiz.end_seq, quiz.last_write_ms = quiz.state.seq, now
             rows = quiz.rows()
             top = [row.entry() for row in rows[: self.limits.top_n]]
             ended = m.QuizEnded(seq=quiz.end_seq, playerCount=len(rows), entries=top, you=None)
@@ -302,6 +335,7 @@ class MemoryStore:
                 del quiz.present[user_id], quiz.seen_ms[user_id]
             if stale:
                 quiz.state = replace(quiz.state, dirty=True)
+            quiz.last_write_ms = now
             return port.Renewed("renewed", len(stale))
 
     async def mark_dirty(self, quiz_id: str) -> None:
