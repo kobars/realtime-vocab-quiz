@@ -62,8 +62,10 @@ In order, stopping at the first failing step:
    branch-coverage floor (`UNIT_COVERAGE_FLOOR` in the `Makefile`), then the acceptance tests on
    the memory store.
 7. The contract drift check: the generated schema and types match the server's models.
-8. vue-tsc, then Vitest with coverage thresholds (`web/vitest.config.ts`).
-9. The client build (`pnpm -C web build`).
+8. The test citations: each test that the tracked Markdown cites as a file path, `::` and a
+   test name, outside the AI-LOG entries, exists (`scripts/check_citations.py`).
+9. vue-tsc, then Vitest with coverage thresholds (`web/vitest.config.ts`).
+10. The client build (`pnpm -C web build`).
 
 Each acceptance run writes a JUnit report (into `REPORTS`, else `reports/`), and
 `scripts/check_junit_skips.py` fails the run when a test skips that should run: none on the
