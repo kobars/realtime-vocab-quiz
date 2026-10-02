@@ -15,13 +15,11 @@ import pytest
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.typing import Origin, Subprotocol
 
-import bots
 from quiz.adapters.ws.endpoint import SUBPROTOCOL
 from quiz.contracts.codec import encode
 from quiz.contracts.messages import ClientMessage
 
-QUIZ_ID = "VOCAB-42"
-QUIZ_MINUTES = 50  # a rerun against the same stack within this time reuses the open quiz
+QUIZ_ID = "BIZ-20"  # the browser specs take the bank's other two quizzes
 RECEIVE_S = 5.0
 
 
@@ -33,11 +31,19 @@ def stack_url() -> str:
 
 @pytest.fixture(scope="session")
 def quiz_id(stack_url: str) -> str:
-    """MOCK admin: start the quiz, or check that an earlier run's is still open."""
+    """MOCK admin: start the quiz. A quiz left by an earlier run keeps its players and its window
+    for 24 h, so the suite needs a stack that has not run it yet."""
     token = os.environ.get("ADMIN_TOKEN") or pytest.fail("set ADMIN_TOKEN, as the stack has it")
-    duration_s = str(QUIZ_MINUTES * 60)
-    args = ["--url", f"{stack_url}/api", "--quiz-ids", QUIZ_ID, "--duration", duration_s]
-    asyncio.run(bots.create_quizzes(bots.parse([*args, "--ramp", "0", "--admin-token", token])))
+    reply = httpx.post(
+        f"{stack_url}/api/admin/quizzes",
+        json={"quizId": QUIZ_ID},
+        headers={"X-Admin-Token": token},
+        timeout=10,
+    )
+    if reply.status_code == httpx.codes.CONFLICT:
+        restart = "`docker compose --profile full down -v`, then `up -d --wait`"
+        pytest.fail(f"quiz {QUIZ_ID} exists from an earlier run: start the stack afresh: {restart}")
+    reply.raise_for_status()
     return QUIZ_ID
 
 
