@@ -1,6 +1,7 @@
 # AI-ASSISTED: the development Redis (profile dev), the full stack (profile full): two API nodes on
-# one Redis behind nginx, the only service that publishes a port; the bot swarm (profile load), the
-# demo's seed and bots (profile demo) and the tests (profile test), none needing uv or pnpm on the host.
+# one Redis behind nginx, the only service that publishes a port, each restarted after a crash
+# unless it was stopped; the bot swarm (profile load), the demo's seed and bots (profile demo) and
+# the tests (profile test), none needing uv or pnpm on the host.
 name: elsaquiz
 
 x-hardened: &hardened
@@ -22,6 +23,7 @@ x-redis-health: &redis-health
 x-api: &api
   <<: *hardened
   image: elsaquiz-api:${IMAGE_TAG:-dev}
+  restart: unless-stopped
   depends_on:
     stack-redis:
       condition: service_healthy
@@ -54,12 +56,18 @@ services:
     <<: *hardened
     image: redis:8.10-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
     user: redis # the entrypoint then runs the server as is, with no capability to drop to it
+    restart: unless-stopped
+    # When full it refuses writes rather than evict a quiz's keys (docs/spec/redis.md §5, failures).
     command:
       - redis-server
       - --appendonly
       - "yes"
       - --appendfsync
       - everysec
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - noeviction
       - --requirepass
       - ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
     environment:
@@ -84,11 +92,13 @@ services:
   web:
     <<: *hardened
     image: elsaquiz-web:${IMAGE_TAG:-dev}
+    restart: unless-stopped
 
   # The web image's nginx build, with its security-headers snippet, runs the edge config.
   nginx:
     <<: *hardened
     image: elsaquiz-web:${IMAGE_TAG:-dev}
+    restart: unless-stopped
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:

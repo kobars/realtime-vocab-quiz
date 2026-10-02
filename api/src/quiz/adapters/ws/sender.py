@@ -9,7 +9,10 @@ Above the hard limit the queue makes way for ``error UNAVAILABLE`` and close 101
 gets ``flush_s`` after a close, and the close frame ``CLOSE_S`` more of its own. A socket that
 does not take them in that time is given up: its receive loop ends, and the close frame stays
 pending (``closing``) until the transport is writable again or the peer is gone, holding its cap
-slot meanwhile (see the endpoint)."""
+slot meanwhile (see the endpoint).
+
+Each written frame reports its time from queueing to the end of its write in
+``ws_send_delay_seconds``; a frame that conflation drops reports nothing."""
 
 import asyncio
 from collections import deque
@@ -37,6 +40,7 @@ _SLOW = encode(
 class _Frame:
     data: bytes
     leaderboard: bool
+    queued_at: float  # a loop time
 
 
 class Sender:
@@ -78,7 +82,7 @@ class Sender:
         self._ready.set()
 
     def _append(self, data: bytes, *, leaderboard: bool) -> None:
-        self._queue.append(_Frame(data, leaderboard))
+        self._queue.append(_Frame(data, leaderboard, asyncio.get_running_loop().time()))
         self._queued += len(data)
 
     def close(self, code: int) -> None:
@@ -131,3 +135,4 @@ class Sender:
                 await self._ws.send_text(frame.data.decode())
             finally:
                 self._in_flight = 0
+            metrics.WS_SEND_DELAY.observe(asyncio.get_running_loop().time() - frame.queued_at)

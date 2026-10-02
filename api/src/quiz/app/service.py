@@ -128,6 +128,7 @@ class QuizService:
         self._epochs: dict[str, object] = {}
         self._outage_log = Throttle(clock, OUTAGE_LOG_INTERVAL_MS)
         self._pages: dict[PageKey, tuple[int, m.LeaderboardPage]] = {}  # (expires at ms, page)
+        self._pages_swept_ms = 0  # every page expires a tick after it is cached
         self._page_reads: dict[PageKey, asyncio.Task[m.LeaderboardPage]] = {}
         # whether this node can send the quiz's live updates, held while the join runs; the
         # composition root sets it
@@ -364,8 +365,10 @@ class QuizService:
             entries=[row.entry() for row in page.rows],
         )
         if self._page_reads.get(key) is read:
-            for stale in [k for k, (expires_ms, _) in self._pages.items() if expires_ms <= now]:
-                del self._pages[stale]
+            if now >= self._pages_swept_ms + self._tick_ms:
+                self._pages_swept_ms = now
+                for stale in [k for k, (expires_ms, _) in self._pages.items() if expires_ms <= now]:
+                    del self._pages[stale]
             self._pages[key] = (now + self._tick_ms, reply)
         return reply
 

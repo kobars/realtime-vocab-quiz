@@ -34,20 +34,26 @@ def test_redis_store_is_built_without_connecting() -> None:
     services = services_of(create_app(Settings(store="redis", redis_url="redis://unused:1/0")))
     assert isinstance(services.store, RedisStore)
     assert isinstance(services.tickets, RedisTicketStore)
-    assert len(services.startup) == 2  # load the scripts, then start the presence renewal
-    assert len(services.shutdown) == 4  # close both clients; stop the fan-out and renewal first
+    assert len(services.startup) == 3  # load the scripts, then start the renewal and lag timer
+    assert len(services.shutdown) == 5  # close both clients; stop the fan-out and timers first
+
+
+def running(loop: str) -> bool:
+    return loop in (getattr(t.get_coro(), "__qualname__", "") for t in asyncio.all_tasks())
 
 
 async def test_the_presence_renewal_runs_while_the_app_runs() -> None:
     app = create_app(Settings())
-
-    def renewing() -> bool:
-        loops = (getattr(t.get_coro(), "__qualname__", "") for t in asyncio.all_tasks())
-        return "PresenceRenewer._run" in loops
-
     async with app.router.lifespan_context(app):
-        assert renewing()
-    assert not renewing()
+        assert running("PresenceRenewer._run")
+    assert not running("PresenceRenewer._run")
+
+
+async def test_the_loop_lag_timer_runs_while_the_app_runs() -> None:
+    app = create_app(Settings())
+    async with app.router.lifespan_context(app):
+        assert running("LoopLag._run")
+    assert not running("LoopLag._run")
 
 
 async def test_hooks_run_in_order_and_shutdown_runs_after_a_failed_start() -> None:
