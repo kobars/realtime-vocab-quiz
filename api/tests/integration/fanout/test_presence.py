@@ -87,6 +87,18 @@ async def test_two_nodes_scan_the_presence_hash_once_per_sweep_window(
     assert await calls(redis_client, "hgetall") == before + 2
 
 
+async def test_a_sweep_token_without_an_expiry_gets_the_window_back(
+    redis_store: RedisStore, redis_client: Redis, redis_prefix: str
+) -> None:
+    quiz_id = f"T-{uuid.uuid4().hex[:12].upper()}"
+    create = redis_store.create_quiz
+    await create(quiz_id, (Question("q0", 1),), window_ms=60_000, time_limit_ms=20_000)
+    keys = quiz_keys(quiz_id, redis_prefix)
+    await redis_client.set(keys.sweep, 1)  # no expiry: without a cut back no renew sweeps again
+    await redis_store.renew_presence(quiz_id, GRACE_MS + RENEW_MS, 1_000, [])
+    assert 0 < await redis_client.pttl(keys.sweep) <= 1_000
+
+
 async def test_a_failed_renew_is_logged_and_the_next_one_still_runs(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

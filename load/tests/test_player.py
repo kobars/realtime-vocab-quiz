@@ -170,6 +170,20 @@ def test_a_frame_held_for_a_resync_times_the_board_when_the_snapshot_applies_it(
     assert p.last_seq == 6
 
 
+def test_a_rebase_frame_waits_while_the_resync_of_a_gap_is_due() -> None:
+    p = player()
+    p.user_id = "u1"
+    snapshot(p, 3, 0)
+    p.board.accepted(100, 1.0)
+    frame(p, 5, 1.1)  # a gap: its resync is due within 250 ms
+    frame(p, 7, 1.2, rebase=True, score=100)  # the web client holds it too
+    assert (p.last_seq, p.rec.board_ms) == (3, [])
+    p.due(1.4)
+    snapshot(p, 6, 2.0)
+    assert p.last_seq == 7
+    assert p.rec.board_ms == [pytest.approx(1000)]
+
+
 def test_a_rejoin_keeps_the_resync_limit_and_a_refused_resync_is_retried() -> None:
     p = player()
     joined(p, 0)

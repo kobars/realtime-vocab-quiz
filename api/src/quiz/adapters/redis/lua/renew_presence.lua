@@ -26,8 +26,11 @@ if redis.call('SET', KEYS[K.sweep], 1, 'NX', 'PX', sweep_ms) then
       removed = removed + 1
     end
   end
-elseif redis.call('PTTL', KEYS[K.sweep]) > sweep_ms then  -- expiry is wall-clock: a step back
-  redis.call('PEXPIRE', KEYS[K.sweep], sweep_ms)
+else
+  local ttl = redis.call('PTTL', KEYS[K.sweep])
+  if ttl == -1 or ttl > sweep_ms then  -- expiry is wall-clock: a clock step back stretches it
+    redis.call('PEXPIRE', KEYS[K.sweep], sweep_ms)
+  end
 end
 if removed > 0 then
   set_dirty(now)  -- the next frame carries the lower onlineCount

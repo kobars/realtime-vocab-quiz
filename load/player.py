@@ -4,11 +4,11 @@
 Times are monotonic seconds; reported latencies are milliseconds. The bot follows the web
 client: full-jitter backoff (none after close 1000, 1008 or 4001; 5 s more after 1013), one
 ``resync`` after each ``joined``, after a ``seq`` gap and after a ``pong`` ahead of its ``seq``
-(at most one per second; a frame after a gap and every frame during a resync wait for the
-``snapshot``, and only an applied frame settles a leaderboard wait), a refused request sent again
-after 1 s (``RATE_LIMITED``) or the backoff (``UNAVAILABLE``), and an open answer resent with
-the same ``submissionId``, also after a reconnect. A sample slower than the timeout counts as
-timed out, wherever it is taken.
+(at most one per second; every frame from a gap, or while a resync is due or in flight, waits
+for the ``snapshot``, and only an applied frame settles a leaderboard wait), a refused request
+sent again after 1 s (``RATE_LIMITED``) or the backoff (``UNAVAILABLE``), and an open answer
+resent with the same ``submissionId``, also after a reconnect. A sample slower than the timeout
+counts as timed out, wherever it is taken.
 """
 
 import math
@@ -158,9 +158,9 @@ class Player:
     def on_seq(self, seq: int, rebase: bool, score: int | None, now: float) -> None:  # noqa: FBT001
         """Apply a leaderboard frame in ``seq`` order, as the web client's ``SeqTracker`` does:
         only an applied frame shows the own ``score``; one before the snapshot, after a gap or
-        during a resync waits in ``buffered``."""
+        while a resync is due or in flight waits in ``buffered``."""
         last = self.last_seq
-        if last is not None and not self.resyncing:
+        if last is not None and not self.resyncing and self.resync_at is None:
             if seq == last:
                 return
             if seq == last + 1 or (rebase and seq > last):
