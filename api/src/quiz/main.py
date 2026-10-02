@@ -25,6 +25,7 @@ from quiz.adapters.ws.endpoint import Gateway
 from quiz.adapters.ws.limits import AddressRateLimiter
 from quiz.app.service import QuizService
 from quiz.config import Settings
+from quiz.fanout.presence import PresenceRenewer
 from quiz.fanout.tick import Ticker
 from quiz.obs.logs import configure_logging
 from quiz.ports.clock import Clock
@@ -149,6 +150,9 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
     ticker = Ticker(services.store, gateway.registry, services.service, services.settings.node_id)
     gateway.registry.watcher = ticker
     services.shutdown.append(ticker.stop)  # stop hooks run in reverse: before the store closes
+    renewer = PresenceRenewer(services.store, gateway.registry, services.settings.grace_ms)
+    services.startup.append(renewer.start)
+    services.shutdown.append(renewer.stop)
     s, ttl_ms = services.settings, TICKET_TTL_S * 1000
     token = s.admin_token.get_secret_value() if s.admin_mock and s.admin_token else None
     burst = 2 * s.per_ip_conn_cap  # a session and a ticket for each socket one address may hold

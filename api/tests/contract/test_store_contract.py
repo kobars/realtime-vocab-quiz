@@ -11,7 +11,7 @@ from quiz.contracts.messages import FULL_LIST_MAX, TOP_N
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.domain.session import Question
 from quiz.domain.standings import REACHED_BITS
-from quiz.ports.store import End, Finished, Publish, Row, Served, Store
+from quiz.ports.store import End, Finished, Publish, Renewed, Row, Served, Store
 
 type Advance = Callable[[int], Awaitable[None]]
 type QuizStep = Callable[[str], Awaitable[None]]
@@ -44,6 +44,7 @@ async def answer(  # noqa: PLR0913, PLR0917
 async def test_unknown_quiz_is_not_found(store: Store, quiz_id: str) -> None:
     assert await refused(store.join(quiz_id, "a", "A", "c-a")) == ErrorCode.QUIZ_NOT_FOUND
     assert await refused(store.publish_if_dirty(quiz_id, "n1")) == ErrorCode.QUIZ_NOT_FOUND
+    assert await refused(store.renew_presence(quiz_id, 1, [])) == ErrorCode.QUIZ_NOT_FOUND
 
 
 @pytest.mark.parametrize(
@@ -408,3 +409,30 @@ async def test_leave_sets_dirty_only_while_open(
     assert await store.leave(quiz_id, "b", "c-b")  # after the mark: the seat is still freed
     assert await store.end_quiz(quiz_id, "host") == End("ended", 3)
     assert (await store.snapshot(quiz_id, None)).online_count == 0
+
+
+async def test_renew_presence_drops_only_entries_that_no_node_renews(
+    store: Store, advance: Advance, quiz_id: str
+) -> None:
+    await started(store, quiz_id, "a", "b")
+    await store.publish_if_dirty(quiz_id, "n1")
+    await advance(250)
+    mine = [("a", "c-a"), ("b", "c-gone")]  # c-b holds b's entry, and nobody renews it
+    assert await store.renew_presence(quiz_id, 1_000, mine) == Renewed("renewed", 0)
+    assert (await store.publish_if_dirty(quiz_id, "n1")).status == "clean"
+    await advance(600)
+    assert await store.renew_presence(quiz_id, 500, mine) == Renewed("renewed", 1)
+    assert (await store.snapshot(quiz_id, None)).online_count == 1  # a was renewed first
+    assert await store.publish_if_dirty(quiz_id, "n1") == Publish("published", 2)
+    assert await store.leave(quiz_id, "a", "c-a")
+    assert not await store.leave(quiz_id, "b", "c-b")
+
+
+async def test_renew_presence_writes_nothing_once_ended(
+    store: Store, advance: Advance, pass_deadline: QuizStep, quiz_id: str
+) -> None:
+    await started(store, quiz_id, "a")
+    await advance(10)
+    await pass_deadline(quiz_id)
+    assert await store.renew_presence(quiz_id, 1, []) == Renewed("ended")
+    assert (await store.snapshot(quiz_id, None)).online_count == 1

@@ -29,6 +29,7 @@ class _Quiz:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     names: dict[str, str] = field(default_factory=dict)
     present: dict[str, str] = field(default_factory=dict)  # user id -> connection id
+    seen_ms: dict[str, int] = field(default_factory=dict)  # user id -> last join or renew
     replaced: set[str] = field(default_factory=set)  # connection ids a newer join took over
     tick_until_ms: int = 0  # the tick token, limits.tick_ms long
     end_seq: int | None = None  # the seq of quiz_ended, once announced
@@ -113,7 +114,7 @@ class MemoryStore:
                 replaced = None  # a repeat join on the same connection replaces nothing
             if replaced is not None:
                 quiz.replaced.add(replaced)
-            quiz.present[user_id] = conn_id
+            quiz.present[user_id], quiz.seen_ms[user_id] = conn_id, now
             quiz.state = state = replace(step.state, dirty=True)  # onlineCount may change
             return Joined(
                 state.seq,
@@ -133,7 +134,7 @@ class MemoryStore:
         async with quiz.lock:
             if quiz.present.get(user_id) != conn_id:
                 return False
-            del quiz.present[user_id]
+            del quiz.present[user_id], quiz.seen_ms[user_id]
             if quiz.state.is_open(self._clock()):
                 quiz.state = replace(quiz.state, dirty=True)
             return True
@@ -288,7 +289,20 @@ class MemoryStore:
     async def renew_presence(
         self, quiz_id: str, stale_ms: int, pairs: Sequence[tuple[str, str]]
     ) -> port.Renewed:
-        raise NotImplementedError
+        quiz = self._quiz(quiz_id)
+        async with quiz.lock:
+            now = self._clock()
+            if not quiz.state.is_open(now):
+                return port.Renewed("ended")
+            for user_id, conn_id in pairs:
+                if quiz.present.get(user_id) == conn_id:
+                    quiz.seen_ms[user_id] = now
+            stale = [user for user, seen in quiz.seen_ms.items() if seen < now - stale_ms]
+            for user_id in stale:
+                del quiz.present[user_id], quiz.seen_ms[user_id]
+            if stale:
+                quiz.state = replace(quiz.state, dirty=True)
+            return port.Renewed("renewed", len(stale))
 
     async def mark_dirty(self, quiz_id: str) -> None:
         raise NotImplementedError
