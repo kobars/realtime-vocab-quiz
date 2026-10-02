@@ -19,6 +19,8 @@ dist/
 coverage/
 htmlcov/
 coverage.xml
+diff-cover.md
+reports/
 
 # Local environment and work trees
 .env
