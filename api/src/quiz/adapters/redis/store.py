@@ -1,4 +1,4 @@
-# AI-ASSISTED: the Redis store: one Lua script per port method; the feed is the events channel.
+# AI-ASSISTED: the Redis store: one Lua script per port method; the feed is events plus control.
 """The store port on Redis. Scripts read the Redis clock; Python passes no time or points.
 
 The client must decode responses (``decode_responses=True``). A redis-py connection or
@@ -196,15 +196,16 @@ class RedisStore:
 
     @asynccontextmanager
     async def subscribe(self, quiz_id: str) -> AsyncIterator[AsyncIterator[str]]:
-        """The quiz's ``events`` channel, entered once Redis confirmed the subscription."""
-        pubsub = self._client.pubsub()
+        """The quiz's ``events`` and ``control`` channels, entered once Redis confirmed both."""
+        keys, pubsub = quiz_keys(quiz_id, self._prefix), self._client.pubsub()
         try:
             async with aclosing(_messages(pubsub)) as messages:
                 with _reachable():
-                    await pubsub.subscribe(quiz_keys(quiz_id, self._prefix).events)
-                    if await pubsub.get_message(timeout=SUBSCRIBE_TIMEOUT_S) is None:
-                        msg = "Redis did not confirm the subscription"
-                        raise ConnectionError(msg)
+                    await pubsub.subscribe(keys.events, keys.control)
+                    for _ in range(2):  # one confirmation per channel
+                        if await pubsub.get_message(timeout=SUBSCRIBE_TIMEOUT_S) is None:
+                            msg = "Redis did not confirm the subscription"
+                            raise ConnectionError(msg)
                 yield messages
         finally:
             await pubsub.aclose()  # type: ignore[no-untyped-call]

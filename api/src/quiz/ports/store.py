@@ -199,7 +199,9 @@ class Store(Protocol):
 
 class Feed(Protocol):
     def subscribe(self, quiz_id: str) -> AbstractAsyncContextManager[AsyncIterator[str]]:
-        """The quiz's broadcasts as published, ``{"frame": …, "ranks": [[uid, rank, score], …]}``.
+        """The quiz's broadcasts as published, ``{"frame": …, "ranks": [[uid, rank, score], …]}``,
+        and, from a store shared by several nodes, its control messages
+        ``{"type": "session_replaced", "uid": …, "connId": …}``.
 
         Subscribed once entered: every later broadcast arrives, in ``seq`` order. The quiz need
         not exist yet: its broadcasts arrive once it is created. Read the iterator in the task

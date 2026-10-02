@@ -43,6 +43,9 @@ class Sink:
     def send_to(self, _quiz_id: str, user_id: str, data: bytes) -> None:
         self.updates[user_id].append((time.monotonic(), json.loads(data)))
 
+    def replace(self, conn_id: str) -> None:
+        raise AssertionError(conn_id)  # no join here replaces a connection
+
 
 @pytest.fixture(params=["memory", "redis"])
 def store(request: pytest.FixtureRequest) -> FeedStore:

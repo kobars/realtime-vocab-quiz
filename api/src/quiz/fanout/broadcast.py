@@ -24,6 +24,8 @@ class Sockets(Protocol):  # this node's sockets, by quiz
 
     def send_to(self, quiz_id: str, user_id: str, data: bytes) -> None: ...
 
+    def replace(self, conn_id: str) -> None: ...
+
 
 class Relay:
     """The broadcasts of one quiz on this node."""
@@ -38,6 +40,9 @@ class Relay:
     async def relay(self, message: str) -> bool:
         """Queue the frame on every local socket; True once it was the last one, ``quiz_ended``."""
         parsed = json.loads(message)
+        if parsed.get("type") == "session_replaced":  # control: a join replaced that connection
+            self._sockets.replace(parsed["connId"])  # nothing when it is not on this node
+            return False
         frame, data = parsed["frame"], message[len(_HEAD) : message.rindex(_TAIL)].encode()
         if frame["type"] == "quiz_ended":
             await self._ended(frame, data)
