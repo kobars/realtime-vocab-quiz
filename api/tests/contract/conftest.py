@@ -15,6 +15,11 @@ from quiz.ports.store import Store
 
 # The longest step a test may take: a real clock sleeps through every step.
 MAX_ADVANCE_MS = 1_000
+# A real advance sleeps on the test host's clock, but the scripts read Redis TIME from a container,
+# whose clock (in a VM on some hosts) drifts and is corrected on its own: a host sleep of 200 ms has
+# read 197 ms there. Every real advance sleeps this much longer, so a span or expiry the test waits
+# out has passed on the Redis clock too, and every assertion keeps its exact bound.
+CLOCK_SKEW_MS = 20
 # Far above the 200 ms tick, so no slow step lets a held token lapse; a busy publish cuts it back.
 HOLD_TICK_MS = 10_000
 # The deadline becomes the server's now, read by the scripts' own clock.
@@ -56,7 +61,8 @@ def memory_harness() -> Harness:
 
 async def real_advance(ms: int) -> None:
     assert ms <= MAX_ADVANCE_MS, f"advance({ms}) would sleep {ms / 1000} s"
-    await asyncio.sleep(ms / 1000)
+    if ms > 0:  # a step back cannot happen on a real clock: no wait
+        await asyncio.sleep((ms + CLOCK_SKEW_MS) / 1000)
 
 
 def redis_harness(store: Store, client: Redis, prefix: str) -> Harness:

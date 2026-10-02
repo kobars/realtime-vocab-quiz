@@ -339,7 +339,8 @@ async def test_publish_lag_runs_from_the_first_change_the_frame_carries(
     published = await store.publish_if_dirty(quiz_id, "n1")
     assert published.status == "published"
     assert published.lag_ms is not None
-    assert 200 <= published.lag_ms < 1_000  # a real clock adds the steps' own time
+    # From the later change the lag would be about 100 ms; a real clock adds the steps' own time.
+    assert 200 <= published.lag_ms < 1_000
 
 
 async def test_tick_token_holds_at_most_200_ms_after_a_clock_step_back(
