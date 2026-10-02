@@ -78,7 +78,7 @@ GATE_FAILS = "- if: contains(needs.*.result, 'failure') || contains(needs.*.resu
         (
             "security.yml",
             "security-required",
-            "[secrets, dependency-review, lockfiles, python-audit, web-audit]",
+            "[secrets, dependency-review, audit-inputs, python-audit, web-audit]",
         ),
         ("containers.yml", "containers-required", "[config, images]"),
     ],
@@ -214,6 +214,35 @@ def test_container_workflow_runs_every_infra_check_on_pull_requests() -> None:
     # Image scans fail on CRITICAL and HIGH findings that have a fix, for both images.
     assert workflow.count("ignore-unfixed: true") == workflow.count("image-ref:") == 2
     assert workflow.count("severity: CRITICAL,HIGH") == 2
+
+
+def _audit_inputs() -> re.Pattern[str]:
+    """Return the pattern of the changed paths that make a pull request run the audits."""
+    lines = _section(WORKFLOWS / "security.yml", "audit-inputs", 2)
+    (pattern,) = [line.split(": ", 1)[1].strip("'") for line in lines if line.startswith("PATHS:")]
+    assert any('grep -qE "$PATHS"' in line for line in lines)
+    return re.compile(pattern)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "api/uv.lock",
+        "web/pnpm-lock.yaml",
+        "api/pyproject.toml",
+        "web/package.json",
+        ".nvmrc",
+        "Makefile",
+        ".github/workflows/security.yml",
+    ],
+)
+def test_a_pull_request_that_changes_how_the_audits_run_runs_them(path: str) -> None:
+    assert _audit_inputs().search(path)
+
+
+@pytest.mark.parametrize("path", ["README.md", "api/src/quiz/app.py", "web/Makefile.txt"])
+def test_a_pull_request_that_leaves_the_audits_alone_skips_them(path: str) -> None:
+    assert not _audit_inputs().search(path)
 
 
 def test_make_check_runs_every_pre_commit_hook_on_every_file() -> None:

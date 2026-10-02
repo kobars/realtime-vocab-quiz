@@ -43,8 +43,9 @@ the security workflow (`.github/workflows/security.yml`): a gitleaks scan of the
 history of the checked-out commit (on a pull request, the merge commit, so other branches
 never fail it), dependency review that blocks a new dependency with a high-severity advisory,
 and audits of the locked Python (`pip-audit`) and production web (`pnpm audit`) dependencies.
-On a pull request the audits run only when `api/uv.lock` or `web/pnpm-lock.yaml`
-changes; pushes to `main` and the weekly runs audit every time. Both workflows also run
+On a pull request the audits run only when a lock file or a file that sets how they run
+changes (the `audit-inputs` job lists them); pushes to `main` and the weekly runs audit every
+time. Both workflows also run
 weekly. Every action in the workflows is pinned to a commit SHA and every image to a
 digest; Dependabot updates them weekly, except the hadolint and lychee images that
 `docker run` pulls, which are updated by hand. OpenSSF Scorecard (`.github/workflows/scorecard.yml`)

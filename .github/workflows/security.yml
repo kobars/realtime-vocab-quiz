@@ -52,7 +52,8 @@ jobs:
 
   # A new advisory against an unchanged lock file is not the pull request's fault: on pull
   # requests the audits run only when a lock file changes; main and the weekly run catch the rest.
-  lockfiles:
+  # On a pull request the audits run only when a lock file or a file that sets how they run changes.
+  audit-inputs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -65,14 +66,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           FILES_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files
+          PATHS: '^(api/uv\.lock|api/pyproject\.toml|web/pnpm-lock\.yaml|web/package\.json|\.nvmrc|Makefile|\.github/workflows/security\.yml)$'
         run: |
           files=$(gh api --paginate "$FILES_URL" --jq '.[].filename')
-          if grep -qxE 'api/uv\.lock|web/pnpm-lock\.yaml' <<<"$files"; then changed=true; else changed=false; fi
+          if grep -qE "$PATHS" <<<"$files"; then changed=true; else changed=false; fi
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
   python-audit:
-    needs: lockfiles
-    if: ${{ !failure() && !cancelled() && (github.event_name != 'pull_request' || needs.lockfiles.outputs.changed == 'true') }}
+    needs: audit-inputs
+    if: ${{ !failure() && !cancelled() && (github.event_name != 'pull_request' || needs.audit-inputs.outputs.changed == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -85,8 +87,8 @@ jobs:
       - run: make audit-python
 
   web-audit:
-    needs: lockfiles
-    if: ${{ !failure() && !cancelled() && (github.event_name != 'pull_request' || needs.lockfiles.outputs.changed == 'true') }}
+    needs: audit-inputs
+    if: ${{ !failure() && !cancelled() && (github.event_name != 'pull_request' || needs.audit-inputs.outputs.changed == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -106,7 +108,7 @@ jobs:
   # The ruleset requires this job only; a job joins the gate by being listed in needs.
   security-required:
     if: always()
-    needs: [secrets, dependency-review, lockfiles, python-audit, web-audit]
+    needs: [secrets, dependency-review, audit-inputs, python-audit, web-audit]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
