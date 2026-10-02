@@ -19,7 +19,9 @@
 **/.DS_Store
 api/tests
 docs
-load
+load/bank
+load/results
+load/tests
 web/e2e
 **/test-results
 **/playwright-report
