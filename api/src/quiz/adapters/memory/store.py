@@ -353,6 +353,3 @@ class MemoryStore:
                 quiz.state = replace(quiz.state, dirty=True)
             quiz.last_write_ms = now
             return port.Renewed("renewed", len(stale))
-
-    async def mark_dirty(self, quiz_id: str) -> None:
-        raise NotImplementedError
