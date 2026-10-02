@@ -30,3 +30,7 @@ reports/
 .DS_Store
 .idea/
 .vscode/
+
+# Playwright output
+test-results/
+playwright-report/

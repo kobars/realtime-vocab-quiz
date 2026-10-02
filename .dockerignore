@@ -20,3 +20,6 @@
 api/tests
 docs
 load
+web/e2e
+**/test-results
+**/playwright-report
