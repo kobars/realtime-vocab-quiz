@@ -59,6 +59,24 @@ step, the same stack is two API nodes on one Redis behind nginx; you need Docker
 5. `make down` stops the stack and keeps the Redis data; `docker compose --profile full down -v`
    also deletes it.
 
+To run a second stack beside the first, for example from another clone or worktree, give it its
+own Compose project, port and network in its `.env`: `COMPOSE_PROJECT_NAME` (default `elsaquiz`)
+keeps its containers, network and volumes apart, `QUIZ_PORT` moves its nginx off 8080 (the API's
+default allowed origins follow it), and `QUIZ_SUBNET` gives its network a range that does not
+overlap the first one's (default `10.89.78.0/24`):
+
+```bash
+COMPOSE_PROJECT_NAME=elsaquiz-b
+QUIZ_PORT=8090
+QUIZ_SUBNET=10.89.80.0/24
+```
+
+The make targets and the system and browser tests of that checkout then use its stack, since they
+read `.env`. Both checkouts build the same `elsaquiz-api:dev` and `elsaquiz-web:dev` images; to
+run different code in the second, build it with `IMAGE_TAG=b make build` and add `IMAGE_TAG=b` to
+its `.env`. The development Redis of `make up` always takes `127.0.0.1:6381`, so only one
+checkout can run it at a time.
+
 ## Develop without Docker
 
 One API node with an in-memory store, and the client's dev server, which reloads the page when
