@@ -92,13 +92,13 @@ To run the development API on Redis instead: `make up`, then
 
 ## Run the tests
 
-- `make test`: the server unit, property and contract tests, and the client tests (no
-  Redis needed).
-- `make test-integration`: the tests that need Redis, then the acceptance tests on Redis. The
-  integration tests use `REDIS_URL` when it is set, else a Redis container of their own; the
-  acceptance tests always start their own (Docker).
-- `make acceptance`: the black-box acceptance tests over HTTP and the WebSocket alone;
-  `ACCEPTANCE_STORE=redis` runs them on Redis.
+The [Make targets](#make-targets) table says what each test target runs. `make test` and
+`make acceptance` on the memory store need only the [Set up](#set-up) tools; `make check` runs
+before every pull request and needs Docker (see [below](#what-make-check-runs)). The other
+layers need more:
+
+- `make test-integration`: the integration tests use `REDIS_URL` when it is set, else a Redis
+  container of their own; the acceptance tests on Redis always start their own (Docker).
 - `make ui-check`: the visual and accessibility specs (`web/e2e/visual.spec.ts`,
   `web/e2e/a11y.spec.ts`) on the production build, with no backend: `web/e2e/fixtures/` mocks the
   HTTP calls and the quiz socket and pauses the page clock. Eleven screens, from the join form to
@@ -116,9 +116,11 @@ To run the development API on Redis instead: `make up`, then
   the system tests `BIZ-20`, the browser specs `VOCAB-42` and `ACAD-10`. A quiz ID can be
   created only once on the same stack data, so an earlier run of them, or a seeded quiz you
   created by hand, makes them fail with HTTP 409 (the IDs of `make demo` and `make new-quiz`
-  never collide). Start from fresh stack data first:
+  never collide). The `make demo` stack does not suit them either: it raises the connection
+  cap that the system tests check. Start from fresh stack data first:
 
   ```bash
+  make demo-stop    # removes the demo's bots, which the next command leaves running
   docker compose --profile full down -v
   docker compose --profile full up -d --wait
   ```
@@ -135,7 +137,7 @@ To run the development API on Redis instead: `make up`, then
     other node within 10 s with its score (`load/smoke_full.py`).
   - The bot swarm (`load/bots.py`) plays quizzes and reports the answer → leaderboard latency,
     for example 10 bots for 30 seconds:
-    `uv run --project api python load/bots.py --admin-token "$ADMIN_TOKEN" --bots 10 --duration 30`.
+    `uv run --project api python load/bots.py --admin-token "$(sed -n 's/^ADMIN_TOKEN=//p' .env)" --bots 10 --duration 30`.
     Without `--admin-token` it plays quizzes that already exist. `make load` runs it as a
     container on the stack network, with its options in `LOAD_ARGS`;
     [load/README.md](load/README.md) explains them and holds the measured load runs.
@@ -143,8 +145,6 @@ To run the development API on Redis instead: `make up`, then
   memory store in a container, with no uv or pnpm on the host. It needs `.env` (step 1 of
   [Run the full stack](#run-the-full-stack), or `make demo` writes it), as every Compose command
   does.
-- `make check`: every check a change must pass (see [below](#what-make-check-runs)). Run it
-  before you open a pull request; it needs Docker.
 
 ## Make targets
 
@@ -282,8 +282,11 @@ docs/       specs, decisions, operations and the AI log
   secrets (`make demo` writes them, or step 1 of [Run the full stack](#run-the-full-stack)).
 - **The quiz has ended**: a quiz closes when its window ends, and its ID stays taken (HTTP 409)
   while its data lives (24 hours). On the stack, `make new-quiz` starts a fresh 60-minute quiz
-  under a new ID. On the development API, pass a longer window (`"windowMs": 3600000`, the
-  60-minute maximum) or restart `make dev-api` to start with empty data.
+  under a new ID. On the development API, create a quiz under a new ID that plays the same
+  seeded quiz, optionally with a longer window (`"windowMs": 3600000`, the 60-minute maximum),
+  for example `-d '{"quizId": "VOCAB-42-B", "bankQuizId": "VOCAB-42", "windowMs": 3600000}'` in
+  the curl of [Develop without Docker](#develop-without-docker), and open `/q/VOCAB-42-B`; or
+  restart `make dev-api` to start with empty data.
 
 ## Pull requests
 

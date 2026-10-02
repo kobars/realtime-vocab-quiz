@@ -14,12 +14,8 @@
 
 Each API node serves `/healthz` (liveness: the process answers), `/readyz` (readiness: 503
 when Redis is unreachable) and `/metrics` (Prometheus text format). nginx passes the first two
-on as `/api/healthz` and `/api/readyz`, and both return 200 on a healthy stack:
-
-```bash
-curl -s -w ' %{http_code}\n' http://localhost:8080/api/healthz   # {"status":"ok"} 200
-curl -s -w ' %{http_code}\n' http://localhost:8080/api/readyz    # {"status":"ready"} 200
-```
+on as `/api/healthz` and `/api/readyz`, and both return 200 on a healthy stack (step 3 of
+[Run the full stack](../CONTRIBUTING.md#run-the-full-stack) checks them with `curl`).
 
 ## Metrics
 

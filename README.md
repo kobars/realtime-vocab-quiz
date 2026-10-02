@@ -64,15 +64,16 @@ them to its own sockets. [DESIGN.md](DESIGN.md) has the full design.
 
 ## Run the tests
 
-The host tests need Python 3.14 with uv and Node 24 with pnpm: `uv sync --project api && pnpm -C web install`
-([CONTRIBUTING.md](CONTRIBUTING.md#set-up)).
+The host tests need Docker, Python 3.14 with uv and Node 24 with pnpm:
+`uv sync --project api && pnpm -C web install` ([CONTRIBUTING.md](CONTRIBUTING.md#set-up)).
 
 - `make check`: lint, types, the unit, property, contract and acceptance tests, the client tests
   and build; every change passes it.
-- `make test-integration`: the tests that need Redis (in a container of their own), then the
-  acceptance tests on Redis.
+- `make test-integration`: the tests that need Redis (in a container of their own, or at
+  `REDIS_URL` when it is set), then the acceptance tests on Redis.
 - `make test-system`: the system tests through nginx against the running stack: a score on one
-  node reaches a socket on the other.
+  node reaches a socket on the other. They need fresh stack data, not the `make demo` stack
+  ([CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests) has the steps).
 
 `make help` lists the rest; [CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests) explains each layer.
 
@@ -91,3 +92,4 @@ tells how the design was made.
 - [docs/DECISIONS.md](docs/DECISIONS.md): the architecture decision records
 - [CONTRIBUTING.md](CONTRIBUTING.md): running the stack, development, the make targets, troubleshooting
 - [docs/operations.md](docs/operations.md): ports, endpoints, configuration, metrics and deploying to a VM
+- [SECURITY.md](SECURITY.md): how to report a vulnerability
