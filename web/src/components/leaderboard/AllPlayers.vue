@@ -1,8 +1,8 @@
-<!-- AI-ASSISTED: "Show all players": get_leaderboard pages with their atSeq, read again (at most once per second, on the monotonic clock) while the standings move or no reply came in a lifted clay panel that fades in behind motion-safe (UI spec §3.6, §6.1; protocol §3, §7). -->
+<!-- AI-ASSISTED: "Show all players": get_leaderboard pages, read again (at most once per second, on the monotonic clock) while the standings move or no reply came, with a loading status until a page arrives and the shown rows kept while the next one loads, in a lifted clay panel that fades in behind motion-safe (UI spec §3.6, §6.1; protocol §3, §7). -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { PAGE_SIZE, useQuizStore } from '@/stores/quiz'
+import { PAGE_SIZE, type StandingsPage, useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 import LeaderboardRows from './LeaderboardRows.vue'
 import { PAGE_RELOAD_MS } from './limits'
@@ -17,8 +17,11 @@ let reload: ReturnType<typeof setTimeout> | null = null
 
 /** The reply for the open offset, once it has arrived. */
 const page = computed(() => (store.page?.offset === offset.value ? store.page : null))
-const rows = computed(() => page.value?.rows ?? [])
-const last = computed(() => Math.min(offset.value + PAGE_SIZE, store.playerCount))
+/** The page on screen: the open offset's, or while that one loads, the page shown before it. */
+const previous = ref<StandingsPage | null>(null)
+watch(page, (arrived) => arrived !== null && (previous.value = arrived))
+const shown = computed(() => page.value ?? previous.value)
+const last = computed(() => Math.min((shown.value?.offset ?? 0) + PAGE_SIZE, store.playerCount))
 
 function cancel(): void {
   if (reload !== null) clearTimeout(reload)
@@ -44,6 +47,8 @@ function go(at: number): void {
 function show(): void {
   open.value = true
   load(0)
+  // The stored reply for offset 0, if any, is the fallback too: `page` keeps the same object, so its watcher stays quiet.
+  previous.value = page.value
   void nextTick(() => panel.value?.focus())
 }
 
@@ -88,12 +93,23 @@ onBeforeUnmount(cancel)
     :aria-label="strings.leaderboard.showAll"
     @keydown.esc="hide"
   >
-    <p class="text-sm text-muted-foreground">
-      {{ strings.leaderboard.range(offset + 1, last, store.playerCount) }} ·
-      <span data-test="page-seq">{{ page === null ? '' : page.final ? strings.leaderboard.final : strings.leaderboard.asOf(page.atSeq) }}</span>
+    <!-- The live region stays in the panel, so the loading text is announced when it appears. -->
+    <p
+      role="status"
+      data-test="page-status"
+      :class="page === null ? 'text-sm text-muted-foreground' : 'sr-only'"
+    >
+      {{ page === null ? strings.leaderboard.loading : '' }}
+    </p>
+    <p
+      v-if="shown !== null"
+      data-test="page-range"
+      class="text-sm text-muted-foreground"
+    >
+      {{ strings.leaderboard.range(shown.offset + 1, last, store.playerCount) }}{{ shown.final ? ` · ${strings.leaderboard.final}` : '' }}
     </p>
     <LeaderboardRows
-      :entries="rows"
+      :entries="shown?.rows ?? []"
       :my-user-id="store.quiz?.userId"
       :limit="PAGE_SIZE"
       :animate="false"

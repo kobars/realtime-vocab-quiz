@@ -1,4 +1,4 @@
-// AI-ASSISTED: component tests for the finished and results screens and the podium (order, medals, the one-shot rise), driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the finished and results screens and the podium (order, medals, the one-shot rise) and an ended quiz with no players, driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -163,13 +163,24 @@ it('after the end, "Show all players" never shows a live page from before the en
   const w = render()
   await w.findAll('button').find((b) => b.text() === 'Show all players')?.trigger('click')
   await receive({ type: 'leaderboard_page', atSeq: 7, offset: 0, final: false, playerCount: 3, entries: [me(1, 410), row(2, 140), row(3, 0)] })
-  expect(w.find('[data-test="page-seq"]').text()).toBe('As of update 7')
+  expect(w.find('[data-test="page-range"]').text()).toBe('Players 1–3 of 3')
   await receive({ type: 'quiz_ended', seq: 8, playerCount: 3, entries: [row(1, 500), me(2, 410), row(3, 90)], you: { rank: 2, score: 410 } })
   await w.findAll('button').find((b) => b.text() === 'Show all players')?.trigger('click')
-  expect(w.find('[data-test="page-seq"]').text()).toBe('')
+  expect(w.find('[data-test="page-status"]').text()).toBe('Loading players…')
   expect(w.find('section[aria-label="Show all players"]').findAll('li')).toHaveLength(0)
   await receive({ type: 'leaderboard_page', atSeq: 7, offset: 0, final: false, playerCount: 3, entries: [me(1, 410), row(2, 140), row(3, 0)] })
-  expect(w.find('[data-test="page-seq"]').text()).toBe('')
+  expect(w.find('section[aria-label="Show all players"]').findAll('li')).toHaveLength(0)
   await receive({ type: 'leaderboard_page', atSeq: 8, offset: 0, final: true, playerCount: 3, entries: [row(1, 500), me(2, 410), row(3, 90)] })
-  expect(w.find('[data-test="page-seq"]').text()).toBe('Final standings')
+  expect(w.find('[data-test="page-range"]').text()).toBe('Players 1–3 of 3 · Final standings')
+})
+
+it('an ended quiz that no one played says so, with no podium, no list and no player range', async () => {
+  await join(false)
+  await receive({ type: 'quiz_ended', seq: 6, playerCount: 0, entries: [], you: null })
+  const w = render()
+  expect(w.get('[data-test="no-players"]').text()).toBe('No one played this quiz.')
+  expect(w.find('[data-rank]').exists()).toBe(false)
+  expect(w.find('ol').exists()).toBe(false)
+  expect(w.findAll('button').some((b) => b.text() === 'Show all players')).toBe(false)
+  expect(w.text()).not.toContain('Players 1–0 of 0')
 })

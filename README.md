@@ -29,7 +29,7 @@ make demo
 ```
 
 `make demo` writes `.env` with new secrets if there is none, builds the images, starts the full
-stack, starts a fresh 60-minute quiz with 20 bots playing it, and prints the quiz ID, the
+stack, starts a fresh 60-minute quiz with 20 bots that each play it once, and prints the quiz ID, the
 player URL and the command that ends the quiz. Open that URL in two browser windows and join to
 play next to the bots; `make demo-end ID=<id>` then ends the quiz as the host, and both windows
 show the final podium. `make demo BOTS=200` starts more bots, `make demo-stop` removes them,

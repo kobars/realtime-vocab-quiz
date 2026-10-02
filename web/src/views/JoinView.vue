@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link, the quiz preview and the join (with the busy retry, the blocking card and the rejoin after a reload), a link back to the quiz this tab is still in, in a clay card over the hero decoration (UI spec §3.1). -->
+<!-- AI-ASSISTED: the landing and join screen: quiz ID and name checks, the share link, the quiz preview (a miss also announced) and the join (with the busy retry, the blocking card and the rejoin after a reload), a link back to the quiz this tab is still in, in a clay card over the hero decoration (UI spec §3.1). -->
 <script setup lang="ts">
 import { LoaderCircle } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
@@ -220,9 +220,11 @@ watch(
           @blur="onIdBlur"
         />
 
+        <!-- A miss shows under the quiz ID field; here it is only announced, as the lookup may end after the focus left. -->
         <div
           aria-live="polite"
-          class="empty:hidden"
+          data-test="preview-status"
+          :class="shown?.result?.kind === 'not-found' ? 'sr-only' : 'empty:hidden'"
         >
           <p
             v-if="shown !== null && shown.result === null"
@@ -234,6 +236,9 @@ watch(
             v-else-if="shown?.result?.kind === 'found'"
             :quiz="shown.result.quiz"
           />
+          <p v-else-if="shown?.result?.kind === 'not-found'">
+            {{ strings.join.notFound }}
+          </p>
         </div>
 
         <JoinField

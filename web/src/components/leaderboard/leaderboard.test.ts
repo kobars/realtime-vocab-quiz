@@ -1,4 +1,4 @@
-// AI-ASSISTED: component tests for the leaderboard rows, the live panel and "Show all players" paging, driven by server frames through the quiz store.
+// AI-ASSISTED: component tests for the leaderboard rows, the live panel and "Show all players" paging (its loading status and the rows kept while paging), driven by server frames through the quiz store.
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -98,19 +98,22 @@ it('highlights my row, shows the counts, and pins my row from rank_update outsid
   await receive(board(4, top(50)), { type: 'rank_update', atSeq: 4, rank: 120, score: 310, playerCount: 300 })
   const pinned = w.find('[data-test="pinned"]').findAll('span').map((span) => span.text())
   expect([store.myRank, pinned]).toEqual([120, ['#120', 'Ana (you)', '310']])
+  // It stays in view at the bottom of the window below up to 50 rows.
+  expect(w.get('[data-test="pinned"]').classes()).toEqual(expect.arrayContaining(['sticky', 'bottom-0']))
   // My old row fades out (it keeps its leave class until the transition ends).
   expect(w.find('[aria-current="true"]:not(.lb-leave-active)').exists()).toBe(false)
   await receive(board(5, [me(1, 2_000), ...top(49, 2)]))
   expect(w.find('[data-test="pinned"]').exists()).toBe(false)
 })
 
-it('pages through get_leaderboard, shows the page atSeq and reloads it at most once per second while scores move', async () => {
+it('pages through get_leaderboard and reloads the open page at most once per second while scores move', async () => {
   await joinedStore()
   const w = render(LeaderboardPanel)
   await w.find('button').trigger('click')
   expect(sent()).toEqual([[0, 100]])
   await receive(page(7, 0, top(100)))
-  expect(w.find('[data-test="page-seq"]').text()).toBe('As of update 7')
+  expect(w.get('[data-test="page-range"]').text()).toBe('Players 1–100 of 300')
+  expect(w.text()).not.toContain('As of update')
   await w.findAll('button').find((b) => b.text() === 'Next')?.trigger('click')
   expect(sent().at(-1)).toEqual([100, 100])
   await receive(page(7, 100, top(100, 101)))
@@ -125,9 +128,33 @@ it('pages through get_leaderboard, shows the page atSeq and reloads it at most o
   expect(sent()).toEqual([[0, 100], [100, 100], [100, 100]])
   const moved = top(100, 101).map((e, i) => (i === 0 ? { ...e, score: 9_999 } : e))
   await receive(page(10, 100, moved))
-  expect([w.find('[data-test="page-seq"]').text(), w.find('[data-user="p101"]').text()]).toEqual(['As of update 10', expect.stringContaining('9999')])
+  expect(w.find('[data-user="p101"]').text()).toContain('9999')
   await vi.advanceTimersByTimeAsync(5_000)
   expect(sent()).toHaveLength(3)
+})
+
+it('a Loading players status shows until the first page arrives; paging keeps the shown rows until the next page arrives', async () => {
+  const w = await openAll()
+  const status = () => w.get('[data-test="page-status"]')
+  expect([status().attributes('role'), status().text()]).toEqual(['status', 'Loading players…'])
+  expect([w.find('[data-test="page-range"]').exists(), pageRanks(w)]).toEqual([false, []])
+  await receive(page(7, 0, top(100)))
+  expect([status().text(), pageRanks(w).length]).toEqual(['', 100])
+  await button(w, 'Next')?.trigger('click')
+  expect(status().text()).toBe('Loading players…')
+  expect([pageRanks(w)[0], w.get('[data-test="page-range"]').text()]).toEqual(['#1', 'Players 1–100 of 300'])
+  await receive(page(7, 100, top(100, 101)))
+  expect([status().text(), pageRanks(w)[0], w.get('[data-test="page-range"]').text()]).toEqual(['', '#101', 'Players 101–200 of 300'])
+})
+
+it('after a close and a reopen on the first page, Next still keeps the shown rows until the next page arrives', async () => {
+  const w = await openAll()
+  await receive(page(7, 0, top(100)))
+  await button(w, 'Close')?.trigger('click')
+  await button(w, 'Show all players')?.trigger('click')
+  expect(pageRanks(w).length).toBe(100)
+  await button(w, 'Next')?.trigger('click')
+  expect([pageRanks(w).length, pageRanks(w)[0], w.get('[data-test="page-range"]').text()]).toEqual([100, '#1', 'Players 1–100 of 300'])
 })
 
 it('a final page is never reloaded', async () => {
@@ -136,7 +163,7 @@ it('a final page is never reloaded', async () => {
   await w.find('button').trigger('click')
   await receive(page(9, 0, top(100), true), board(10, top(50)))
   await vi.advanceTimersByTimeAsync(3_000)
-  expect([sent(), w.find('[data-test="page-seq"]').text()]).toEqual([[[0, 100]], 'Final standings'])
+  expect([sent(), w.find('[data-test="page-range"]').text()]).toEqual([[[0, 100]], 'Players 1–100 of 300 · Final standings'])
 })
 
 it('opening the panel moves the focus into it, so Escape closes it and focuses the button again', async () => {
@@ -189,7 +216,6 @@ it('a page shows the ranks from its offset, even when an earlier page was short'
   await receive(page(7, 100, top(10, 101)))
   expect(pageRanks(w).slice(0, 2)).toEqual(['#101', '#102'])
   await button(w, 'Previous')?.trigger('click')
-  expect(pageRanks(w)).toHaveLength(0)
   await receive(page(7, 0, top(90)))
   expect([pageRanks(w).length, pageRanks(w).at(-1)]).toEqual([90, '#90'])
 })
@@ -200,7 +226,7 @@ it('a store restart (a snapshot with a lower seq) makes the open page stale', as
   await receive({ type: 'snapshot', atSeq: 3, status: 'open', playerCount: 300, onlineCount: 290, entries: top(50), you: null })
   await receive(board(4, top(50)), board(5, top(50)))
   await vi.advanceTimersByTimeAsync(1_000)
-  expect([sent(), w.find('[data-test="page-seq"]').text()]).toEqual([[[0, 100], [0, 100]], 'As of update 5000'])
+  expect([sent(), pageRanks(w).length]).toEqual([[[0, 100], [0, 100]], 100])
 })
 
 it('a page request with no reply, or a refused one, is sent again at most once per second', async () => {

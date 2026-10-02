@@ -12,6 +12,8 @@ from typing import Any
 import pytest
 from pre_commit.yaml import yaml_load
 
+import bots
+
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE: dict[str, Any] = yaml_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
 SERVICES: dict[str, Any] = COMPOSE["services"]
@@ -74,7 +76,7 @@ def test_a_fresh_clone_gets_secrets_the_stack_a_fresh_quiz_and_its_bots(tmp_path
         BOTS_UP.format(cap=10000, bots=20),
     ]
     assert "Quiz ID: VOCAB-42-TEST (open for 60 min)" in out
-    assert "20 playing VOCAB-42-TEST" in out
+    assert "20 each playing VOCAB-42-TEST once" in out
 
 
 @pytest.mark.parametrize(
@@ -137,6 +139,15 @@ def test_the_bots_are_the_bot_swarm_on_the_demo_quiz_with_an_allowed_origin() ->
     flags = dict(arg.removeprefix("--").split("=", 1) for arg in bots["command"])
     assert (flags["quiz-ids"], flags["bots"]) == ("${DEMO_QUIZ_ID:-}", "${DEMO_BOTS:-20}")
     assert flags["origin"] == "http://localhost:${QUIZ_PORT:-8080}"  # the API's default origin
+
+
+def test_each_demo_bot_plays_one_player_so_the_quiz_holds_the_bots_and_the_people() -> None:
+    """Without a cohort limit each slot starts a new player every 20-25 s for the whole hour."""
+    defaults = [re.sub(r"\$\{\w+:-([^}]*)\}", r"\1", arg) for arg in SERVICES["bots"]["command"]]
+    demo = bots.parse([*defaults, "--quiz-ids=VOCAB-42-TEST"])  # demo.sh sets the seeded quiz
+    assert (demo.bots, demo.cohorts, demo.duration) == (20, 1, 3600)
+    assert "command" not in SERVICES["load"]  # make load keeps its flags: no cohort limit
+    assert bots.parse([]).cohorts == 0
 
 
 def test_the_test_profile_runs_the_unit_and_acceptance_tests_from_a_fresh_build() -> None:
