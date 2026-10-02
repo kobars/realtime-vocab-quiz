@@ -331,7 +331,7 @@ async def test_replacing_a_socket_whose_writer_failed_does_not_raise() -> None:
     assert sender.close_code == 4001
 
 
-async def test_a_closing_socket_that_is_the_quizs_only_one_is_forgotten_on_drop() -> None:
+async def test_a_closing_socket_alone_in_its_quiz_is_forgotten_on_drop() -> None:
     registry = Registry(cast("Store", None), 10_000)
     conn, sender = Connection("c0", "u0", "VOCAB-42"), sender_of(Socket())
     sender.close(4001)  # replaced before its own join reply arrived
