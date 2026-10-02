@@ -48,11 +48,18 @@ class _Quiz:
     tick_until_ms: int = 0  # the tick token, limits.tick_ms long
     end_seq: int | None = None  # the seq of quiz_ended, once announced
     scored: set[str] = field(default_factory=set)  # who scored since the last broadcast
+    dirty_ms: int | None = None  # the time of the first change since the last broadcast
     last_write_ms: int = 0
     # The rankings of one state: every change replaces the state, so its identity keys them.
     ranked_for: s.QuizState | None = None
     ranked: list[Row] = field(default_factory=list)
     index: dict[str, Row] = field(default_factory=dict)  # user id -> its row in ranked
+
+    def changed(self, state: s.QuizState, now: int) -> None:
+        """Take a write's state; like the Redis ``dirty`` key, keep the first change's time."""
+        self.state, self.last_write_ms = state, now
+        if state.dirty and self.dirty_ms is None:
+            self.dirty_ms = now
 
     def fence(self, user_id: str, conn_id: str) -> None:
         if (held := self.present.get(user_id)) is None:
@@ -176,8 +183,7 @@ class MemoryStore:
             if replaced is not None:
                 quiz.replaced.add(replaced)
             quiz.present[user_id], quiz.seen_ms[user_id] = conn_id, now
-            quiz.state = state = replace(step.state, dirty=True)  # onlineCount may change
-            quiz.last_write_ms = now
+            quiz.changed(state := replace(step.state, dirty=True), now)  # onlineCount may change
             return Joined(
                 state.seq,
                 player.cursor,
@@ -197,9 +203,10 @@ class MemoryStore:
             if quiz.present.get(user_id) != conn_id:
                 return False
             del quiz.present[user_id], quiz.seen_ms[user_id]
-            if quiz.state.is_open(now := self._clock()):
-                quiz.state = replace(quiz.state, dirty=True)
-            quiz.last_write_ms = now
+            now = self._clock()
+            quiz.changed(
+                replace(quiz.state, dirty=True) if quiz.state.is_open(now) else quiz.state, now
+            )
             return True
 
     async def serve_next(
@@ -241,7 +248,7 @@ class MemoryStore:
             step = s.transition(quiz.state, command, now)
             if not isinstance(result := step.reply, ev.AnswerScored):
                 raise TypeError(result)
-            quiz.state, quiz.last_write_ms = step.state, now
+            quiz.changed(step.state, now)
             if not replay and result.points > 0:
                 quiz.scored.add(user_id)
             return Answered(result, step_back, replay)
@@ -288,7 +295,8 @@ class MemoryStore:
                 return port.Publish("busy", retry_ms=quiz.tick_until_ms - now)
             if not quiz.state.dirty:
                 return port.Publish("clean")
-            quiz.state = s.transition(quiz.state, s.Tick(), now).state
+            lag_ms = max(0, now - (now if quiz.dirty_ms is None else quiz.dirty_ms))
+            quiz.state, quiz.dirty_ms = s.transition(quiz.state, s.Tick(), now).state, None
             quiz.tick_until_ms, quiz.last_write_ms = now + tick_ms, now
             rows = quiz.rows()
             shown = self._shown(rows)
@@ -306,7 +314,7 @@ class MemoryStore:
                 entries=[row.entry() for row in shown],
             )
             self._publish(quiz_id, frame, ranks)
-            return port.Publish("published", quiz.state.seq)
+            return port.Publish("published", quiz.state.seq, lag_ms=lag_ms)
 
     async def end_quiz(self, quiz_id: str, reason: Literal["deadline", "host"]) -> port.End:
         quiz = self._quiz(quiz_id)
@@ -361,7 +369,5 @@ class MemoryStore:
             stale = [user for user, seen in quiz.seen_ms.items() if seen < now - stale_ms]
             for user_id in stale:
                 del quiz.present[user_id], quiz.seen_ms[user_id]
-            if stale:
-                quiz.state = replace(quiz.state, dirty=True)
-            quiz.last_write_ms = now
+            quiz.changed(replace(quiz.state, dirty=True) if stale else quiz.state, now)
             return port.Renewed("renewed", len(stale))

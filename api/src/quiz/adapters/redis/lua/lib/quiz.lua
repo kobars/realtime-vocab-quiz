@@ -9,6 +9,12 @@ local function now_ms()
   return tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 end
 
+-- Mark the standings or counts changed: dirty keeps the time of the first change since the last
+-- frame, from which publish_leaderboard measures its lag.
+local function set_dirty(now)
+  redis.call('SET', KEYS[K.dirty], now, 'NX')
+end
+
 -- Give every data key the quiz TTL, so a quiz expires as a whole (the tick token keeps its own).
 local function refresh()
   for _, i in ipairs(DATA_KEYS) do

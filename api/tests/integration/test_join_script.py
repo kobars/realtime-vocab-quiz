@@ -89,8 +89,12 @@ async def test_join_sets_dirty_without_seq_or_events(
     redis_store: RedisStore, redis_client: Redis, keys: QuizKeys, channels: PubSub, quiz_id: str
 ) -> None:
     await redis_store.join(quiz_id, "a", "Ann", "c1")
+    first = str(await redis_client.get(keys.dirty))
+    await asyncio.sleep(0.01)
     await redis_store.join(quiz_id, "b", "Bo", "c2")
-    assert await redis_client.get(keys.dirty) == "1"
+    seconds, micros = await redis_client.time()
+    assert 0 <= seconds * 1000 + micros // 1000 - int(first) < 1_000  # the first change's time
+    assert str(await redis_client.get(keys.dirty)) == first  # a later change keeps it
     assert await redis_client.get(keys.seq) == "0"
     assert await messages(channels) == []
 

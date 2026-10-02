@@ -23,7 +23,7 @@ for i = 1, #entries, 2 do
   end
 end
 if removed > 0 then
-  redis.call('SET', KEYS[K.dirty], 1)  -- the next frame carries the lower onlineCount
+  set_dirty(now)  -- the next frame carries the lower onlineCount
 end
 refresh()
 return {'ok', removed}

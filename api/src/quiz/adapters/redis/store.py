@@ -205,8 +205,10 @@ class RedisStore:
         reply = await self._run("publish_leaderboard", quiz_id, *args)
         value = reply[1] if len(reply) > 1 else None
         match reply[0]:
-            case "published" | "ended" as status:
-                return port.Publish(status, None if value is None else int(value))
+            case "published":
+                return port.Publish("published", int(reply[1]), lag_ms=int(reply[2]))
+            case "ended":
+                return port.Publish("ended", None if value is None else int(value))
             case "busy":
                 return port.Publish("busy", retry_ms=int(value or 0))
             case "clean":

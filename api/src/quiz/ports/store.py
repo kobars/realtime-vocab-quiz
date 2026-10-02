@@ -8,7 +8,7 @@ refusal carries ``end_seq``, None while no ``quiz_ended`` was published yet.
 
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from quiz.contracts.messages import FULL_LIST_MAX, TOP_N, Entry
@@ -126,6 +126,8 @@ class Publish:
     status: Literal["published", "clean", "busy", "ended"]
     seq: int | None = None  # published: the new seq; ended: the end seq, if announced
     retry_ms: int = 0  # busy: how long the tick token still holds
+    # published: ms from the first change the frame carries; a timing, not part of the result
+    lag_ms: int = field(default=0, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
