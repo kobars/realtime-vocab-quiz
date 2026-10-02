@@ -21,9 +21,6 @@ QUESTIONS = tuple(Question(f"q{i}", i % 4) for i in range(3))
 WINDOW_MS, LIMIT_MS = 600_000, 20_000
 SWEEP_MS = 100  # the presence sweep window: shorter than every wait between two renews
 SHORT_WINDOW_MS = 5_000  # far below LIMIT_MS, and far above any setup step on a real clock
-# A real advance sleeps on the test host's clock, but the scripts read Redis TIME, which runs in a
-# container and is truncated to ms: a measured span can come out a few ms short of the sleep.
-CLOCK_SKEW_MS = 20
 
 
 async def refused(call: Awaitable[object]) -> ErrorCode:
@@ -343,7 +340,7 @@ async def test_publish_lag_runs_from_the_first_change_the_frame_carries(
     assert published.status == "published"
     assert published.lag_ms is not None
     # From the later change the lag would be about 100 ms; a real clock adds the steps' own time.
-    assert 200 - CLOCK_SKEW_MS <= published.lag_ms < 1_000
+    assert 200 <= published.lag_ms < 1_000
 
 
 async def test_tick_token_holds_at_most_200_ms_after_a_clock_step_back(
