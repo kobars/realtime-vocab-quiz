@@ -28,7 +28,7 @@ updates:
     groups:
       npm:
         update-types: [minor, patch]
-    # The runtime is pinned to Node 24 (.nvmrc, engines, CI), so Node majors are not offered.
+    # The runtime is pinned to Node 24 (.nvmrc, the Dockerfiles, CI), so Node majors are not offered.
     ignore:
       - dependency-name: "@types/node"
         update-types: [version-update:semver-major]
@@ -42,7 +42,7 @@ updates:
     groups:
       docker:
         update-types: [minor, patch]
-    # The runtime is pinned to Node 24 (.nvmrc, engines, CI), so Node majors are not offered.
+    # The runtime is pinned to Node 24 (.nvmrc, the Dockerfiles, CI), so Node majors are not offered.
     ignore:
       - dependency-name: node
         update-types: [version-update:semver-major]

@@ -12,13 +12,18 @@ PR = 7
 ENTRY = {f"docs/ai-log/PR-{PR}.md": "## PR-7 — Test\n"}
 
 
-def _check(
-    base: str, capsys: pytest.CaptureFixture[str], *labels: str, author: str = "octocat"
-) -> tuple[int, str]:
-    status = check_pr.main(
-        ["--base", base, "--head", "HEAD", "--pr", str(PR), "--author", author, "--labels", *labels]
-    )
+def _check(base: str, capsys: pytest.CaptureFixture[str], *labels: str) -> tuple[int, str]:
+    status = check_pr.main(["--base", base, "--head", "HEAD", "--pr", str(PR), "--labels", *labels])
     return status, capsys.readouterr().out
+
+
+def _dependabot_commit(repo: Repo, files: dict[str, str], message: str) -> str:
+    """Commit as Dependabot does: its author, no trailer."""
+    repo.commit(files, message)
+    repo.git(
+        "commit", "-q", "--amend", "--no-edit", f"--author=dependabot[bot] <{check_pr.DEPENDABOT}>"
+    )
+    return repo.git("rev-parse", "--short", "HEAD").strip()
 
 
 @pytest.fixture
@@ -166,12 +171,24 @@ def test_the_ai_log_entry_must_exist(
 def test_a_dependabot_pr_needs_no_trailer_and_no_ai_log_entry(
     pr_repo: Repo, base: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    pr_repo.commit({"api/uv.lock": "x\n"}, "Bump uv-build in /api")
-    assert _check(base, capsys, author=check_pr.DEPENDABOT)[0] == 0
+    _dependabot_commit(pr_repo, {"api/uv.lock": "x\n"}, "Bump uv-build in /api")
+    assert _check(base, capsys) == (
+        0,
+        "PR guards passed: 0 changed lines, generated files not counted\n",
+    )
+
+
+def test_a_commit_pushed_onto_a_dependabot_pr_needs_the_trailer_and_the_entry(
+    pr_repo: Repo, base: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bump = _dependabot_commit(pr_repo, {"compose.yaml": "redis\n"}, "Bump redis")
+    follow = pr_repo.commit({"ci.yml": "redis\n"}, "Follow the Redis bump")
     status, out = _check(base, capsys)
     assert status == 1
-    assert "has no AI-Assisted: trailer" in out
-    assert "the AI-LOG entry docs/ai-log/PR-7.md is missing" in out
+    assert out.count("has no AI-Assisted: trailer") == 1
+    assert f"commit {follow[:7]}" in out
+    assert f"commit {bump} " not in out
+    assert f"the AI-LOG entry docs/ai-log/PR-{PR}.md is missing" in out
 
 
 @pytest.mark.parametrize(
@@ -189,7 +206,7 @@ def test_a_dependabot_pr_still_meets_the_other_rules(
     change: tuple[dict[str, str], str],
     problem: str,
 ) -> None:
-    pr_repo.commit(*change)
-    status, out = _check(base, capsys, author=check_pr.DEPENDABOT)
+    _dependabot_commit(pr_repo, *change)
+    status, out = _check(base, capsys)
     assert status == 1
     assert problem in out
