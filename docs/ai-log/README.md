@@ -11,9 +11,8 @@ entries. I set the rules and the fixed choices, wrote the review prompts, decide
 finding, and ran and checked the verification. Marked sections: `git grep -n AI-ASSISTED` (marker
 forms in [AGENTS.md](../../AGENTS.md)).
 
-**Tools.**
+**Reviews.**
 
-- **Who writes:** Claude Code (`claude-opus-5-5`) writes each change and its entry.
 - **Who reviews:** Claude Code `/code-review` (high) and Codex (`gpt-6-astra`, high or xhigh
   reasoning; the entry names which) review each PR. The two finding lists are combined, each
   finding is checked against the code and marked confirmed or refuted, and the verified findings

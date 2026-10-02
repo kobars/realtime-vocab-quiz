@@ -67,10 +67,12 @@ source file it wrote or changed carries an `AI-ASSISTED` marker: find them with
 request has an entry in [docs/ai-log/](docs/ai-log/README.md): the tool, the task, the
 interaction, how it was verified and the mistakes caught.
 
-- **[Tests first](docs/ai-log/README.md#how-ai-written-code-was-verified):** new behavior gets a test that fails without the change.
-- **[One gate, run twice](docs/ai-log/README.md#how-ai-written-code-was-verified):** `make check` on the laptop before every push, and again in CI.
-- **[Two independent reviewers per PR](docs/ai-log/README.md#how-ai-written-code-was-verified):** Claude Code `/code-review` and Codex; every finding is confirmed or refuted against the code.
-- **[End to end and under load](docs/ai-log/README.md#how-ai-written-code-was-verified):** system tests and browser specs on the full stack, and load runs on two nodes.
+How AI-written code was verified ([an example of each step](docs/ai-log/README.md#how-ai-written-code-was-verified)):
+
+- **Tests first:** new behavior gets a test that fails without the change.
+- **One gate, run twice:** `make check` on the laptop before every push, and again in CI.
+- **Two independent reviewers per PR:** Claude Code `/code-review` and Codex; every finding is confirmed or refuted against the code.
+- **End to end and under load:** system tests and browser specs on the full stack, and load runs on two nodes.
 
 [DESIGN.md §15](DESIGN.md#15-ai-collaboration-in-design) tells how the design was made.
 
