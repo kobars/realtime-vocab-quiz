@@ -7,6 +7,11 @@ leaderboard move live as anyone scores, across two server nodes.
 [![ci](https://github.com/kobars/realtime-vocab-quiz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kobars/realtime-vocab-quiz/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/kobars/realtime-vocab-quiz/badge)](https://scorecard.dev/viewer/?uri=github.com/kobars/realtime-vocab-quiz)
 
+**Live demo:** <https://kobar-vocab-quiz-web.fly.dev>, deployed on Fly.io
+([Deploy to Fly.io](docs/operations.md#deploy-to-flyio)). Start a quiz on its host page,
+[/host](https://kobar-vocab-quiz-web.fly.dev/host), and open the player link it shares in two
+browser windows.
+
 **Video walkthrough:** placeholder, the link is added here once the video is published.
 
 ![Two players in one quiz: each window shows its question and the same live leaderboard](docs/images/demo.png)
