@@ -105,7 +105,6 @@ jobs:
     env:
       IMAGE_TAG: ci
       STACK_URL: https://localhost
-      SSL_CERT_FILE: ${{ github.workspace }}/caddy-root.crt
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -118,14 +117,18 @@ jobs:
         run: printf 'DOMAIN=localhost\nALLOWED_ORIGINS=https://localhost\nTLS_ISSUER=internal\nADMIN_TOKEN=%s\nREDIS_PASSWORD=%s\n' "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" > .env
       - run: make prod-up
       - name: trust Caddy's local CA
-        # Caddy writes its root certificate once it has issued the first one.
+        # Caddy writes its root certificate once it has issued the first one. The tests trust it
+        # next to the system's CAs, which uv needs to download Python.
         run: |
           for _ in $(seq 30); do
-            docker compose -f compose.yaml -f compose.prod.yaml cp caddy:/data/caddy/pki/authorities/local/root.crt "$SSL_CERT_FILE" && break
+            docker compose -f compose.yaml -f compose.prod.yaml cp caddy:/data/caddy/pki/authorities/local/root.crt caddy-root.crt && break
             sleep 1
           done
-          curl --fail --silent --show-error --retry 10 --retry-all-errors --cacert "$SSL_CERT_FILE" "$STACK_URL/api/readyz"
+          curl --fail --silent --show-error --retry 10 --retry-all-errors --cacert caddy-root.crt "$STACK_URL/api/readyz"
+          cat /etc/ssl/certs/ca-certificates.crt caddy-root.crt > ca-bundle.crt
       - run: make test-system
+        env:
+          SSL_CERT_FILE: ${{ github.workspace }}/ca-bundle.crt
       - if: failure()
         run: docker compose -f compose.yaml -f compose.prod.yaml --profile full logs --no-color --timestamps > stack-logs.txt
       - if: failure()
