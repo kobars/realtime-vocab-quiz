@@ -307,6 +307,12 @@ sequenceDiagram
     R-->>N1: busy: another node holds the token
 ```
 
+*Two players on two nodes: join, answer, one tick, both leaderboards.*
+
+A player joins with a ticket, on either node. Each answer is scored once, in one Lua script that
+also marks the quiz dirty. The 200 ms tick publishes the standings over pub/sub, and every node
+relays them to its own sockets; the numbered steps below give the detail.
+
 ### Join
 
 1. The client (`protocol/identity.ts`) creates a mock session once per tab
