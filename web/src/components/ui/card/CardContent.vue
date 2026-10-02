@@ -1,3 +1,4 @@
+<!-- AI-ASSISTED: shadcn-vue card part; the padding comes from the clay Card. -->
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue"
 import { cn } from "@/lib/utils"
@@ -10,7 +11,7 @@ const props = defineProps<{
 <template>
   <div
     data-slot="card-content"
-    :class="cn('px-6', props.class)"
+    :class="cn(props.class)"
   >
     <slot />
   </div>

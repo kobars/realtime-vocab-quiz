@@ -1,3 +1,4 @@
+<!-- AI-ASSISTED: shadcn-vue badge with an optional leading icon slot; its variants are in index.ts. -->
 <script setup lang="ts">
 import type { PrimitiveProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
@@ -21,6 +22,7 @@ const delegatedProps = reactiveOmit(props, "class")
     :class="cn(badgeVariants({ variant }), props.class)"
     v-bind="delegatedProps"
   >
+    <slot name="icon" />
     <slot />
   </Primitive>
 </template>

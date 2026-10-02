@@ -1,35 +1,34 @@
-// AI-ASSISTED: shadcn-vue button variants, changed to a solid offset focus ring and 44 px default and icon sizes.
+// AI-ASSISTED: shadcn-vue button variants as clay buttons: 3 px outline, hard press shadow, a lift and press behind motion-safe, a solid offset focus ring, every size at least 44 px.
 import type { VariantProps } from "class-variance-authority"
 import { cva } from "class-variance-authority"
 
 export { default as Button } from "./Button.vue"
 
 export const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background aria-invalid:ring-destructive aria-invalid:border-destructive",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg border-clay text-base font-bold transition-[color,background-color,border-color,box-shadow,transform] duration-fast ease-spring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background aria-invalid:ring-destructive aria-invalid:border-destructive",
   {
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground hover:bg-primary/90",
+          "border-night/10 bg-gradient-primary text-primary-foreground shadow-press hover:shadow-press-hover active:shadow-press-active motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0.5",
         destructive:
-          "bg-destructive text-white hover:bg-destructive/90 dark:bg-destructive/60",
+          "border-night/10 bg-destructive text-destructive-foreground shadow-press hover:shadow-press-hover active:shadow-press-active motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0.5",
+        mint:
+          "border-night/10 bg-mint text-night shadow-press hover:shadow-press-hover active:shadow-press-active motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0.5",
         outline:
-          "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50",
+          "border-input bg-card text-primary shadow-press hover:border-primary-hover hover:bg-primary-hover hover:text-primary-foreground hover:shadow-press-hover active:shadow-press-active motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0.5",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+          "border-border bg-secondary text-secondary-foreground hover:border-input",
         ghost:
-          "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
-        link: "text-primary underline-offset-4 hover:underline",
+          "border-transparent hover:bg-accent hover:text-accent-foreground",
+        link: "border-transparent text-primary underline-offset-4 hover:underline",
       },
       size: {
-        "default": "h-11 px-4 py-2 has-[>svg]:px-3",
-        "xs": "h-6 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
-        "sm": "h-8 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5",
-        "lg": "h-12 rounded-md px-6 has-[>svg]:px-4",
+        "default": "h-11 px-6 has-[>svg]:px-5",
+        "sm": "h-11 gap-1.5 px-4 text-sm has-[>svg]:px-3",
+        "lg": "h-14 px-8 text-lg has-[>svg]:px-7",
         "icon": "size-11",
-        "icon-xs": "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",
-        "icon-sm": "size-8",
-        "icon-lg": "size-12",
+        "icon-lg": "size-14",
       },
     },
     defaultVariants: {
