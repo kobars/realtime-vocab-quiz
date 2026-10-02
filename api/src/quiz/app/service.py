@@ -16,6 +16,7 @@ from typing import Any
 from quiz.contracts import messages as m
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.obs import metrics
+from quiz.obs.logs import Throttle
 from quiz.ports.clock import Clock
 from quiz.ports.questions import QuestionBank
 from quiz.ports.store import Finished, Joined, Limits, Place, Ranks, Store
@@ -118,7 +119,7 @@ class QuizService:
         self._store, self._bank, self._clock, self._tick_ms = store, bank, clock, tick_ms
         self._shared: dict[str, Shared] = {}  # per quiz: the standings at its latest seq
         self._refills: dict[str, asyncio.Task[Shared]] = {}  # per quiz: the read in flight
-        self._outage_logged_ms: int | None = None
+        self._outage_log = Throttle(clock, OUTAGE_LOG_INTERVAL_MS)
         self._pages: dict[PageKey, tuple[int, m.LeaderboardPage]] = {}  # (expires at ms, page)
         self._page_reads: dict[PageKey, asyncio.Task[m.LeaderboardPage]] = {}
 
@@ -177,10 +178,7 @@ class QuizService:
         except Refused as error:
             return Outcome((_error(error.code, str(error), kind),))
         except ConnectionError, TimeoutError:
-            now = self._clock()
-            last = self._outage_logged_ms
-            if last is None or now - last >= OUTAGE_LOG_INTERVAL_MS:
-                self._outage_logged_ms = now
+            if self._outage_log.due():
                 log.warning("store unreachable on %s", kind, exc_info=True)
             return Outcome((_error(m.ErrorCode.UNAVAILABLE, "the store is unreachable", kind),))
         except Exception:

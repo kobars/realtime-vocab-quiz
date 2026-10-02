@@ -3,19 +3,23 @@
 quiz's broadcasts, calls ``publish_if_dirty`` every tick (after ``busy``, once the token expires)
 and sends the shifted ranks at most once a second. The first local socket starts the loop; the
 last one cancels it, which also unsubscribes. The loop ends after it relayed ``quiz_ended``.
-When the subscription or the tick fails, the loop subscribes again after a full-jitter backoff
-and sends each local player a snapshot: pub/sub does not replay what the drop lost (§5)."""
+When the subscription fails, the loop subscribes again after a full-jitter backoff and sends each
+local player a snapshot: pub/sub does not replay what the drop lost (§5). A tick that finds the
+store unreachable keeps the subscription and waits the same backoff, which grows with each
+failure in a row and starts over after a tick that went through."""
 
 import asyncio
 import logging
 import random
 from collections.abc import AsyncIterator
 
-from quiz.app.service import QuizService
+from quiz.app.service import OUTAGE_LOG_INTERVAL_MS, QuizService
 from quiz.contracts.codec import encode
 from quiz.domain.errors import DomainError, ErrorCode
 from quiz.fanout.broadcast import Relay, Sockets
 from quiz.obs import metrics
+from quiz.obs.logs import Throttle
+from quiz.ports.clock import Clock
 from quiz.ports.store import FeedStore, Publish
 
 log = logging.getLogger(__name__)
@@ -31,10 +35,12 @@ def backoff_s(attempt: int) -> float:
 
 class Ticker:
     def __init__(
-        self, store: FeedStore, sockets: Sockets, service: QuizService, node_id: str
+        self, store: FeedStore, sockets: Sockets, service: QuizService, node_id: str, clock: Clock
     ) -> None:
+        """``clock`` paces the warning of an unreachable store: one per interval for every quiz."""
         self._store, self._sockets, self._service = store, sockets, service
         self._node_id = node_id
+        self._outage_log = Throttle(clock, OUTAGE_LOG_INTERVAL_MS)
         self._tick_s = store.limits.tick_ms / 1000
         self._loops: dict[str, asyncio.Task[None]] = {}
 
@@ -124,35 +130,47 @@ class Ticker:
     async def _tick(self, quiz_id: str, relay: Relay, progress: asyncio.Event) -> int | None:
         """Tick until the quiz ended: the seq of its ``quiz_ended``, if the store gave one."""
         clock = asyncio.get_running_loop().time
-        shift_at = clock() + SHIFT_S
+        shift_at, failures = clock() + SHIFT_S, 0
         while True:
             wait_s = self._tick_s
             try:
                 with metrics.TICK_DURATION.time():
                     result = await self._publish(quiz_id)
                     progress.set()
-                    if result.status == "ended":
-                        if result.seq is not None:
-                            return result.seq
-                        end = await self._store.end_quiz(quiz_id, "deadline")
-                        if end.status == "ended":
-                            return end.seq
-                        # not_due: a host mark not announced, or whose announcement a Redis
-                        # restart lost; announce it once it is durable (redis.md §3.1)
-                        try:
-                            return await self._store.end_by_host(quiz_id)
-                        except DomainError as error:
-                            if error.code is not ErrorCode.UNAVAILABLE:
-                                raise
-                            log.warning("tick of quiz %s: the end mark is not durable yet", quiz_id)
+                    failures = 0
+                    if (
+                        result.status == "ended"
+                        and (end := await self._end(quiz_id, result)) is not None
+                    ):
+                        return end
                     if result.status == "busy":
                         wait_s = (result.retry_ms + 1) / 1000
                     if clock() >= shift_at:
                         shift_at = clock() + SHIFT_S
                         await relay.shifted()
             except ConnectionError, TimeoutError:
-                log.warning("tick of quiz %s: store unreachable", quiz_id)
+                failures += 1
+                wait_s = max(wait_s, backoff_s(failures))
+                if self._outage_log.due():
+                    log.warning("tick of quiz %s: store unreachable", quiz_id)
             await asyncio.sleep(wait_s)
+
+    async def _end(self, quiz_id: str, result: Publish) -> int | None:
+        """The seq of the quiz's ``quiz_ended``, or None while its host mark is not durable."""
+        if result.seq is not None:
+            return result.seq
+        end = await self._store.end_quiz(quiz_id, "deadline")
+        if end.status == "ended":
+            return end.seq
+        # not_due: a host mark not announced, or whose announcement a Redis restart lost;
+        # announce it once it is durable (redis.md §3.1)
+        try:
+            return await self._store.end_by_host(quiz_id)
+        except DomainError as error:
+            if error.code is not ErrorCode.UNAVAILABLE:
+                raise
+            log.warning("tick of quiz %s: the end mark is not durable yet", quiz_id)
+            return None
 
     async def _publish(self, quiz_id: str) -> Publish:
         result = await self._store.publish_if_dirty(quiz_id, self._node_id)

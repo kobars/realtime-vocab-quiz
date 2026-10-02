@@ -75,9 +75,15 @@ def last_sent(sockets: Mock) -> dict[str, Any]:
     return cast("dict[str, Any]", json.loads(sockets.send_to.call_args.args[2]))
 
 
-async def run(store: ScriptedStore, sockets: Mock, service: Mock | None = None) -> None:
+async def run(
+    store: ScriptedStore,
+    sockets: Mock,
+    service: Mock | None = None,
+    clock: Callable[[], int] = lambda: 0,
+) -> None:
     """Run quiz Q's loop on this node until it ends by itself."""
-    ticker = Ticker(cast("FeedStore", store), sockets, service or Mock(spec=QuizService), "n1")
+    service = service or Mock(spec=QuizService)
+    ticker = Ticker(cast("FeedStore", store), sockets, service, "n1", clock)
     ticker.open("Q")
     await asyncio.wait_for(ticker._loops["Q"], 1)  # noqa: SLF001 - the loop under test
 
@@ -91,13 +97,23 @@ STORE_BLIPS = pytest.mark.parametrize("blip", [ConnectionError(), TimeoutError()
 
 @STORE_BLIPS
 async def test_a_store_blip_logs_a_warning_and_the_loop_keeps_ticking(
-    sockets: Mock, caplog: pytest.LogCaptureFixture, blip: Exception
+    sockets: Mock, caplog: pytest.LogCaptureFixture, blip: Exception, backoffs: list[int]
 ) -> None:
     store = ScriptedStore(blip, Publish("clean"), Publish("ended", SEQ))
     await run(store, sockets)
-    assert store.calls == 3
+    assert (store.calls, backoffs) == (3, [1])
     assert logged(caplog, logging.WARNING) == ["tick of quiz Q: store unreachable"]
     assert logged(caplog, logging.ERROR) == []
+
+
+async def test_tick_failures_in_a_row_back_off_and_log_once_per_interval(
+    sockets: Mock, caplog: pytest.LogCaptureFixture, backoffs: list[int]
+) -> None:
+    down = ConnectionError()
+    store = ScriptedStore(down, down, down, Publish("clean"), down, Publish("ended", SEQ))
+    await run(store, sockets, clock=iter([0, 500, 1_000, 1_200]).__next__)
+    assert backoffs == [1, 2, 3, 1]  # the subscription held: each failure grows the wait
+    assert logged(caplog, logging.WARNING) == ["tick of quiz Q: store unreachable"] * 2
 
 
 async def test_a_quiz_the_store_lost_ends_the_loop_quietly(
@@ -258,7 +274,7 @@ async def test_a_frame_with_no_change_time_is_counted_but_not_timed(
     metric: Callable[..., float],
 ) -> None:
     store = ScriptedStore(Publish("published", SEQ + 1), Publish("published", SEQ + 2, lag_ms=150))
-    ticker = Ticker(cast("FeedStore", store), Mock(), Mock(spec=QuizService), "n1")
+    ticker = Ticker(cast("FeedStore", store), Mock(), Mock(spec=QuizService), "n1", lambda: 0)
     frames, lags = (
         metric("leaderboard_frames_total"),
         metric("leaderboard_publish_lag_seconds_count"),
