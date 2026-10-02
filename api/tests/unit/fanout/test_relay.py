@@ -2,7 +2,7 @@
 import asyncio
 import json
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, override
 from unittest.mock import Mock
 
 import pytest
@@ -99,6 +99,22 @@ async def test_the_end_frame_is_validated_once_for_any_number_of_players(
     assert (len(calls), sockets.send_to.call_count) == (1, 1000)
 
 
+async def test_the_final_ranks_are_read_in_chunks_of_at_most_1000_players(sockets: Mock) -> None:
+    relay, users = ending(sockets, 2500)
+    store, asked = relay._store, []  # noqa: SLF001 - count the reads of the store under test
+    ranks_of = store.ranks_of
+
+    async def counted(quiz_id: str, user_ids: Sequence[str]) -> Ranks:
+        asked.append(len(user_ids))
+        return await ranks_of(quiz_id, user_ids)
+
+    store.ranks_of = counted  # type: ignore[method-assign]
+    assert await relay.relay(quiz_ended(2500)[1])
+    assert asked == [1000, 1000, 500]
+    got = sent_to(sockets)
+    assert all(json.loads(got[user][0])["you"] for user in users[:-1])  # the last one is unranked
+
+
 def test_quiz_ended_encodes_you_last() -> None:
     """The relay splices each player's ``you`` in place of the shared frame's trailing null."""
     ended = m.QuizEnded(seq=1, playerCount=0, entries=[], you=None)
@@ -158,3 +174,55 @@ async def test_a_rank_read_older_than_a_frame_with_the_players_row_sends_nothing
     await reading
     updates = [json.loads(data) for data in sent_to(sockets)["u"]]
     assert [(u["atSeq"], u["rank"]) for u in updates] == [(3, 58)]  # none from the read at 5
+
+
+class FailingBatchStore(ChunkStore):
+    """Like ``ChunkStore``, but the second read of a round fails while ``failing`` is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failing = True
+
+    @override
+    async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> Ranks:
+        if self.failing and len(self.asked) == 1:
+            self.asked.append(len(user_ids))
+            raise TimeoutError
+        return await super().ranks_of(quiz_id, user_ids)
+
+
+async def test_a_failed_batch_leaves_every_player_to_the_next_shifted_read(sockets: Mock) -> None:
+    users = [f"p{n}" for n in range(2500)]
+    sockets.players.return_value = users
+    store = FailingBatchStore()
+    relay = Relay("Q", store, sockets, Limits())  # type: ignore[arg-type]
+    await relay.relay(board(6, 2500, [], []))
+    with pytest.raises(TimeoutError):
+        await relay.shifted()  # the first batch went out, the second failed
+    store.failing = False
+    await relay.shifted()  # the store is back: every batch is read again
+    assert store.asked == [1000, 1000, 1000, 1000, 500]
+    assert set(sent_to(sockets)) == set(users[50:])
+
+
+class FrameDuringTheRead:
+    """A rank read at seq 10 of 2,400 players, during which the frame of seq 12 (2,450) arrives."""
+
+    def __init__(self, relay: list[Relay]) -> None:
+        self.relay = relay
+
+    async def ranks_of(self, _quiz_id: str, _user_ids: Sequence[str]) -> Ranks:
+        await self.relay[0].relay(board(12, 2450, [], []))
+        return Ranks(10, "open", 2400, {"u": Place(60, 150)})
+
+
+async def test_a_rank_read_older_than_a_frame_keeps_the_frames_player_count(
+    sockets: Mock,
+) -> None:
+    holder: list[Relay] = []
+    relay = Relay("Q", FrameDuringTheRead(holder), sockets, Limits())  # type: ignore[arg-type]
+    holder.append(relay)
+    await relay.relay(board(5, 2300, [], []))
+    await relay.shifted()
+    (update,) = [json.loads(data) for data in sent_to(sockets)["u"]]
+    assert (update["atSeq"], update["playerCount"]) == (10, 2450)

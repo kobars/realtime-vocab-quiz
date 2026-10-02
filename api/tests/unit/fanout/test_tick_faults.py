@@ -188,6 +188,24 @@ async def test_an_end_published_during_the_seq_read_still_reaches_every_local_pl
     )
 
 
+class SlowEndDuringTheSeqRead(EndDuringTheSeqRead):
+    """As ``EndDuringTheSeqRead``, but the final-rank read outlasts the grace."""
+
+    @override
+    async def ranks_of(self, quiz_id: str, user_ids: Sequence[str]) -> Ranks:
+        await asyncio.sleep(0.1)
+        return await super().ranks_of(quiz_id, user_ids)
+
+
+async def test_a_held_end_frame_still_reaches_every_local_player_after_the_grace(
+    sockets: Mock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tick, "END_GRACE_S", 0.01)
+    store = SlowEndDuringTheSeqRead(Publish("ended", SEQ), messages=[ended(SEQ)])
+    await run(store, sockets)
+    assert last_sent(sockets)["type"] == "quiz_ended"
+
+
 async def test_a_malformed_broadcast_is_skipped_and_the_next_one_relayed(
     sockets: Mock, caplog: pytest.LogCaptureFixture
 ) -> None:
