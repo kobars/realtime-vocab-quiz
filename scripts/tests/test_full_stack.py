@@ -105,6 +105,12 @@ def test_a_refused_upgrade_is_not_replayed_and_a_503_takes_no_node_out() -> None
     assert _directive("server api-[12]:8000") == ["resolve max_fails=0"] * 2
 
 
+def test_a_killed_node_holds_a_request_a_quarter_second_before_the_other_node() -> None:
+    """A killed node's address sends no reset, so each connect to it waits out the timeout. A
+    connect inside the stack's network takes well under a millisecond."""
+    assert _directive("proxy_connect_timeout") == ["250ms"]
+
+
 def test_the_edge_ceilings_hold_for_the_whole_stack_behind_any_proxy() -> None:
     """Behind Caddy, $remote_addr names each client: the zones key on one constant instead, so
     they stay stack-wide ceilings, and the nodes limit each address."""

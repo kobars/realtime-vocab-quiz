@@ -398,6 +398,7 @@ def test_the_fly_edge_is_the_vm_edge_with_only_the_fly_lines_changed() -> None:
         "        server api-2:8000 resolve max_fails=0;",
         "        server web:8080 resolve;",
         "        listen 8080;",
+        "        proxy_connect_timeout 250ms;",
     ]
     assert added == [
         "    set_real_ip_from 172.16.0.0/16;",
@@ -409,6 +410,7 @@ def test_the_fly_edge_is_the_vm_edge_with_only_the_fly_lines_changed() -> None:
         "    include /etc/nginx/conf.d/default.conf;",
         "        server 127.0.0.1:8080;",
         "        listen 8081;",
+        "        proxy_connect_timeout 2s;",  # one upstream server: no other node to fail over to
         *([HSTS] * 3),  # on /, /api/ and /ws: Caddy sends it on the VM
     ]
     assert not any("real_ip" in line or "Fly-Client-IP" in line for line in vm)
