@@ -1,4 +1,6 @@
 // AI-ASSISTED: every piece of UI copy in one module, so a translation can be added later.
+const players = (n: number): string => (n === 1 ? '1 player' : `${n} players`)
+
 export const strings = {
   appName: 'Vocab Quiz',
   skipLink: 'Skip to content',
@@ -26,7 +28,7 @@ export const strings = {
       open: 'Open',
       ended: 'Ended',
       questions: (n: number) => (n === 1 ? '1 question' : `${n} questions`),
-      players: (n: number) => (n === 1 ? '1 player' : `${n} players`),
+      players,
     },
   },
   host: {
@@ -123,7 +125,7 @@ export const strings = {
   },
   leaderboard: {
     title: 'Leaderboard',
-    counts: (players: number, online: number) => `${players} players · ${online} online`,
+    counts: (count: number, online: number) => `${players(count)} · ${online} online`,
     updating: 'Updating…',
     you: '(you)',
     showAll: 'Show all players',
