@@ -455,6 +455,7 @@ The stack deploys to one Ubuntu VM. A managed platform that runs containers in a
 
 - The stack runs in one region with one Redis Machine and one volume: a host failure there stops the quiz until the Machine comes back, as on the VM. Fly snapshots the volume daily.
 - Every `make fly-deploy` restarts Redis for a few seconds; the nodes answer 503 meanwhile and the clients retry.
+- nginx sees one upstream server, the Flycast address, so unlike the VM edge it cannot retry a failed request or upgrade on the other node. Fly's proxy stops routing to a node once its `/readyz` check fails (checked every 10 s), so a node that goes down can fail requests until then, and the clients retry.
 - Any Machine in the organization can reach the API's Flycast address and name a client address; keep the deployment in an organization of its own when other apps share it.
 - About 17 USD a month in Singapore for four always-on Machines (an estimate at Fly's published rates).
 
