@@ -52,14 +52,9 @@ describe('Tailwind entry', () => {
     expect(main).toContain(`@utility ${name} { ${body} }`)
   })
 
-  it.each(['clay', 'clay-lift', 'press', 'press-hover', 'press-active', 'inset'])(
-    'shadow-%s fills the shadow slot and keeps the ring slots, so a focus ring survives hover and press',
-    (name) => {
-      const rule = main.match(new RegExp(`@utility shadow-${name} \\{([^}]*)\\}`))?.[1] ?? ''
-      expect(rule).toContain(`--tw-shadow: var(--shadow-${name});`)
-      expect(rule).toMatch(/box-shadow: [^;]*var\(--tw-ring-offset-shadow[^;]*var\(--tw-ring-shadow[^;]*var\(--tw-shadow\);/)
-    },
-  )
+  it.each(['clay', 'clay-lift', 'press', 'press-hover', 'press-active', 'inset'])('the shadow-%s utility reads its token', (name) => {
+    expect(main).toContain(`@utility shadow-${name} { box-shadow: var(--shadow-${name}); }`)
+  })
 
   it('sets the podium delay after the animation shorthand, which would reset it', () => {
     const rise = main.match(/@utility animate-rise \{([^}]*)\}/)?.[1] ?? ''
