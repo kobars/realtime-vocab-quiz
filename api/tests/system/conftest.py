@@ -23,6 +23,10 @@ QUIZ_ID = "BIZ-20"  # the browser specs take the bank's other two quizzes
 RECEIVE_S = 5.0
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "system: tests of a running full stack at STACK_URL")
+
+
 @pytest.fixture(scope="session")
 def stack_url() -> str:
     url = os.environ.get("STACK_URL") or pytest.fail("set STACK_URL, e.g. http://localhost:8080")

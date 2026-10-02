@@ -18,6 +18,8 @@ from quiz.contracts.messages import Answer, Join, Next
 if TYPE_CHECKING:
     from tests.system.conftest import Player, Session, Socket
 
+pytestmark = pytest.mark.system
+
 REPO = Path(__file__).resolve().parents[3]
 CROSS_NODE_S = 0.5  # answer accepted on one node -> leaderboard frame on the other
 NODE_TRIES = 6  # nginx alternates the nodes, but HTTP requests share its round-robin

@@ -26,7 +26,7 @@ settings.register_profile("ci", max_examples=500, deadline=None, print_blob=True
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
 
 _TESTS = Path(__file__).parent
-_FOLDER_MARKERS = frozenset({"unit", "property", "contract", "integration", "acceptance", "system"})
+_FOLDER_MARKERS = frozenset({"unit", "property", "contract", "integration", "acceptance"})
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
