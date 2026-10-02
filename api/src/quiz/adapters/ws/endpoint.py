@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 
 SUBPROTOCOL = "quiz.v1"
 UVICORN_LOGGERS = ("uvicorn.access", "uvicorn.error", "uvicorn.asgi")  # asgi: the trace level
+MISSED_HANDSHAKE = "ASGI callable returned without completing handshake."
 
 
 def _redact(arg: object) -> object:
@@ -54,6 +55,13 @@ def path_only(record: logging.LogRecord) -> bool:
     return True
 
 
+def not_after_a_denial(record: logging.LogRecord) -> bool:
+    """Drop the error that uvicorn's websockets protocol logs after every denial response: it
+    never marks the handshake done on that path. ``Gateway.endpoint`` always accepts or denies,
+    so the message never means a missed handshake here."""
+    return record.msg != MISSED_HANDSHAKE
+
+
 class Gateway:
     def __init__(
         self, settings: Settings, tickets: TicketStore, service: QuizService, store: Store
@@ -65,6 +73,7 @@ class Gateway:
         self.clock: Clock = lambda: time.monotonic_ns() // 1_000_000  # paces the token buckets
         for name in UVICORN_LOGGERS:  # adding it twice is a no-op
             logging.getLogger(name).addFilter(path_only)
+        logging.getLogger("uvicorn.error").addFilter(not_after_a_denial)
 
     async def endpoint(self, ws: WebSocket) -> None:
         settings = self._settings

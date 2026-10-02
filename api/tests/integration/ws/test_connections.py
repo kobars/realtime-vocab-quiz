@@ -1,13 +1,16 @@
-# AI-ASSISTED: slow clients, session replacement, sender edge cases, leave grace and heartbeat.
+# AI-ASSISTED: slow clients, session replacement, sender edge cases, leave grace, heartbeat and
+# the server's transport limits.
 import asyncio
 import json
+import logging
 import socket
 import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from functools import partial
-from typing import Any, cast, override
+from typing import Any, NamedTuple, cast, override
+from urllib.request import urlopen
 
 import pytest
 import uvicorn
@@ -19,7 +22,7 @@ from websockets.typing import Origin, Subprotocol
 from quiz.adapters.memory import MemoryStore
 from quiz.adapters.mock_auth import MemoryTicketStore
 from quiz.adapters.ws import endpoint
-from quiz.adapters.ws.heartbeat import server_config
+from quiz.adapters.ws.heartbeat import GRACEFUL_SHUTDOWN_S, MAX_FRAGMENTS, server_config
 from quiz.adapters.ws.limits import RateLimiter
 from quiz.adapters.ws.registry import Registry
 from quiz.adapters.ws.sender import Sender
@@ -242,8 +245,14 @@ def test_a_drop_leaves_after_the_grace_unless_the_player_comes_back() -> None:
     assert calls == [first, second]  # the second join took over: the first socket's leave is stale
 
 
+class Live(NamedTuple):  # a server running on its own thread
+    server: uvicorn.Server
+    thread: threading.Thread
+    port: int
+
+
 @contextmanager
-def served(app: FastAPI, settings: Settings) -> Iterator[int]:  # a live server's port
+def served(app: FastAPI, settings: Settings) -> Iterator[Live]:
     server = uvicorn.Server(server_config(app, settings, "127.0.0.1", 0))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -253,38 +262,144 @@ def served(app: FastAPI, settings: Settings) -> Iterator[int]:  # a live server'
             assert thread.is_alive(), "the server stopped during startup"
             assert time.monotonic() < deadline, "the server did not start within 5 s"
             time.sleep(0.01)
-        yield server.servers[0].sockets[0].getsockname()[1]
+        yield Live(server, thread, server.servers[0].sockets[0].getsockname()[1])
     finally:
         server.should_exit = True
         thread.join(5)
 
 
+def tickets_of(app: FastAPI, count: int) -> list[str | None]:  # all for one user
+    store = services_of(app).tickets
+    _, token = asyncio.run(store.create_session("Ann"))
+    return [asyncio.run(store.issue_ticket(token)) for _ in range(count)]
+
+
+def raw_upgrade(port: int, ticket: str | None, origin: str = ORIGIN) -> socket.socket:
+    """Send a WebSocket upgrade request over a plain socket; the reply is the caller's to read."""
+    sock = socket.create_connection(("127.0.0.1", port), timeout=3)
+    sock.sendall(
+        f"GET /ws?ticket={ticket} HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n"
+        f"Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
+        f"Sec-WebSocket-Protocol: quiz.v1\r\nOrigin: {origin}\r\n\r\n".encode()
+    )
+    return sock
+
+
+def drain(sock: socket.socket) -> bytes:
+    """Everything the server sends until it closes the connection."""
+    received = b""
+    with suppress(ConnectionResetError):  # a close with unread input resets the connection
+        while chunk := sock.recv(65_536):
+            received += chunk
+    sock.close()
+    return received
+
+
 def test_the_server_pings_and_drops_a_socket_that_never_pongs() -> None:
     settings = Settings(heartbeat_ms=200)
     app = create_app(settings)
-    with served(app, settings) as port:
-        tickets_ = services_of(app).tickets
-        _, token = asyncio.run(tickets_.create_session("Ann"))
-        first, second = (asyncio.run(tickets_.issue_ticket(token)) for _ in range(2))
-        silent = socket.create_connection(("127.0.0.1", port), timeout=3)
-        silent.sendall(
-            f"GET /ws?ticket={first} HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n"
-            f"Connection: Upgrade\r\n"
-            f"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
-            f"Sec-WebSocket-Protocol: quiz.v1\r\nOrigin: {ORIGIN}\r\n\r\n".encode()
-        )
-        url = f"ws://127.0.0.1:{port}/ws?ticket={second}"
-        with ws_connect(url, subprotocols=[Subprotocol("quiz.v1")], origin=Origin(ORIGIN)) as alive:
-            start, received = time.monotonic(), b""
-            while chunk := silent.recv(4096):  # the server closes it: recv returns b""
-                received += chunk
-            silent.close()
+    with served(app, settings) as live:
+        first, second = tickets_of(app, 2)
+        url = f"ws://127.0.0.1:{live.port}/ws?ticket={second}"
+        with (
+            raw_upgrade(live.port, first) as silent,
+            ws_connect(url, subprotocols=[Subprotocol("quiz.v1")], origin=Origin(ORIGIN)) as alive,
+        ):
+            start = time.monotonic()
+            received = drain(silent)  # the server closes it
             assert time.monotonic() - start < 2
             assert received.startswith(b"HTTP/1.1 101")
             assert b"\x89" in received  # a ping frame came
             time.sleep(0.6)  # three more heartbeats: the socket that answers pings stays open
             alive.send(PING)
             assert json.loads(alive.recv(timeout=2))["type"] == "pong"
+
+
+def test_an_unfinished_request_head_is_cut_at_its_size_limit_and_at_its_deadline() -> None:
+    settings = Settings(header_timeout_ms=1_000)
+    app = create_app(settings)
+    with served(app, settings) as live:
+        with urlopen(f"http://127.0.0.1:{live.port}/healthz", timeout=2) as ok:  # noqa: S310
+            assert ok.status == 200
+        head = b"GET /healthz HTTP/1.1\r\nHost: x\r\n"
+        with socket.create_connection(("127.0.0.1", live.port), timeout=2) as endless:
+            start = time.monotonic()
+            with suppress(OSError):  # the server may close before it has read everything
+                endless.sendall(head + b"".join(b"X-%d: aaaa\r\n" % i for i in range(6_000)))
+            answer = drain(endless)  # the blank line never comes
+        assert answer == b"" or answer.startswith(b"HTTP/1.1 4")
+        assert time.monotonic() - start < 0.5  # cut at the size limit, well before the deadline
+        with socket.create_connection(("127.0.0.1", live.port), timeout=3) as idle:
+            idle.sendall(head)
+            start = time.monotonic()
+            assert drain(idle) == b""
+        assert time.monotonic() - start < 2
+
+
+def frame(opcode: int, payload: bytes = b"", *, fin: bool) -> bytes:
+    """One masked client frame with a payload below 126 bytes."""
+    mask = b"\x0f\x1e\x2d\x3c"
+    masked = bytes(byte ^ mask[i % 4] for i, byte in enumerate(payload))
+    return bytes([fin << 7 | opcode, 0x80 | len(payload)]) + mask + masked
+
+
+def read_frame(sock: socket.socket) -> tuple[int, bytes]:
+    """The opcode and payload of the next unmasked server frame below 126 bytes."""
+    first, size = sock.recv(2, socket.MSG_WAITALL)
+    return first & 0x0F, sock.recv(size, socket.MSG_WAITALL) if size else b""
+
+
+def test_a_message_of_more_than_max_fragments_closes_1009() -> None:
+    settings = Settings()
+    app = create_app(settings)
+    with served(app, settings) as live, raw_upgrade(live.port, tickets_of(app, 1)[0]) as sock:
+        response = b""
+        while not response.endswith(b"\r\n\r\n"):
+            response += sock.recv(1)
+        assert response.startswith(b"HTTP/1.1 101")
+        text, cont = 0x1, 0x0
+        within = [frame(text, PING.encode(), fin=False)]
+        within += [frame(cont, fin=False)] * (MAX_FRAGMENTS - 2) + [frame(cont, fin=True)]
+        sock.sendall(b"".join(within))  # one message of MAX_FRAGMENTS fragments
+        opcode, payload = read_frame(sock)
+        assert (opcode, json.loads(payload)["type"]) == (text, "pong")
+        sock.sendall(frame(text, fin=False) + frame(cont, fin=False) * (MAX_FRAGMENTS + 1))
+        opcode, payload = read_frame(sock)
+        assert (opcode, int.from_bytes(payload[:2])) == (0x8, 1009)
+        assert drain(sock) == b""
+
+
+def test_a_refused_upgrade_logs_its_refusal_and_no_error(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO)
+    settings = Settings()
+    app = create_app(settings)
+    with served(app, settings) as live:
+        with raw_upgrade(live.port, tickets_of(app, 1)[0], "http://evil.example") as sock:
+            answer = drain(sock)
+        assert answer.startswith(b"HTTP/1.1 403")
+    refusals = [r for r in caplog.records if r.name == "quiz.adapters.ws.endpoint"]
+    assert [r.getMessage() for r in refusals] == ["ws /ws refused 403: origin not allowed"]
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+def test_a_request_whose_body_never_ends_holds_the_shutdown_only_for_the_grace() -> None:
+    settings = Settings()
+    app = create_app(settings)
+    with (
+        served(app, settings) as live,
+        socket.create_connection(("127.0.0.1", live.port), timeout=3) as stuck,
+    ):
+        stuck.sendall(
+            b"POST /sessions HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+            b"Content-Length: 100\r\n\r\n" + b'{"display'
+        )
+        time.sleep(0.2)  # the request has reached the app, which waits for the rest of the body
+        start = time.monotonic()
+        live.server.should_exit = True
+        live.thread.join(GRACEFUL_SHUTDOWN_S + 2)
+        assert not live.thread.is_alive()
+        assert time.monotonic() - start < GRACEFUL_SHUTDOWN_S + 2
 
 
 class BrokenSocket(Socket):  # the peer is gone: every write fails

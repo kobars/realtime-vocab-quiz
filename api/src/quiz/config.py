@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # At most the parser's limit, so every frame above it closes with 1009.
     max_payload_bytes: Annotated[int, Field(ge=1, le=MAX_FRAME_BYTES)] = MAX_FRAME_BYTES
     heartbeat_ms: PositiveInt = 25_000
+    # A request head (request line and headers) not complete this long after the connection opened
+    # or the request began: the connection is closed.
+    header_timeout_ms: PositiveInt = 10_000
     send_buffer_soft_bytes: PositiveInt = 64 * KIB  # above it: skip and conflate leaderboards
     send_buffer_hard_bytes: PositiveInt = 256 * KIB  # above it: error, then close 1013
     grace_ms: PositiveInt = 10_000  # after a disconnect, before the player counts as gone
