@@ -45,7 +45,7 @@ beforeEach(() => {
   clock = 0
   setActivePinia(createPinia())
   getLeaderboard = vi.fn()
-  const port = { start: vi.fn(), next: vi.fn(), answer: vi.fn(() => 's-1'), rejoin: vi.fn(), getLeaderboard, stop: vi.fn() }
+  const port = { start: vi.fn(), next: vi.fn(), answer: vi.fn(() => 's-1'), rejoin: vi.fn(), refresh: vi.fn(), getLeaderboard, stop: vi.fn() }
   configureQuizStore({ now: () => clock, createClient: (onEvent) => ((emit = onEvent), port as unknown as QuizClientPort) })
 })
 afterEach(() => {

@@ -56,7 +56,7 @@ beforeEach(() => {
   // performance.now() is the store's monotonic clock; moving the wall clock never changes it.
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
   setActivePinia(createPinia())
-  port = { start: vi.fn(), next: vi.fn(), answer: vi.fn(() => 's-1'), rejoin: vi.fn(), getLeaderboard: vi.fn(), stop: vi.fn() }
+  port = { start: vi.fn(), next: vi.fn(), answer: vi.fn(() => 's-1'), rejoin: vi.fn(), refresh: vi.fn(), getLeaderboard: vi.fn(), stop: vi.fn() }
   configureQuizStore({ now: () => performance.now(), createClient: (onEvent) => ((emit = onEvent), port as unknown as QuizClientPort) })
 })
 afterEach(() => {
