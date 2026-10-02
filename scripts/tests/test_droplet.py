@@ -126,7 +126,7 @@ def test_deploy_without_a_domain_serves_on_the_ips_sslip_io_name(tmp_path: Path)
     assert len(calls) == 6  # no domain lookup and no record
     template = (ROOT / "infra" / "deploy" / "cloud-init.yaml").read_text(encoding="utf-8")
     assert (tmp_path / "doctl.log.user-data").read_text(encoding="utf-8") == template
-    assert "https://203.0.113.7.sslip.io/" in out
+    assert "The quiz app is live at https://203.0.113.7.sslip.io/" in out
 
 
 def test_a_domain_elsewhere_gets_no_record_and_an_existing_firewall_is_kept(

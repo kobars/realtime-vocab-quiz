@@ -51,7 +51,8 @@ up() {
 # Tags the images that the stack runs now as :rollback, as a pull replaces the tag's local images.
 keep_running_images() {
   local id
-  id=$(prod_compose ps -q api-1) && [[ -n $id ]] || die "the stack is not running; start it with make prod-up"
+  id=$(prod_compose ps -q api-1)
+  [[ -n $id ]] || die "the stack is not running; start it with make prod-up"
   docker tag "$(docker inspect --format '{{.Image}}' "$id")" "$API_IMAGE:rollback"
   id=$(prod_compose ps -q web)
   docker tag "$(docker inspect --format '{{.Image}}' "$id")" "$WEB_IMAGE:rollback"
