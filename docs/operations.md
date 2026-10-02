@@ -85,9 +85,10 @@ Compose plugin, `git`, `make` and `openssl` when they are missing, clones the re
 `make prod-up`, waits up to 3 minutes for `https://DOMAIN/api/readyz` and prints the next steps.
 Without `--domain` it finds the VM's public IPv4 address from DigitalOcean's metadata service or
 a public echo service. It stops with a clear error when it is not run as root, on another OS,
-when ports 80 or 443 are in use, or when the domain does not resolve to this VM: that check runs
-before Caddy asks for a certificate, so a wrong record does not use up Let's Encrypt's rate
-limits. Running it again is safe: it keeps `.env` and its secrets, and changes `DOMAIN` only when
+when ports 80 or 443 are in use, or when the domain does not resolve to this VM in public DNS
+(asked through Google Public DNS's JSON API, else the system's resolver): that check runs before
+Caddy asks for a certificate, so a wrong record does not use up Let's Encrypt's rate limits.
+Running it again is safe: it keeps `.env` and its secrets, and changes `DOMAIN` only when
 `--domain` is given. `--ref` picks another branch or tag, `--ip` gives the address, and
 `--help` lists every option; `--dry-run` runs the checks and writes `.env` but only prints the
 commands that install, clone, start or wait.
@@ -117,22 +118,28 @@ plain `docker compose` and the other make targets act on this stack too.
 
 ### Update
 
-`make prod-update` notes the running commit, runs `git pull --ff-only` and `make prod-up` (which
-also recreates nginx and Caddy for new config), and waits for `readyz`. When the new commit does
-not get ready, it checks out the commit that ran before, starts that again and exits non-zero
-with a message that says whether the rollback is ready.
+`make prod-update` notes the running commit, fast-forwards the branch the checkout is on to its
+newest commit on GitHub, runs `make prod-up` (which also recreates nginx and Caddy for new
+config) and waits for `readyz`. `make prod-update REF=<tag or branch>` moves to that ref instead;
+an install from a tag (`--ref v1.2`) is on no branch, so its updates name the next tag. When the
+new commit does not get ready, it checks out the commit that ran before, starts that again and
+exits non-zero with a message that says whether the rollback is ready.
 
 ### Backup and restore
 
 `make prod-backup` writes `backups/quiz-<UTC time>.tar.gz` (or `FILE=<path>`): a Redis snapshot
 taken with `BGSAVE` while the stack runs, Caddy's data volume (the certificates and the ACME
 account) and `.env`. **The file holds the secrets and the TLS private keys**: it is readable by
-root only; copy it off the VM and keep it private.
+root only, even when it replaces an older file; copy it off the VM and keep it private. The
+image builds leave out `backups/` and `.env.before-restore`.
 
 `make prod-restore FILE=<backup>` restores one, for example onto a fresh install on a new VM
 (after pointing the domain at it): it stops the stack, keeps the current `.env` as
 `.env.before-restore`, puts back the backup's `.env`, Redis data and certificates, and starts
-the stack again.
+the stack again. When the backup's `DOMAIN` is an `<ip>.sslip.io` name, which points at the old
+VM, the new VM keeps its own `DOMAIN`. The current Redis data stays until the backup's snapshot
+has loaded: when it does not load, the restore puts the previous `.env` back, starts the stack on
+its old data and exits non-zero.
 
 ### Uninstall
 
