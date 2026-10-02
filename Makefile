@@ -79,6 +79,7 @@ check: export ACCEPTANCE_STORE = memory
 check: ## Run every check a change must pass
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,pre-commit hooks,uv run --project api --locked pre-commit run --all-files)
+	$(call step,test citations,uv run --project api --locked python scripts/check_citations.py)
 	$(call step,actionlint,uv run --project api --locked actionlint)
 	$(call step,zizmor,$(ZIZMOR))
 	$(call step,mypy,cd api && uv run --locked mypy)
@@ -88,7 +89,6 @@ check: ## Run every check a change must pass
 	$(call step,pytest,$(PYTEST) -m "$(UNIT_MARKERS)" --cov --cov-fail-under=$(UNIT_COVERAGE_FLOOR) $(call pytest_junit,unit))
 	$(acceptance_steps)
 	$(call step,contracts drift,uv run --project api --locked python scripts/gen_contracts.py --check)
-	$(call step,test citations,uv run --project api --locked python scripts/check_citations.py)
 	$(call step,vue-tsc,pnpm -C web exec vue-tsc --noEmit)
 	$(call step,vitest,$(VITEST) --coverage $(vitest_junit))
 	$(call step,web build,pnpm -C web build)
