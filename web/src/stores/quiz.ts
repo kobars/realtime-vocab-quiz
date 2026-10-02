@@ -71,6 +71,8 @@ const initial = () => ({
   /** The quiz ID sent in the last `join`; it stays after a join to an ended quiz, which binds no `quiz`. */
   quizId: null as string | null,
   quiz: null as QuizInfo | null,
+  /** This tab's user: the one the connect signs in as, and the one `joined` names; a join to an ended quiz has only the first. */
+  userId: null as string | null,
   question: null as CurrentQuestion | null,
   /** The answer sent for the current question and not settled yet: the choices stay locked. */
   pending: null as { questionIndex: number; choiceIndex: number; submissionId: string } | null,
@@ -186,6 +188,7 @@ export const useQuizStore = defineStore('quiz', () => {
   const loadPage = (offset: number): void => client.value?.getLeaderboard(offset, PAGE_SIZE)
 
   function handle(event: ClientEvent): void {
+    if (event.type === 'identity') return void (s.userId = event.userId)
     if (event.type !== 'status') return receive(event)
     s.closeCode = event.code
     s.connection = event.status === 'open' ? 'connecting' : event.status === 'failed' ? 'closed' : event.status
@@ -198,7 +201,7 @@ export const useQuizStore = defineStore('quiz', () => {
     }
   }
 
-  function receive(message: Exclude<ClientEvent, { type: 'status' }>): void {
+  function receive(message: Exclude<ClientEvent, { type: 'status' | 'identity' }>): void {
     if (s.busy !== null && (RETRIED_BY_REPLY[message.type] === s.busy || message.type === 'quiz_ended')) s.busy = null
     if (message.type === 'question' || message.type === 'finished') s.requested = false
     switch (message.type) {
@@ -254,7 +257,7 @@ export const useQuizStore = defineStore('quiz', () => {
         if (s.ended && !message.final) return
         // A live page read before my last answer was scored never shows my row below the header's score (protocol §3).
         const rows = message.final ? message.entries : message.entries.map((entry) =>
-          (entry.userId === s.quiz?.userId ? { ...entry, score: ownScore(message.atSeq, entry.score) } : entry))
+          (entry.userId === s.userId ? { ...entry, score: ownScore(message.atSeq, entry.score) } : entry))
         s.page = { offset: message.offset, atSeq: message.atSeq, final: message.final, rows }
         s.playerCount = message.playerCount
         return
@@ -267,6 +270,7 @@ export const useQuizStore = defineStore('quiz', () => {
   function onJoined(message: Joined): void {
     saved = lastJoin
     s.quiz = { ...message, endsAt: deps.now() + message.quizRemainingMs }
+    s.userId = message.userId
     Object.assign(s, { finished: message.finished, connection: 'resyncing' })
     if (s.ended) return
     s.myScore = message.score
@@ -327,7 +331,7 @@ export const useQuizStore = defineStore('quiz', () => {
    * when the message is built, so it can be newer than the rows; my row then shows its rank and score, like the header.
    */
   function standings(seq: number, rows: Entry[], players: number, online: number, you?: You | null, replace = false): boolean {
-    const row = rows.find((entry) => entry.userId === s.quiz?.userId)
+    const row = rows.find((entry) => entry.userId === s.userId)
     const mine = you ?? row
     // Only live `leaderboard` rows (no `you` field) can predate my last answer; a snapshot or the final standings set it.
     if (mine) Object.assign(s, { myRank: mine.rank, myScore: you === undefined ? ownScore(seq, mine.score) : mine.score })

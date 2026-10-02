@@ -89,6 +89,13 @@ it('keeps each row element across 5 updates per second, and skips FLIP when more
   expect(w.find('ol').attributes('data-flip')).toBe('false')
 })
 
+it('counts a lone player in the singular', async () => {
+  await joinedStore()
+  const w = render(LeaderboardPanel)
+  await receive({ type: 'snapshot', atSeq: 4, status: 'open', playerCount: 1, onlineCount: 1, entries: [me(1, 0)], you: { rank: 1, score: 0 } })
+  expect(w.find('[data-test="counts"]').text()).toBe('1 player · 1 online')
+})
+
 it('highlights my row, shows the counts, and pins my row from rank_update outside the top 10', async () => {
   const store = await joinedStore()
   const w = render(LeaderboardPanel)

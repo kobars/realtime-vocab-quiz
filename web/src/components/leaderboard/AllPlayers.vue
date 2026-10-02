@@ -114,7 +114,7 @@ onBeforeUnmount(cancel)
     </p>
     <LeaderboardRows
       :entries="shown?.rows ?? []"
-      :my-user-id="store.quiz?.userId"
+      :my-user-id="store.userId"
       :limit="PAGE_SIZE"
       :animate="false"
     />

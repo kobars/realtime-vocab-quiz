@@ -83,6 +83,12 @@ it('opens /ws with a fresh ticket and the quiz.v1 subprotocol, then joins', asyn
   expect(socket.sent).toEqual([{ v: 1, type: 'join', quizId: 'VOCAB-42', displayName: 'Ana' }])
 })
 
+it('names the user each connect signs in as, before its socket opens, so the UI knows it without a joined', async () => {
+  start()
+  await connected(false)
+  expect(events).toEqual([{ type: 'status', status: 'connecting', code: null }, { type: 'identity', userId: 'u1' }])
+})
+
 it('treats an open slower than 5 s, or a failed ticket request, as 1006', async () => {
   const client = start()
   client.createTicket.mockRejectedValueOnce(new Error('offline'))

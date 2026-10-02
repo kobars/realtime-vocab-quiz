@@ -17,8 +17,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
 FROM python:3.14-slim@sha256:0741d101873c12ab927e6f8653feb8862b9bd58771177acb1b885b95141f91b4 AS runtime
-# STORE=redis: a node started without STORE never keeps state of its own, and without REDIS_URL it
-# reports not ready. make dev-api runs from source on the memory store.
+# STORE=redis: a node started without STORE never keeps state of its own. It loads its scripts at
+# startup, so without a reachable Redis (REDIS_URL) it exits and its supervisor restarts it; /readyz
+# answers 503 when Redis goes away later. make dev-api runs from source on the memory store.
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

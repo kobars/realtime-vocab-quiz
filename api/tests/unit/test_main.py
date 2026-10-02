@@ -38,6 +38,18 @@ def test_redis_store_is_built_without_connecting() -> None:
     assert len(services.shutdown) == 5  # close both clients; stop the fan-out and timers first
 
 
+async def test_a_redis_node_fails_to_start_while_redis_is_unreachable() -> None:
+    # It loads its scripts at startup, so it exits and its supervisor (compose, Fly) restarts it;
+    # /readyz reports a Redis lost after a clean start.
+    settings = Settings(
+        store="redis", redis_url="redis://127.0.0.1:1/0", redis_connect_timeout_ms=500
+    )
+    app = create_app(settings)
+    with pytest.raises(redis_errors.ConnectionError):
+        async with app.router.lifespan_context(app):
+            pass
+
+
 def running(loop: str) -> bool:
     return loop in (getattr(t.get_coro(), "__qualname__", "") for t in asyncio.all_tasks())
 

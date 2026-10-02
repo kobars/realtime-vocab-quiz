@@ -16,6 +16,9 @@ Each API node serves `/healthz` (liveness: the process answers), `/readyz` (read
 when Redis is unreachable) and `/metrics` (Prometheus text format). nginx passes the first two
 on as `/api/healthz` and `/api/readyz`, and both return 200 on a healthy stack (step 3 of
 [Run the full stack](../CONTRIBUTING.md#run-the-full-stack) checks them with `curl`).
+A node needs Redis to start: it loads its Lua scripts at startup and exits when Redis is
+unreachable, and Compose (`restart: unless-stopped`) or Fly (restart policy `always`) starts it
+again until Redis answers. `/readyz` reports a Redis lost after that start.
 
 ## Metrics
 

@@ -1,4 +1,8 @@
 // AI-ASSISTED: every piece of UI copy in one module, so a translation can be added later.
+const players = (n: number): string => (n === 1 ? '1 player' : `${n} players`)
+const questions = (n: number): string => (n === 1 ? '1 question' : `${n} questions`)
+const seconds = (n: number): string => (n === 1 ? '1 second' : `${n} seconds`)
+
 export const strings = {
   appName: 'Vocab Quiz',
   skipLink: 'Skip to content',
@@ -25,8 +29,8 @@ export const strings = {
     preview: {
       open: 'Open',
       ended: 'Ended',
-      questions: (n: number) => (n === 1 ? '1 question' : `${n} questions`),
-      players: (n: number) => (n === 1 ? '1 player' : `${n} players`),
+      questions,
+      players,
     },
   },
   host: {
@@ -34,14 +38,14 @@ export const strings = {
     intro: 'Pick a question set. You get a quiz ID, a link and a QR code to share; players join on their own devices.',
     banksLabel: 'Question sets',
     loading: 'Loading question sets…',
-    questions: (n: number) => (n === 1 ? '1 question' : `${n} questions`),
+    questions,
     pick: 'Host',
     creating: 'Creating…',
     retry: 'Try again',
     off: 'This server does not offer public hosting.',
     full: 'Every public quiz slot is in use. Try again in a few minutes.',
     rateLimited: (wait: string) => `You started several quizzes in a row. Try again in ${wait}.`,
-    seconds: (n: number) => (n === 1 ? '1 second' : `${n} seconds`),
+    seconds,
     minutes: (n: number) => (n === 1 ? '1 minute' : `${n} minutes`),
     invalid: 'That question set is no longer available. Pick another one.',
     error: 'Could not reach the server. Check your connection and try again.',
@@ -75,13 +79,13 @@ export const strings = {
     score: (score: number) => `Score ${score}`,
     rank: (rank: number, players: number) => `#${rank} of ${players}`,
     announceRank: (rank: number, players: number) => `Rank ${rank} of ${players}`,
-    intro: (n: number, seconds: number) => `${n} questions, ${seconds} seconds each.`,
+    intro: (count: number, limit: number) => `${questions(count)}, ${seconds(limit)} each.`,
     quizLeft: (time: string) => `${time} left in the quiz`,
     rule: 'Correct answers score 100–150 points, more when faster; wrong or late answers score 0.',
     start: 'Start',
     continue: 'Continue',
     loading: 'Loading the question…',
-    secondsLeft: (seconds: number) => `${seconds} seconds left`,
+    secondsLeft: (left: number) => `${seconds(left)} left`,
     timeLeft: (seconds: number) => `${seconds} s left`,
     checking: 'Checking…',
     timeUp: "Time's up: an answer now scores 0.",
@@ -123,7 +127,7 @@ export const strings = {
   },
   leaderboard: {
     title: 'Leaderboard',
-    counts: (players: number, online: number) => `${players} players · ${online} online`,
+    counts: (count: number, online: number) => `${players(count)} · ${online} online`,
     updating: 'Updating…',
     you: '(you)',
     showAll: 'Show all players',

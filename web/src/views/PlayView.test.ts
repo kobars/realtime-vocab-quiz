@@ -89,6 +89,17 @@ it('the ring counts down on the monotonic clock, whatever the wall clock says; a
   expect(w.find('[data-test="time-up"] button').exists()).toBe(false)
 })
 
+it('the countdown and the intro count one second and one question in the singular', async () => {
+  useQuizStore().join('VOCAB-42', 'Ana')
+  await receive(joined({ questionCount: 1, timeLimitMs: 1_000 }), snapshot(0))
+  const w = await view()
+  expect(w.text()).toContain('1 question, 1 second each.')
+  await receive(question())
+  clock = 19_500
+  await frames(50)
+  expect(w.get('[data-test="ring"]').attributes('aria-label')).toBe('1 second left')
+})
+
 it('keys 1–4 answer once: the choices lock with Checking… while it is pending, and focus starts on the prompt', async () => {
   const w = await playing()
   expect(document.activeElement?.textContent?.trim()).toBe('bright')
