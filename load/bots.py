@@ -2,7 +2,8 @@
 """Fill quizzes with bots and measure what a player sees.
 
 Each ``--bots`` slot plays one player at a time, then the next cohort's player, until the run
-ends; ``--procs`` splits the slots over processes. ``player.py`` holds the protocol rules.
+ends or the slot has played ``--cohorts`` players; ``--procs`` splits the slots over processes.
+``player.py`` holds the protocol rules.
 """
 
 import argparse
@@ -46,6 +47,7 @@ class Options:
     origin: str
     quiz_ids: tuple[str, ...]
     bots: int
+    cohorts: int
     accuracy: float
     think_ms: int
     duration: float
@@ -168,10 +170,11 @@ async def swarm(opts: Options, proc: int = 0) -> tuple[Recorder, dict[str, float
         return 100 * (time.process_time() - cpu0) / max(time.monotonic() - t0, 1e-9)
 
     async def slot(index: int, http: httpx.AsyncClient) -> None:
-        """One bot slot: cohort after cohort until the deadline, the quiz's end or a final close."""
+        """One bot slot: cohort after cohort until the deadline, its last cohort, the quiz's end or
+        a final close."""
         await asyncio.sleep(max(0.0, start + opts.ramp * index / opts.bots - time.monotonic()))
-        cohort = 0
-        while time.monotonic() < deadline:
+        cohort = played = 0  # a play that raised does not count toward --cohorts: it tries again
+        while time.monotonic() < deadline and (opts.cohorts == 0 or played < opts.cohorts):
             quiz_id = opts.quiz_ids[index % len(opts.quiz_ids)]
             board = BoardWait(rec, opts.timeout_ms / 1000)
             name = f"bot-{index}-{cohort}"
@@ -181,6 +184,8 @@ async def swarm(opts: Options, proc: int = 0) -> tuple[Recorder, dict[str, float
             except OSError, httpx.HTTPError, ValueError, KeyError:  # ValueError: not JSON
                 rec.counts["bot_errors"] += 1
                 await asyncio.sleep(1)
+            else:
+                played += 1
             cohort += 1
             rec.counts["cohorts"] += 1
             if p.ended:
@@ -192,7 +197,10 @@ async def swarm(opts: Options, proc: int = 0) -> tuple[Recorder, dict[str, float
         slots = asyncio.gather(*(slot(i, http) for i in range(proc, opts.bots, opts.procs)))
         cpu_pct = await steady_cpu(slots)
         await slots
-    return rec, {"cpu_pct": round(cpu_pct, 1), "rss_mb": _rss_mb()}
+    # The window the slots answered in: shorter than ramp + duration when --cohorts or a quiz end
+    # stopped them first, so the message rates are not spread over idle time.
+    active_s = min(time.monotonic(), deadline) - start
+    return rec, {"cpu_pct": round(cpu_pct, 1), "rss_mb": _rss_mb(), "active_s": round(active_s, 3)}
 
 
 def worker(opts: Options, proc: int) -> tuple[Recorder, dict[str, float]]:
@@ -233,7 +241,7 @@ def run(opts: Options) -> dict[str, Any]:
         rec.merge(part)
     options = {k: v for k, v in asdict(opts).items() if k != "admin_token"}
     meta = {"started_at": started.isoformat(timespec="seconds"), "options": options}
-    wall, active = time.monotonic() - t0, opts.ramp + opts.duration
+    wall, active = time.monotonic() - t0, max(p["active_s"] for _, p in parts)
     return {"run": meta | {"wall_s": round(wall, 1)}, **summary(rec, [p for _, p in parts], active)}
 
 
@@ -245,6 +253,7 @@ def parse(argv: list[str] | None = None) -> Options:
     add("--quiz-ids", default="VOCAB-42,BIZ-20,ACAD-10", help="comma-separated quiz IDs")
     add("--quizzes", type=int, default=1, help="spread the bots over the first N quiz IDs")
     add("--bots", type=int, default=10, help="bots playing at the same time")
+    add("--cohorts", type=int, default=0, help="players each slot plays in turn; 0: no limit")
     add("--accuracy", type=float, default=0.7, help="share of correct answers, 0..1")
     add("--think-ms", type=int, default=2000, help="mean think time before each answer")
     add("--duration", type=float, default=60, help="seconds of answering after the ramp")
@@ -257,8 +266,8 @@ def parse(argv: list[str] | None = None) -> Options:
     ids = tuple(q.strip() for q in a.quiz_ids.split(",") if q.strip())
     if not 1 <= a.quizzes <= len(ids):
         cli.error(f"--quizzes must be 1..{len(ids)} (the number of --quiz-ids)")
-    if a.bots < 1 or not 1 <= a.procs <= a.bots or not 0 <= a.accuracy <= 1:
-        cli.error("need --bots >= 1, 1 <= --procs <= --bots and 0 <= --accuracy <= 1")
+    if a.bots < 1 or not 1 <= a.procs <= a.bots or not 0 <= a.accuracy <= 1 or a.cohorts < 0:
+        cli.error("need --bots >= 1, 1 <= --procs <= --bots, 0 <= --accuracy <= 1, --cohorts >= 0")
     finite = math.isfinite(a.ramp + a.duration)  # also an overflowing sum
     if not finite or a.duration <= 0 or a.ramp < 0 or a.think_ms < 0:
         cli.error("need finite --duration > 0 and --ramp >= 0, and --think-ms >= 0")

@@ -41,7 +41,7 @@ def _latency(samples: list[float], missing: int, timeouts: int) -> dict[str, Any
 
 
 def summary(rec: Recorder, procs: list[dict[str, float]], active_s: float) -> dict[str, Any]:
-    """The result document: latencies, message rates over the active ``ramp + duration``,
+    """The result document: latencies, message rates over the slots' active window,
     counters, the swarm's own CPU, why the run is invalid, if it is, and whether the server met
     the SLO. ``valid`` judges the measurement, ``slo_met`` the server."""
     c, active = rec.counts, max(active_s, 1e-9)

@@ -1,9 +1,10 @@
-// AI-ASSISTED: Playwright runs the browser specs in e2e/ in Chromium: against a running full stack, or (E2E_SUITE=ui) the visual and accessibility specs against the production build on a mocked backend.
+// AI-ASSISTED: Playwright runs the browser specs in e2e/ in Chromium: against a running full stack (on a desktop, and the phone spec on a Pixel 7), or (E2E_SUITE=ui) the visual and accessibility specs against the production build on a mocked backend.
 import process from 'node:process'
 import { defineConfig, devices, type PlaywrightTestConfig } from '@playwright/test'
 import { STACK_URL } from './e2e/stack'
 
 const UI_SPECS = /(visual|a11y)\.spec\.ts$/
+const PHONE_SPECS = /phone\.spec\.ts$/
 /** `make ui-check` runs this suite in a container, so the port is the container's own. */
 const PREVIEW_URL = 'http://127.0.0.1:4173'
 const WIDTHS = [320, 768, 1280]
@@ -14,8 +15,12 @@ const stack: PlaywrightTestConfig = {
   testIgnore: UI_SPECS,
   workers: 1, // the specs share the stack's quizzes and its per-address request limits
   use: { baseURL: STACK_URL },
-  // Desktop Chrome is wider than the 1024 px breakpoint: the leaderboard sits beside the quiz.
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // Desktop Chrome is wider than the 1024 px breakpoint: the leaderboard sits beside the quiz. A Pixel 7 is narrower:
+  // the quiz and the leaderboard are two tabs.
+  projects: [
+    { name: 'chromium', testIgnore: [UI_SPECS, PHONE_SPECS], use: { ...devices['Desktop Chrome'] } },
+    { name: 'phone', testMatch: PHONE_SPECS, use: { ...devices['Pixel 7'] } },
+  ],
 }
 
 const ui: PlaywrightTestConfig = {

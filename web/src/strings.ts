@@ -1,6 +1,7 @@
 // AI-ASSISTED: every piece of UI copy in one module, so a translation can be added later.
 export const strings = {
   appName: 'Vocab Quiz',
+  skipLink: 'Skip to content',
   join: {
     title: 'Real-time vocabulary quiz',
     quizIdLabel: 'Quiz ID',
@@ -38,6 +39,7 @@ export const strings = {
     continue: 'Continue',
     loading: 'Loading the question…',
     secondsLeft: (seconds: number) => `${seconds} seconds left`,
+    timeLeft: (seconds: number) => `${seconds} s left`,
     checking: 'Checking…',
     timeUp: "Time's up: an answer now scores 0.",
     waiting: 'Waiting for the connection…',
@@ -86,7 +88,7 @@ export const strings = {
     previous: 'Previous',
     next: 'Next',
     range: (from: number, to: number, total: number) => `Players ${from}–${to} of ${total}`,
-    asOf: (seq: number) => `As of update ${seq}`,
+    loading: 'Loading players…',
     final: 'Final standings',
   },
   results: {
@@ -98,6 +100,7 @@ export const strings = {
     points: (score: number) => `${score} points`,
     title: 'Final results',
     placed: (rank: number, players: number) => `You placed #${rank} of ${players}`,
+    noPlayers: 'No one played this quiz.',
   },
   notFound: {
     title: 'Page not found',

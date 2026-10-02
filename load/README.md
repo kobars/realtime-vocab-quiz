@@ -5,7 +5,7 @@
 `load/bots.py` fills quizzes with bots and measures what a player sees. Each of `--bots` slots
 plays one player at a time: a fresh mock session (`POST /sessions`), a ticket, the socket,
 `join`, every question with a think time, then the next cohort's player takes the slot, so the
-bots keep answering for the whole run. Slots start spread over `--ramp` and over the quizzes
+bots keep answering for the whole run (or until each slot has played `--cohorts` players). Slots start spread over `--ramp` and over the quizzes
 round-robin.
 
 ## What it measures
@@ -70,6 +70,7 @@ host). Outside Docker, from the host against the same stack through nginx (the d
 | `--origin` | `http://localhost:8080` | the `Origin` header; it must be in the API's `ALLOWED_ORIGINS` |
 | `--quiz-ids`, `--quizzes` | the three seeded quizzes, 1 | spread the bots over the first N IDs |
 | `--bots` | 10 | bots playing at the same time |
+| `--cohorts` | 0 | players each slot plays in turn; 0 plays until the run ends. `make demo` passes 1, so its quiz holds one player per bot |
 | `--accuracy` | 0.7 | share of correct answers |
 | `--think-ms` | 2000 | mean think time before each answer (uniform, ±50%) |
 | `--duration`, `--ramp` | 60, 10 | seconds of answering after a ramp of this many seconds |

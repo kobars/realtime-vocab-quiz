@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the live leaderboard panel: player counts, the top 50, my row pinned below it when I am further down, and the full list, in a clay card (UI spec §3.5). -->
+<!-- AI-ASSISTED: the live leaderboard panel: player counts, the top 50, my row pinned below it when I am further down (it sticks to the bottom of the window while the list scrolls), and the full list, in a clay card (UI spec §3.5). -->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
@@ -47,7 +47,7 @@ const pinned = computed(() => store.myRank !== null && !store.entries.some((row)
     <p
       v-if="pinned"
       data-test="pinned"
-      class="flex min-h-12 items-center gap-3 rounded-lg px-3 py-1.5"
+      class="sticky bottom-0 z-1 flex min-h-12 items-center gap-3 rounded-lg px-3 py-1.5"
       :class="MY_ROW"
     >
       <span :class="[RANK_CHIP, placeFill(store.myRank ?? 0)]">#{{ store.myRank }}</span>
