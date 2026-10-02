@@ -906,15 +906,15 @@ stated the fix and a test pinned it. The full record is in the AI-LOG entries (b
 | Tool | Model | Role in the design |
 |---|---|---|
 | Claude Code | claude-opus-5-5 | Drafted the architecture, the protocol, the Redis data model and scripts, the UI spec, the test strategy and the ADRs |
-| Codex CLI | `gpt-6-astra`, high reasoning, read-only sandbox | Independent reviewer of the design drafts, of each spec PR once it merged, and of every later PR before its merge |
+| Codex CLI | `gpt-6-astra`, high reasoning, later xhigh (each AI-LOG entry says which), read-only sandbox | Independent reviewer of the design drafts, of each spec PR once it merged, and of every later PR: after the merge up to PR #100, before the merge from PR #101 |
 | A second Claude Code agent | claude-opus-5-5, fresh context, read-only | Independent reviewer of the design drafts, with no access to how they were written |
-| Claude Code `/code-review` | claude-opus-5-5, high | Reviewer of each spec PR once it merged and of every later PR before its merge, next to Codex |
+| Claude Code `/code-review` | claude-opus-5-5, high | Reviewer of each spec PR once it merged and of every later PR: after the merge up to PR #100, before the merge from PR #101; next to Codex |
 
 **Design tasks and the nature of each interaction.**
 
 | Task | How I worked with the AI |
 |---|---|
-| Architecture and data flow (§3, §4) | I gave Claude Code the README and the fixed choices (self-paced quiz, one Redis, two API nodes); it drafted the diagrams and the component table, which I checked against the code layout and the import-linter contracts |
+| Architecture and data flow (§3, §4) | I gave Claude Code the challenge requirements and the fixed choices (self-paced quiz, one Redis, two API nodes); it drafted the diagrams and the component table, which I checked against the code layout and the import-linter contracts |
 | Domain rules (`docs/spec/domain.md`, ADR-002) | Drafted from my list of rules and scoring examples; I recomputed every scoring example with the formula |
 | Protocol (`docs/spec/protocol.md`, ADR-003, ADR-004) | Drafted from the message names, the `seq` rules and the limits; I traced the ordering of frames on one socket by hand |
 | Redis store (`docs/spec/redis.md`, ADR-005 to ADR-008) | Claude Code designed the key schema, the script contracts and the tick without an owner; I checked each script against the `seq` rule |
