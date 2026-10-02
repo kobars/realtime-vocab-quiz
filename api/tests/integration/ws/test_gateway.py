@@ -201,10 +201,11 @@ def test_the_close_line_carries_the_quiz_id_and_the_connection_id() -> None:
         create = partial(store.create_quiz, window_ms=60_000, time_limit_ms=20_000)
         client.portal.call(create, "VOCAB-42", (Question("q0", 1),))  # type: ignore[union-attr]
         out = io.StringIO()
-        logs.configure_logging(out)
+        listener = logs.configure_logging(out)
         with connect(client, ticket(client)) as ws:
             ws.send_json({"v": 1, "type": "join", "quizId": "VOCAB-42", "displayName": "Ann"})
             assert ws.receive_json()["type"] == "joined"
+    listener.stop()  # writes the queued lines
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     [closed] = [line for line in lines if line["event"].startswith("ws /ws closed")]
     assert closed["quiz_id"] == "VOCAB-42"

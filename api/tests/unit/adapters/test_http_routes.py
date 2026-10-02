@@ -54,10 +54,11 @@ async def test_an_unhandled_error_answers_500_with_the_request_id(
         raise RuntimeError(msg)
 
     out = io.StringIO()
-    logs.configure_logging(out)
+    listener = logs.configure_logging(out)
     resp = await http.get("/boom", headers={"X-Request-ID": "req-9"})
     assert (resp.status_code, resp.headers["X-Request-ID"]) == (500, "req-9")
     assert resp.json() == {"error": "INTERNAL", "message": "internal error"}
+    listener.stop()  # writes the queued lines
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     [error] = [line for line in lines if "exception" in line]
     assert error["request_id"] == "req-9"

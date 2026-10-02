@@ -214,7 +214,8 @@ def test_api_image_bounds_its_shutdown_and_names_its_protocol_classes() -> None:
     """A protocol given by name ("auto") may pick a class without the head and fragment limits."""
     config = _server_config()
     grace = config.timeout_graceful_shutdown
-    assert grace is not None and grace < 10  # the container engine's default stop grace period
+    assert grace is not None
+    assert grace < 10  # the container engine's default stop grace period
     assert not isinstance(config.http, str)
     assert not isinstance(config.ws, str)
 
