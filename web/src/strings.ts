@@ -88,7 +88,7 @@ export const strings = {
     previous: 'Previous',
     next: 'Next',
     range: (from: number, to: number, total: number) => `Players ${from}–${to} of ${total}`,
-    asOf: (seq: number) => `As of update ${seq}`,
+    loading: 'Loading players…',
     final: 'Final standings',
   },
   results: {
@@ -100,6 +100,7 @@ export const strings = {
     points: (score: number) => `${score} points`,
     title: 'Final results',
     placed: (rank: number, players: number) => `You placed #${rank} of ${players}`,
+    noPlayers: 'No one played this quiz.',
   },
   notFound: {
     title: 'Page not found',

@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the finished and results screens: a provisional rank and the live board until the end, with my score and rank in live regions, then the podium, my final rank in a highlighted clay card and the top 50 under a gradient heading (UI spec §3.6, §6.3). -->
+<!-- AI-ASSISTED: the finished and results screens: a provisional rank and the live board until the end, with my score and rank in live regions, then the podium, my final rank in a highlighted clay card and the top 50 under a gradient heading, or a note when no one played (UI spec §3.6, §6.3). -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import AllPlayers from '@/components/leaderboard/AllPlayers.vue'
@@ -58,24 +58,32 @@ const timeLeft = computed(() => {
     >
       {{ strings.results.title }}
     </h2>
-    <ResultsPodium :entries="podium" />
     <Card
-      v-if="store.myRank !== null"
-      data-test="my-result"
-      class="gap-2 bg-highlight"
+      v-if="store.playerCount === 0"
+      data-test="no-players"
     >
-      <p class="text-2xl font-extrabold tabular-nums sm:text-display">
-        {{ strings.results.placed(store.myRank, store.playerCount) }}
-      </p>
-      <p class="text-xl font-bold tabular-nums">
-        {{ strings.results.points(store.myScore) }}
-      </p>
+      {{ strings.results.noPlayers }}
     </Card>
-    <LeaderboardRows
-      :entries="rest"
-      :my-user-id="store.quiz?.userId"
-    />
-    <AllPlayers />
+    <template v-else>
+      <ResultsPodium :entries="podium" />
+      <Card
+        v-if="store.myRank !== null"
+        data-test="my-result"
+        class="gap-2 bg-highlight"
+      >
+        <p class="text-2xl font-extrabold tabular-nums sm:text-display">
+          {{ strings.results.placed(store.myRank, store.playerCount) }}
+        </p>
+        <p class="text-xl font-bold tabular-nums">
+          {{ strings.results.points(store.myScore) }}
+        </p>
+      </Card>
+      <LeaderboardRows
+        :entries="rest"
+        :my-user-id="store.quiz?.userId"
+      />
+      <AllPlayers />
+    </template>
   </section>
   <section
     v-else
