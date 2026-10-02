@@ -411,6 +411,7 @@ def test_the_fly_edge_is_the_vm_edge_with_only_the_fly_lines_changed() -> None:
         "        listen 8081;",
         *([HSTS] * 3),  # on /, /api/ and /ws: Caddy sends it on the VM
     ]
+    assert "        proxy_connect_timeout 250ms;" in fly
     assert not any("real_ip" in line or "Fly-Client-IP" in line for line in vm)
     assert _lines(ROOT / "infra" / "nginx" / "real-ip.conf.template") == [
         "set_real_ip_from ${EDGE_SUBNET};",
@@ -461,6 +462,8 @@ def test_the_rendered_fly_edge_passes_nginx_t_and_trusts_only_flys_proxy() -> No
         "real_ip_header Fly-Client-IP;",
     ]
     assert "server myquiz-api.flycast:8000 resolve max_fails=0;" in lines
+    # The Flycast connect reaches Fly's proxy, which picks a Machine.
+    assert "proxy_connect_timeout 250ms;" in lines
     # The site's scripts and stylesheets go out with their content types.
     assert "# configuration file /etc/nginx/mime.types:" in lines
     assert any(re.fullmatch(r"application/javascript\s+js;", line) for line in lines)
