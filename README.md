@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: project overview: the live demo and video, what it does, how it works, run the tests, where the documents are and how to try it locally. -->
+<!-- AI-ASSISTED: project overview: the live demo, video and test plan, what it does, how it works, the AI collaboration, where the documents are, how to try it locally and how to run the tests. -->
 # Real-time vocabulary quiz
 
 Players join a vocabulary quiz by its ID, answer timed questions, and watch one shared
@@ -49,24 +49,6 @@ flowchart LR
 Each answer runs as one Lua script in Redis, which scores it once and updates the quiz's sorted
 set. A 200 ms tick on one node publishes the standings over Redis pub/sub, and every node relays
 them to its own sockets. [DESIGN.md](DESIGN.md) has the full design.
-
-## Run the tests
-
-The host tests need Docker, Python 3.14 with uv and Node 24 with pnpm:
-`uv sync --project api && pnpm -C web install` ([CONTRIBUTING.md](CONTRIBUTING.md#set-up)).
-
-- `make check`: lint, types, the unit, property, contract and acceptance tests, the client tests
-  and build; every change passes it.
-- `make test-integration`: the tests that need Redis (in a container of their own, or at
-  `REDIS_URL` when it is set), then the acceptance tests on Redis.
-- `make test-system`: the system tests through nginx against the running stack: a score on one
-  node reaches a socket on the other. They need fresh stack data, not the `make demo` stack
-  ([CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests) has the steps).
-- `make test-browser`: the browser specs in Chromium, with an accessibility scan, against the
-  same fresh stack, after the system tests (`web/e2e/`; install Chromium once with
-  `pnpm -C web exec playwright install chromium`).
-
-`make help` lists the rest; [CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests) explains each layer.
 
 ## AI collaboration
 
@@ -135,3 +117,21 @@ To serve it over HTTPS from a fresh Ubuntu VM, one command installs it on the im
 publishes, and `make do-deploy` creates that VM on DigitalOcean from a laptop: see
 [Deploy to a VM](docs/operations.md#deploy-to-a-vm). `make fly-launch` and `make fly-deploy` run it
 on Fly.io instead: see [Deploy to Fly.io](docs/operations.md#deploy-to-flyio).
+
+## Run the tests
+
+The host tests need Docker, Python 3.14 with uv and Node 24 with pnpm:
+`uv sync --project api && pnpm -C web install` ([CONTRIBUTING.md](CONTRIBUTING.md#set-up)).
+
+- `make check`: lint, types, the unit, property, contract and acceptance tests, the client tests
+  and build; every change passes it.
+- `make test-integration`: the tests that need Redis (in a container of their own, or at
+  `REDIS_URL` when it is set), then the acceptance tests on Redis.
+- `make test-system`: the system tests through nginx against the running stack: a score on one
+  node reaches a socket on the other. They need fresh stack data, not the `make demo` stack
+  ([CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests) has the steps).
+- `make test-browser`: the browser specs in Chromium, with an accessibility scan, against the
+  same fresh stack, after the system tests (`web/e2e/`; install Chromium once with
+  `pnpm -C web exec playwright install chromium`).
+
+`make help` lists the rest; [CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests) explains each layer.
