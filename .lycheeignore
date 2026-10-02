@@ -1,2 +1,3 @@
-# Video sites answer CI runners with bot walls and 429s; the link is checked by hand.
+# Video sites and claude.ai answer CI runners with bot walls, 403s and 429s; these links are checked by hand.
 ^https://www\.youtube\.com/
+^https://claude\.ai/
