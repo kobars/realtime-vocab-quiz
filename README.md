@@ -89,7 +89,7 @@ A change merges only when these checks pass, whoever wrote it:
 Design:
 
 - [DESIGN.md](DESIGN.md): the system design; start with its [reading map](DESIGN.md#reading-map)
-- [docs/DECISIONS.md](docs/DECISIONS.md): the decision records, one file per ADR
+- [docs/DECISIONS.md](docs/DECISIONS.md): the index of the decision records, one file per ADR in [docs/adr/](docs/adr/)
 - [docs/spec/](docs/spec/README.md): the domain, protocol, Redis and UI specs
 - [docs/capacity.md](docs/capacity.md): the capacity estimate behind the load targets
 
