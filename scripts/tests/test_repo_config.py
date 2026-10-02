@@ -1,4 +1,5 @@
-# AI-ASSISTED: checks on the pre-commit hooks, make targets, deptry and the CI workflows.
+# AI-ASSISTED: checks on the pre-commit hooks, make targets, deptry, the CI workflows and the
+# link check's ignore list.
 """Tests for the repository's hook and workflow configuration.
 
 The workflows and the Makefile are read as text; the hook test uses pre-commit's own
@@ -557,10 +558,13 @@ def _loopback_links() -> set[str]:
         capture_output=True,
         text=True,
         check=True,
-    ).stdout.split()
+    ).stdout.splitlines()
     loopback = re.compile(r"https?://(?:localhost|127\.0\.0\.1)[^\s<>)\]`'\"]*")
     return {
-        url for name in files for url in loopback.findall((ROOT / name).read_text(encoding="utf-8"))
+        url
+        for name in files
+        if (ROOT / name).is_file()
+        for url in loopback.findall((ROOT / name).read_text(encoding="utf-8"))
     }
 
 
@@ -570,6 +574,20 @@ def test_the_online_link_check_skips_the_local_dev_server_links() -> None:
     assert "http://localhost:5173/q/VOCAB-42" in links
     unmatched = [url for url in links if not any(p.search(url) for p in _link_ignores())]
     assert not unmatched
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost",
+        "http://localhost:5173/q/VOCAB-42",
+        "http://localhost?next=/host",
+        "http://localhost#top",
+        "https://127.0.0.1:8443/api/healthz",
+    ],
+)
+def test_the_online_link_check_skips_every_form_of_loopback_link(url: str) -> None:
+    assert any(p.search(url) for p in _link_ignores())
 
 
 @pytest.mark.parametrize(
