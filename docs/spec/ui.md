@@ -24,6 +24,7 @@ Switching the look later still means replacing the token values in one file (§7
 |---|---|
 | `/` | Landing and join (§3.1) |
 | `/quiz/:quizId` | Everything after the join: intro, question, feedback, finished and results, chosen by the client state (§4). Without a join to this quiz (a direct load, a refresh, another ID) it redirects to `/?quiz=:quizId`. A refresh of the quiz this tab last joined also starts that join again with the same name: the join screen shows "Joining…" and `joined` returns to `/quiz/:quizId`. The join is saved in `sessionStorage` only as the page unloads (not after "This quiz is open in another tab" or "This quiz is no longer available") and read once by the next page, so a duplicated tab, which copies `sessionStorage` while this page stays open, does not join and take the session |
+| `/host` | Host a quiz (§3.8) |
 | `/q/:quizId` | Short share link; redirects to `/?quiz=:quizId`, the join screen with the quiz ID filled in |
 | any other path | "Page not found" with a link back to `/` |
 
@@ -44,6 +45,7 @@ Switching the look later still means replacing the token values in one file (§7
 - `QUIZ_NOT_FOUND` puts "No quiz with this ID" under the quiz ID field; the user may try again. A join after the quiz ended gets the final `snapshot` first, then `QUIZ_ENDED` (protocol §7), and routes to the results screen at `/quiz/:quizId` (§3.6).
 - A join that ends in a blocked state (`UNSUPPORTED_VERSION`, close 1008, close 4001, or 10 connects without a `joined`) unlocks the form and shows the blocking card of §3.7 above it, with its action ("Reload", "Use this tab" or "Try again"); "Use this tab" and "Try again" join again from this screen.
 - Any other join failure (another `error` reply to the `join`, another final close before `joined`, or a client that cannot start) unlocks the form and shows "Could not join, try again" above the button; the user may try again. A `reconnecting` link keeps the spinner.
+- Under the join card, a quiet line "Running a class or a game night? **Host a quiz**" links to `/host` (§3.8). It is a text link after the "Join" button in the focus order, so it never competes with Join, and it shows only once `GET /banks` answers with a list: a 404 (hosting off), a failure or an empty list hides it.
 - After the wordmark leads here from a quiz that is still joined (the socket stays open), a "Resume quiz VOCAB-42" link goes back to `/quiz/:quizId`. Joining another quiz closes the old socket.
 
 ### 3.2 Intro
@@ -114,6 +116,18 @@ Two kinds, by how much they interrupt:
   | "This quiz is no longer available" | `QUIZ_NOT_FOUND` after `joined` (the quiz was removed during play) | "Back to join" (routes to `/`) |
 
   A refused upgrade never reaches the client as a message. A wrong `Origin` (HTTP 403, `FORBIDDEN`), a bad ticket (401, `UNAUTHORIZED`) and a full node or IP cap (503, 429) all look like close 1006 to a browser (protocol §7). The client treats each as a failed open: a new ticket and a reconnect with backoff, which ends at "Still can't connect" after 10 attempts.
+
+### 3.8 Host a quiz
+
+Self-service hosting for a visitor of the public demo: no account, the host token proves who may end the quiz.
+
+- **Pick a question set.** The headline "Host a quiz" and one line on what happens next, then one button per set from `GET /banks` (an icon tile, the title, the question count and "Host"), two columns from 640 px. A button is a big outlined clay control with the press shadow and the `focus-hug` band. Choosing one sends `POST /quizzes {"bankQuizId"}`; that button reads "Creating…" with a spinner and every set has `aria-disabled="true"` until the reply.
+- **States while picking**, each in words: "Loading question sets…" (a status line); a 404 on the list or the create: "This server does not offer public hosting." with a link back to `/`; a failed list: the network message and "Try again". A failed create shows its reason in a polite status box above the sets, which stay usable: 429 "You started several quizzes in a row. Try again in 2 minutes." from `Retry-After` (seconds below a minute, whole minutes above; the sets stay locked until then); 503 `HOSTING_FULL` "Every public quiz slot is in use. Try again in a few minutes."; 422 "That question set is no longer available. Pick another one." and the list loads again; anything else (network, 5xx, an unexpected body, no reply within 8 s) "Could not reach the server. Check your connection and try again."
+- **Created.** One card, which takes the focus on its heading "Your quiz is open": an "Open" badge and "Open until 10:30" (from `endsAtMs`), the quiz ID large in `--primary`, the full player link in a read-only field with "Copy link" (a status line says "Link copied", or asks to copy by hand when the clipboard refuses), the QR code of the same link (drawn in the browser as one SVG path, `--night` modules on a `--mint` tile with a four-module quiet zone, in both themes, so scanners always see dark on light; it has an outline and no shadow, as a surface inside a card), and the player count with a people icon in a polite, atomic live region ("12 players joined"). Under a divider: "Join as a player" (opens the link in a new tab) and the destructive "End quiz". From 768 px the QR code sits to the right of the details.
+- **Player count.** The quiz preview (`GET /quizzes/{id}`) is read at once and every 3 s while the page is visible; a hidden tab stops polling and reads again as soon as it is visible. A preview that says `ended` (the window closed, or someone else ended it) or a `QUIZ_NOT_FOUND` 404 moves to the ended card.
+- **End quiz.** "End quiz" opens a confirm box in the danger soft fill under the actions: "End the quiz for everyone? Players see the final results and cannot answer any more." with "End it now" (destructive) and "Keep it open", which takes the focus and returns it to "End quiz". "End it now" sends `POST /quizzes/{id}/end` with `X-Host-Token`, reads "Ending…" with `aria-busy="true"`, and on 200, 409 `QUIZ_ENDED` or 404 `QUIZ_NOT_FOUND` moves to the ended card. A 403 says "This tab can no longer end the quiz."; any other failure "Could not end the quiz, try again." (`role="alert"`), and the panel stays.
+- **Ended.** A card with "Quiz VOCAB-42-7K3Q has ended" (it takes the focus), "Players can still open the link to see the final results.", "Host another quiz" (the sets again) and "See the results" (the share link).
+- **Refresh.** The created quiz (ID, share path, host token, end time) is kept in `sessionStorage` only, so a refresh of the tab shows the same panel without listing the sets, and another tab or browser has no host controls. The ended card clears it.
 
 ## 4. State chart
 
@@ -272,6 +286,7 @@ The key hints are visible on the choice buttons, so the shortcut is discoverable
 - The answer result is announced through the same region ("Correct, plus 133 points" or "Wrong, the answer was 'bright'").
 - The countdown announces only at 10 s and 5 s left, never every second, from a region outside the phone's tab panels, so the warnings are heard on the Leaderboard tab too.
 - The leaderboard list is not live: 10 rows changing five times a second would drown everything else.
+- On the host page (§3.8), the player count is a polite, atomic region, and a failed create is announced from a status box that stays in the page.
 - Connection pills use `role="status"`; blocking cards use `role="alert"` and take the focus.
 
 ### 6.4 Contrast and size
