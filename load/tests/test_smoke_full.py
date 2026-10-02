@@ -162,10 +162,11 @@ def stack(failing: set[str], monkeypatch: pytest.MonkeyPatch) -> list[tuple[str,
 def test_the_run_stops_the_node_with_the_socket_and_starts_it_again(
     app_url: str, stack: list[tuple[str, ...]], capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """``start`` keeps the stopped container: ``up`` would recreate it without the shell's env."""
     assert smoke_full.main(["--url", app_url, "--origin", parse([]).origin]) == 0
     assert stack[-2:] == [
         ("compose", "stop", "api-1"),
-        ("compose", "up", "--detach", "--wait", "api-1"),
+        ("compose", "start", "--wait", "api-1"),
     ]
     out = capsys.readouterr().out
     assert "api-1 stopped: back in" in out
@@ -178,10 +179,10 @@ def test_a_failed_stop_and_start_are_reported_around_the_runs_own_failure(
     failing: set[str],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    failing.update({"stop", "up"})  # the socket stays open, so the rejoin times out
+    failing.update({"stop", "start"})  # the socket stays open, so the rejoin times out
     assert smoke_full.main(["--url", app_url, "--origin", parse([]).origin]) == 1
-    assert stack[-1] == ("compose", "up", "--detach", "--wait", "api-1")
+    assert stack[-1] == ("compose", "start", "--wait", "api-1")
     assert capsys.readouterr().err == (
         "smoke failed: docker compose stop: no such service; "
-        "no resynced reconnect within 0 s; docker compose up: failed\n"
+        "no resynced reconnect within 0 s; docker compose start: failed\n"
     )
