@@ -164,20 +164,29 @@ export const useQuizStore = defineStore('quiz', () => {
         Object.assign(s, { finished: true, phase: 'finished', myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
         return
       case 'leaderboard':
-        return standings(message.seq, message.entries, message.playerCount, message.onlineCount, undefined, message.rebase)
+        standings(message.seq, message.entries, message.playerCount, message.onlineCount, undefined, message.rebase)
+        return
       case 'rank_update':
         if (!s.ended) Object.assign(s, { myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
         return
       case 'snapshot':
         // A snapshot read before the end never undoes it (protocol §3).
         if (s.ended && message.status === 'open') return
-        standings(message.atSeq, message.entries, message.playerCount, message.onlineCount, message.you, true)
+        // A snapshot's `you: null` means this user is not a player, so there is no rank or score to show.
+        if (!standings(message.atSeq, message.entries, message.playerCount, message.onlineCount, message.you, true)) {
+          Object.assign(s, { myRank: null, myScore: 0 })
+        }
         if (message.status === 'ended') end()
         if (s.connection === 'resyncing') s.connection = 'joined'
         return
-      case 'quiz_ended':
-        standings(message.seq, message.entries, message.playerCount, s.onlineCount, message.you)
-        return end()
+      case 'quiz_ended': {
+        const known = standings(message.seq, message.entries, message.playerCount, s.onlineCount, message.you)
+        end()
+        // Here `you: null` for a player outside the entries means the node could not read the rank, so the last one
+        // shown may be stale: a join after the end gets the final snapshot, with `you`.
+        if (!known && s.quiz !== null) client.value?.rejoin()
+        return
+      }
       case 'leaderboard_page':
         // A page read before the end never shows after it: only the final standings do.
         if (s.ended && !message.final) return
@@ -230,11 +239,13 @@ export const useQuizStore = defineStore('quiz', () => {
     s.connection = 'idle'
   }
 
-  function standings(seq: number, rows: Entry[], players: number, online: number, you?: You | null, replace = false): void {
+  /** Applies the standings; returns whether they gave my rank and score, from `you` or my row in `rows`. */
+  function standings(seq: number, rows: Entry[], players: number, online: number, you?: You | null, replace = false): boolean {
     Object.assign(s, { seq, entries: rows, playerCount: players, onlineCount: online })
     if (replace) s.replacements += 1
     const mine = you ?? rows.find((row) => row.userId === s.quiz?.userId)
     if (mine) Object.assign(s, { myRank: mine.rank, myScore: mine.score })
+    return mine !== undefined
   }
 
   const setCursor = (cursor: number, open: boolean): void => void (s.quiz && Object.assign(s.quiz, { cursor, cursorOpen: open }))

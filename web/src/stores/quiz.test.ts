@@ -358,3 +358,38 @@ it('NOT_JOINED on Next question from feedback sends one join, and the joined rep
   expect(socket.sent.slice(-2)).toEqual([{ v: 1, type: 'resync', lastSeq: 3 }, { v: 1, type: 'next', questionIndex: 1 }])
   expect(socket.sent.filter((message) => message.type === 'join')).toHaveLength(2)
 })
+
+it('a snapshot with you: null and no row of mine clears my rank and score; a leaderboard frame without my row keeps them', async () => {
+  const { store, socket } = await joinQuiz()
+  socket.receive(joined())
+  socket.receive({ ...snapshot(3), entries: [rival, { ...me, score: 150 }], you: { rank: 2, score: 150 } })
+  expect([store.myRank, store.myScore]).toEqual([2, 150])
+  socket.receive({ ...board(4, 0), entries: [rival] })
+  expect([store.myRank, store.myScore, store.seq]).toEqual([2, 150, 4])
+  socket.receive({ ...snapshot(5), entries: [rival], you: null })
+  expect([store.myRank, store.myScore, store.seq]).toEqual([null, 0, 5])
+})
+
+const joins = (socket: FakeSocket) => socket.sent.filter((message) => message.type === 'join').length
+
+it('quiz_ended with you: null and no row of mine keeps my last rank and rejoins once, and the final snapshot repairs it', async () => {
+  const { store, socket } = await playing()
+  socket.receive({ type: 'rank_update', atSeq: 3, rank: 70, score: 90, playerCount: 300 })
+  socket.receive({ type: 'quiz_ended', seq: 4, playerCount: 300, entries: [rival], you: null })
+  expect([store.phase, store.myRank, store.myScore, joins(socket)]).toEqual(['results', 70, 90, 2])
+  socket.receive({ ...snapshot(4, 'ended'), playerCount: 300, entries: [rival], you: { rank: 80, score: 95 } })
+  socket.receive(error('QUIZ_ENDED', 'join'))
+  expect([store.phase, store.myRank, store.myScore, joins(socket)]).toEqual(['results', 80, 95, 2])
+})
+
+it('quiz_ended with you: null sends no rejoin when my row is in the entries', async () => {
+  const { store, socket } = await playing()
+  socket.receive({ type: 'quiz_ended', seq: 4, playerCount: 2, entries: [rival, { ...me, score: 60 }], you: null })
+  expect([store.phase, store.myRank, store.myScore, joins(socket)]).toEqual(['results', 2, 60, 1])
+})
+
+it('quiz_ended with you: null sends no rejoin before a joined', async () => {
+  const { store, socket } = await joinQuiz()
+  socket.receive({ type: 'quiz_ended', seq: 4, playerCount: 2, entries: [rival], you: null })
+  expect([store.phase, store.myRank, joins(socket)]).toEqual(['results', null, 1])
+})
