@@ -204,6 +204,13 @@ it('a first join that gets UNAVAILABLE keeps the client, which sends the join ag
   expect([sockets.length, store.connection, store.busy, store.quiz?.quizId]).toEqual([1, 'resyncing', null, 'VOCAB-42'])
 })
 
+it('a client that cannot be created leaves the store idle, so no join looks under way', () => {
+  const store = useQuizStore()
+  configureQuizStore({ createClient: () => { throw new DOMException('denied', 'SecurityError') } })
+  expect(() => store.join('VOCAB-42', 'Ana')).toThrow('denied')
+  expect([store.connection, store.quizId]).toEqual(['idle', null])
+})
+
 it('another failed first join stops the client and returns to idle, so the player can join again', async () => {
   const { store, socket } = await joinQuiz()
   socket.receive(error('INVALID_MESSAGE', 'join'))
