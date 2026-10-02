@@ -61,6 +61,7 @@ targets are mocks ([DESIGN.md §14](DESIGN.md#14-implemented-and-mocked)).
 ```mermaid
 flowchart LR
   B[Browser: Vue client] -->|HTTP + WebSocket| N[nginx]
+  N -->|/| W[web: the built client]
   N --> A1[API node 1]
   N --> A2[API node 2]
   A1 <-->|Lua scripts, pub/sub| R[(Redis)]
@@ -83,6 +84,9 @@ The host tests need Docker, Python 3.14 with uv and Node 24 with pnpm:
 - `make test-system`: the system tests through nginx against the running stack: a score on one
   node reaches a socket on the other. They need fresh stack data, not the `make demo` stack
   ([CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests) has the steps).
+- `make test-browser`: the browser specs in Chromium, with an accessibility scan, against the
+  same fresh stack, after the system tests (`web/e2e/`; install Chromium once with
+  `pnpm -C web exec playwright install chromium`).
 
 `make help` lists the rest; [CONTRIBUTING.md](CONTRIBUTING.md#run-the-tests) explains each layer.
 
