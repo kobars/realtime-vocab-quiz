@@ -9,7 +9,7 @@ export const ME = { userId: 'u-ana', displayName: 'Ana' }
 export const CORRECT = 2
 const PLAYERS = 250
 const ONLINE = 180
-/** Far below the top 50, so the leaderboard pins my row under them. */
+/** Far below the top 10, so the leaderboard pins my row under them. */
 const MY_PLACE: You = { rank: 137, score: 420 }
 
 /** The top 50 of 250 players; every frame above 200 players carries only these. */

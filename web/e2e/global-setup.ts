@@ -1,7 +1,7 @@
-// AI-ASSISTED: before the browser specs, the MOCK admin API starts the open quiz and ends the other one.
+// AI-ASSISTED: before the browser specs, the MOCK admin API starts the open quizzes and ends the other one.
 import process from 'node:process'
 import { request } from '@playwright/test'
-import { ENDED_QUIZ, OPEN_QUIZ, STACK_URL } from './stack'
+import { CROWDED_QUIZ, ENDED_QUIZ, OPEN_QUIZ, STACK_URL } from './stack'
 
 const CONFLICT = 409 // the quiz exists
 
@@ -21,6 +21,8 @@ export default async function globalSetup(): Promise<void> {
     if (!created.ok() && created.status() !== CONFLICT) throw new Error(`create ${ENDED_QUIZ}: HTTP ${created.status()}`)
     const ended = await api.post(`admin/quizzes/${ENDED_QUIZ}/end`)
     if (!ended.ok()) throw new Error(`end ${ENDED_QUIZ}: HTTP ${ended.status()}`)
+    const crowded = await api.post('admin/quizzes', { data: { quizId: CROWDED_QUIZ } })
+    if (!crowded.ok() && crowded.status() !== CONFLICT) throw new Error(`create ${CROWDED_QUIZ}: HTTP ${crowded.status()}`)
   } finally {
     await api.dispose()
   }
