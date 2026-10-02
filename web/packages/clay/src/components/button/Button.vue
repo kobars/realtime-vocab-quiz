@@ -1,3 +1,4 @@
+<!-- AI-ASSISTED: shadcn-vue button; imports the class-name helper from the package root. -->
 <script setup lang="ts">
 import type { PrimitiveProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"

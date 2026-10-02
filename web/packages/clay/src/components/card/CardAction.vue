@@ -1,3 +1,4 @@
+<!-- AI-ASSISTED: shadcn-vue card part; imports the class-name helper from the package root. -->
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue"
 import { cn } from "../../utils"
