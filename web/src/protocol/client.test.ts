@@ -1,6 +1,6 @@
 // AI-ASSISTED: tests for QuizClient: connect, reconnect, seq wiring, liveness and answer retries, on a fake socket and fake timers.
 import { afterEach, beforeEach, expect, expectTypeOf, it, vi } from 'vitest'
-import { type ClientEvent, QuizClient, type QuizClientOptions, type QuizSocket, REPLY_TIMEOUT_MS } from './client'
+import { type ClientEvent, QuizClient, type QuizClientOptions, type QuizSocket, REPLY_TIMEOUT_MS, RETRY_AFTER_MS } from './client'
 import { httpAuthApi, IDENTITY_TIMEOUT_MS } from './identity'
 import type { ServerMessage } from './types.generated'
 
@@ -849,4 +849,26 @@ it('matches a late error to the first send of an answer that its reply deadline 
   const next = await connected()
   next.receive(joined())
   expect(answers(next)).toEqual([answerMsg('s-2', 1, 3)])
+})
+
+it('refresh sends one resync after the random gap wait, again after a bucket RATE_LIMITED and after the reply deadline, until the snapshot', async () => {
+  const client = start(() => 0.5)
+  const socket = await joinedSocket()
+  socket.receive({ type: 'quiz_ended', seq: 4 } as Partial<ServerMessage>)
+  const resyncs = () => socket.sent.filter((message) => message.type === 'resync')
+  client.refresh()
+  client.refresh()
+  // floor(0.5 × 251) = 125 ms.
+  await wait(124)
+  expect(resyncs()).toEqual([resync(0)])
+  await wait(1)
+  expect(resyncs()).toEqual([resync(0), resync(4)])
+  socket.receive(bucketDrop)
+  await wait(RETRY_AFTER_MS)
+  expect(resyncs()).toHaveLength(3)
+  await quietFor(socket, REPLY_TIMEOUT_MS)
+  expect(resyncs()).toHaveLength(4)
+  socket.receive({ type: 'snapshot', atSeq: 4, status: 'ended' })
+  await quietFor(socket, 2 * REPLY_TIMEOUT_MS)
+  expect([resyncs().length, socket.types().filter((type) => type === 'join').length]).toEqual([4, 1])
 })

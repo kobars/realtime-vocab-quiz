@@ -38,7 +38,7 @@ describe('routes', () => {
 })
 
 describe('quiz guard', () => {
-  configureQuizStore({ createClient: () => ({ start: vi.fn(), next: vi.fn(), answer: vi.fn(), rejoin: vi.fn(), getLeaderboard: vi.fn(), stop: vi.fn() }) })
+  configureQuizStore({ createClient: () => ({ start: vi.fn(), next: vi.fn(), answer: vi.fn(), rejoin: vi.fn(), refresh: vi.fn(), getLeaderboard: vi.fn(), stop: vi.fn() }) })
   /** A join to `quizId`, then its `joined` reply. */
   const joinedTo = (quizId: string) => {
     useQuizStore().join(quizId, 'Ana')

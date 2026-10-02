@@ -13,7 +13,7 @@ export type Phase = 'join' | 'intro' | 'question' | 'feedback' | 'finished' | 'r
  * the server closed with a policy violation (1008), or the client gave up after 10 connects without a `joined`.
  */
 export type Blocked = 'replaced' | 'version' | 'policy' | 'unreachable'
-export type QuizClientPort = Pick<QuizClient, 'start' | 'next' | 'answer' | 'rejoin' | 'getLeaderboard' | 'stop'>
+export type QuizClientPort = Pick<QuizClient, 'start' | 'next' | 'answer' | 'rejoin' | 'refresh' | 'getLeaderboard' | 'stop'>
 
 export interface QuizStoreDeps {
   createClient: (onEvent: (event: ClientEvent) => void) => QuizClientPort
@@ -183,8 +183,8 @@ export const useQuizStore = defineStore('quiz', () => {
         const known = standings(message.seq, message.entries, message.playerCount, s.onlineCount, message.you)
         end()
         // Here `you: null` for a player outside the entries means the node could not read the rank, so the last one
-        // shown may be stale: a join after the end gets the final snapshot, with `you`.
-        if (!known && s.quiz !== null) client.value?.rejoin()
+        // shown may be stale: a resync after the end gets the final snapshot, with `you`.
+        if (!known && s.quiz !== null) client.value?.refresh()
         return
       }
       case 'leaderboard_page':

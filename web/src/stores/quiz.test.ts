@@ -370,26 +370,33 @@ it('a snapshot with you: null and no row of mine clears my rank and score; a lea
   expect([store.myRank, store.myScore, store.seq]).toEqual([null, 0, 5])
 })
 
-const joins = (socket: FakeSocket) => socket.sent.filter((message) => message.type === 'join').length
+const resyncs = (socket: FakeSocket) => socket.sent.filter((message) => message.type === 'resync')
 
-it('quiz_ended with you: null and no row of mine keeps my last rank and rejoins once, and the final snapshot repairs it', async () => {
+it('quiz_ended with you: null and no row of mine keeps my last rank, and one resync after the gap wait repairs it with no error', async () => {
   const { store, socket } = await playing()
   socket.receive({ type: 'rank_update', atSeq: 3, rank: 70, score: 90, playerCount: 300 })
+  const before = socket.sent.length
   socket.receive({ type: 'quiz_ended', seq: 4, playerCount: 300, entries: [rival], you: null })
-  expect([store.phase, store.myRank, store.myScore, joins(socket)]).toEqual(['results', 70, 90, 2])
+  expect([store.phase, store.myRank, store.myScore, socket.sent.length]).toEqual(['results', 70, 90, before])
+  // random() = 0.5: floor(0.5 × 251) = 125 ms.
+  await wait(125)
+  expect([socket.sent.slice(before), store.connection]).toEqual([[{ v: 1, type: 'resync', lastSeq: 4 }], 'resyncing'])
   socket.receive({ ...snapshot(4, 'ended'), playerCount: 300, entries: [rival], you: { rank: 80, score: 95 } })
-  socket.receive(error('QUIZ_ENDED', 'join'))
-  expect([store.phase, store.myRank, store.myScore, joins(socket)]).toEqual(['results', 80, 95, 2])
+  await wait(10_000)
+  expect([store.phase, store.myRank, store.myScore, store.connection, store.lastError]).toEqual(['results', 80, 95, 'joined', null])
+  expect(resyncs(socket)).toHaveLength(2)
 })
 
-it('quiz_ended with you: null sends no rejoin when my row is in the entries', async () => {
+it('quiz_ended with you: null sends no resync when my row is in the entries', async () => {
   const { store, socket } = await playing()
   socket.receive({ type: 'quiz_ended', seq: 4, playerCount: 2, entries: [rival, { ...me, score: 60 }], you: null })
-  expect([store.phase, store.myRank, store.myScore, joins(socket)]).toEqual(['results', 2, 60, 1])
+  await wait(10_000)
+  expect([store.phase, store.myRank, store.myScore, resyncs(socket)]).toEqual(['results', 2, 60, [{ v: 1, type: 'resync', lastSeq: 0 }]])
 })
 
-it('quiz_ended with you: null sends no rejoin before a joined', async () => {
+it('quiz_ended with you: null sends no resync before a joined', async () => {
   const { store, socket } = await joinQuiz()
   socket.receive({ type: 'quiz_ended', seq: 4, playerCount: 2, entries: [rival], you: null })
-  expect([store.phase, store.myRank, joins(socket)]).toEqual(['results', null, 1])
+  await wait(10_000)
+  expect([store.phase, store.myRank, resyncs(socket)]).toEqual(['results', null, []])
 })

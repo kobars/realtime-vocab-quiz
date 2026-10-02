@@ -144,6 +144,11 @@ export class QuizClient {
     this.send({ v: 1, type: 'join', quizId: this.quizId, displayName: this.displayName })
   }
 
+  /** Asks for a fresh `snapshot` after a random 0–250 ms wait, with the resync's reply deadline and retries. */
+  refresh(): void {
+    this.run(this.tracker.refresh())
+  }
+
   /** Asks for `limit` standings rows from rank `offset + 1`; the reply is `leaderboard_page`. */
   getLeaderboard(offset: number, limit: number): void {
     this.send({ v: 1, type: 'get_leaderboard', offset, limit })
