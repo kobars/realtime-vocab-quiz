@@ -173,8 +173,8 @@ async def stopped(node: str) -> AsyncIterator[None]:
         _, stderr = await stop.communicate()
         if stop.returncode:
             problems.insert(0, f"docker compose stop: {stderr.decode().strip()}")
-        try:  # the same container: ``up`` would recreate it from this shell's env, not make demo's
-            compose("start", "--wait", node)
+        try:  # the same container: a plain ``up`` would recreate it from this shell's env
+            compose("up", "--detach", "--wait", "--no-recreate", node)
         except SmokeError as error:
             problems.append(str(error))
     if problems:
