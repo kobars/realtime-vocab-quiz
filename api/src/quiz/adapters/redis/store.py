@@ -1,4 +1,4 @@
-# AI-ASSISTED: the Redis store: one Lua script per port method; the feed is the events channel.
+# AI-ASSISTED: the Redis store: one Lua script per port method; the feed is events plus control.
 """The store port on Redis. Scripts read the Redis clock; Python passes no time or points.
 
 The client must decode responses (``decode_responses=True``). A redis-py connection or
@@ -141,7 +141,7 @@ class RedisStore:
 
     async def _read(
         self, quiz_id: str, offset: int, limit: int, user_ids: Sequence[str] = ()
-    ) -> tuple[port.Snapshot, dict[str, port.Row | None]]:
+    ) -> tuple[port.Snapshot, dict[str, port.Place | None]]:
         """The standings at one seq and each asked user's row.
 
         ``limit`` 0 reads the broadcast rows, ``RANKS_ONLY`` no rows.
@@ -150,12 +150,12 @@ class RedisStore:
         reply = await self._run("read_standings", quiz_id, offset, limit, top_n, full, *user_ids)
         seq, count, online, status = reply[1:5]
         rows = cast("list[list[str]]", reply[5])
-        asked = cast("list[list[str] | None]", reply[6])
+        asked = cast("list[list[int] | None]", reply[6])
         table = tuple(port.Row(int(rank), uid, name, int(total)) for rank, uid, name, total in rows)
         state = cast("Literal['open', 'ended']", status)
         snap = port.Snapshot(int(seq or 0), state, int(count or 0), int(online or 0), table, None)
         return snap, {
-            uid: None if hit is None else port.Row(int(hit[0]), uid, hit[1], int(hit[2]))
+            uid: None if hit is None else port.Place(int(hit[0]), int(hit[1]))
             for uid, hit in zip(user_ids, asked, strict=True)
         }
 
@@ -196,15 +196,16 @@ class RedisStore:
 
     @asynccontextmanager
     async def subscribe(self, quiz_id: str) -> AsyncIterator[AsyncIterator[str]]:
-        """The quiz's ``events`` channel, entered once Redis confirmed the subscription."""
-        pubsub = self._client.pubsub()
+        """The quiz's ``events`` and ``control`` channels, entered once Redis confirmed both."""
+        keys, pubsub = quiz_keys(quiz_id, self._prefix), self._client.pubsub()
         try:
             async with aclosing(_messages(pubsub)) as messages:
                 with _reachable():
-                    await pubsub.subscribe(quiz_keys(quiz_id, self._prefix).events)
-                    if await pubsub.get_message(timeout=SUBSCRIBE_TIMEOUT_S) is None:
-                        msg = "Redis did not confirm the subscription"
-                        raise ConnectionError(msg)
+                    await pubsub.subscribe(keys.events, keys.control)
+                    for _ in range(2):  # one confirmation per channel
+                        if await pubsub.get_message(timeout=SUBSCRIBE_TIMEOUT_S) is None:
+                            msg = "Redis did not confirm the subscription"
+                            raise ConnectionError(msg)
                 yield messages
         finally:
             await pubsub.aclose()  # type: ignore[no-untyped-call]

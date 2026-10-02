@@ -16,7 +16,7 @@ from quiz.domain.errors import DomainError, ErrorCode
 from quiz.obs import metrics
 from quiz.ports.clock import Clock
 from quiz.ports.questions import QuestionBank
-from quiz.ports.store import Finished, Joined, Ranks, Row, Store
+from quiz.ports.store import Finished, Joined, Place, Ranks, Store
 from quiz.ports.store import Snapshot as Shared
 
 log = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ def _key(read: Shared | Ranks) -> tuple[int, str, int]:
     return read.at_seq, read.status, read.player_count
 
 
-def _message(shared: Shared, you: Row | None) -> m.Snapshot:
+def _message(shared: Shared, you: Place | None) -> m.Snapshot:
     return m.Snapshot(
         atSeq=shared.at_seq,
         status=shared.status,
