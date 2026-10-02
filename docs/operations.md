@@ -164,15 +164,25 @@ only then tags them and adds a signed provenance attestation:
 |---|---|
 | `ghcr.io/kobars/realtime-vocab-quiz-api`, `ghcr.io/kobars/realtime-vocab-quiz-web` | `main` (the latest commit of `main`), the commit's short SHA (7 characters, for example `1a2b3c4`), `vX.Y.Z` for a release tag |
 
-The packages are public, so a VM pulls them without a login (GHCR creates a new package as
-private: after the first publish, set each one to public once in its package settings).
+GHCR creates each package as private on its first publish. Make both public once, so that a VM
+pulls them without a login: open
+`https://github.com/users/kobars/packages/container/realtime-vocab-quiz-api/settings` (and the
+same page for `realtime-vocab-quiz-web`), choose **Change visibility** under **Danger Zone**,
+select **Public** and type the package name to confirm. GitHub's REST API reads a package's
+visibility but cannot change it; `gh api /users/kobars/packages/container/realtime-vocab-quiz-api
+--jq .visibility` prints it (after `gh auth refresh -s read:packages`). While a package is private,
+or before the first publish of a tag, an anonymous pull fails ("denied" or "manifest unknown"):
+`make prod-up`, `make prod-update` and the install script then print a warning and build the
+images on the host from the checkout instead, under the published names, so the stack still
+starts (on 1 GiB that build may run out of memory).
 `gh attestation verify oci://ghcr.io/kobars/realtime-vocab-quiz-api:main -R
 kobars/realtime-vocab-quiz` checks that an image was built by this repository's workflow.
 
 `IMAGE_TAG` in `.env` picks the tag, and [compose.images.yaml](../compose.images.yaml), listed
 in the example's `COMPOSE_FILE`, puts those images in place of the ones `make build` makes. The
 prod targets add that override whenever `IMAGE_TAG` is set, in `.env` or on the command line:
-`make prod-up IMAGE_TAG=1a2b3c4` runs one commit's images. To build the images on the host
+`make prod-up IMAGE_TAG=1a2b3c4` runs one commit's images for that command (set it in `.env` to
+keep them for the other targets). To build the images on the host
 instead (a branch with no published images, or a local change), leave `IMAGE_TAG` empty and drop
 `:compose.images.yaml` from `COMPOSE_FILE`, or run the install with `--build`.
 
@@ -183,12 +193,15 @@ newest commit on GitHub, starts the stack again (pulling the tag's images, or bu
 `IMAGE_TAG` is empty; nginx and Caddy are recreated for new config) and waits for `readyz`.
 `make prod-update REF=<tag or branch>` moves to that ref instead; an install from a tag
 (`--ref v1.2.0`) is on no branch, so its updates name the next tag. On published images, a
-`vX.Y.Z` ref runs that release's images and becomes `IMAGE_TAG` in `.env` once it is ready,
-and a branch other than `main` needs `BUILD=1`, which builds that one update on the host. The
-`main` images follow the branch a few minutes after a merge, once the containers workflow has
-published them. When the update does not get ready, it checks out the commit that ran before
-and starts it on the images that ran before (kept as the `rollback` tag before the pull), then
-exits non-zero with a message that says whether the rollback is ready.
+`vX.Y.Z` ref or a commit's short SHA runs that tag's images and becomes `IMAGE_TAG` in `.env`
+once it is ready; a short-SHA `IMAGE_TAG` follows the checkout to its new commit. A branch other
+than `main` needs `BUILD=1`, which builds the images on the host under the current tag's name
+(the next pull replaces them). The `main` images follow the branch a few minutes after a merge,
+once the containers workflow has published them. When the update does not get ready, it checks
+out the commit that ran before and starts it on the images that ran before (kept as the
+`rollback` tag before the pull, then tagged as `IMAGE_TAG` again, so every prod target runs
+them), then exits non-zero with a message that says whether the rollback is ready. An update of
+a stopped stack keeps no images, so when it fails it puts the checkout back and stops there.
 
 ### Backup and restore
 

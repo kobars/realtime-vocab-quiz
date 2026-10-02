@@ -34,28 +34,45 @@ prod_compose() {
   docker compose "${files[@]}" "$@"
 }
 
-# Starts the stack on the tag's published images, pulled first unless --no-pull, or on images
-# built here from the checkout. The edge's config files are bind-mounted: a changed one shows only
-# in a new nginx or Caddy container, so both are recreated. Each step returns on failure, as an
-# update calls it where set -e does not apply.
+# Builds the tag's images here from the checkout under their published names, so that every prod
+# target runs them until a pull replaces them.
+build_published() {
+  local tag
+  tag=$(image_tag)
+  make build IMAGE_TAG="$tag" || return
+  docker tag "elsaquiz-api:$tag" "$API_IMAGE:$tag" && docker tag "elsaquiz-web:$tag" "$WEB_IMAGE:$tag"
+}
+
+# Starts the stack on the tag's published images, pulled first (--no-pull: the local ones;
+# --build: built here), or, with no tag, on images built here from the checkout. When the pull
+# fails, it builds them here: GHCR keeps a new package private until it is made public, and a tag
+# exists only once the containers workflow has published it. The edge's config files are
+# bind-mounted: a changed one shows only in a new nginx or Caddy container, so both are recreated.
+# Each step returns on failure, as an update calls it where set -e does not apply.
 up() {
   if [[ -z $(image_tag) ]]; then
     make build IMAGE_TAG=dev || return
-  elif [[ ${1:-} != --no-pull ]]; then
-    prod_compose --profile full pull --quiet || return
+  elif [[ ${1:-} == --build ]]; then
+    build_published || return
+  elif [[ ${1:-} != --no-pull ]] && ! prod_compose --profile full pull --quiet; then
+    printf 'warning: could not pull the published %s images (a private or missing package, or a tag not published yet; docs/operations.md, "Image tags"); building them here instead\n' "$(image_tag)" >&2
+    build_published || return
   fi
   prod_compose --profile full up -d --wait --wait-timeout 180 || return
   prod_compose --profile full up -d --wait --wait-timeout 180 --no-deps --force-recreate nginx caddy
 }
 
-# Tags the images that the stack runs now as :rollback, as a pull replaces the tag's local images.
+# Tags the images that the stack runs now as :rollback, as a pull or a build replaces the tag's
+# local images. Returns 1 when the stack is not running, so there is nothing to keep.
 keep_running_images() {
-  local id
-  id=$(prod_compose ps -q api-1)
-  [[ -n $id ]] || die "the stack is not running; start it with make prod-up"
-  docker tag "$(docker inspect --format '{{.Image}}' "$id")" "$API_IMAGE:rollback"
-  id=$(prod_compose ps -q web)
-  docker tag "$(docker inspect --format '{{.Image}}' "$id")" "$WEB_IMAGE:rollback"
+  local api web
+  api=$(prod_compose ps -q api-1) && web=$(prod_compose ps -q web) || return
+  if [[ -z $api || -z $web ]]; then
+    log "The stack is not running, so no images are kept to roll back to"
+    return 1
+  fi
+  docker tag "$(docker inspect --format '{{.Image}}' "$api")" "$API_IMAGE:rollback" &&
+    docker tag "$(docker inspect --format '{{.Image}}' "$web")" "$WEB_IMAGE:rollback"
 }
 
 # Puts the checkout back on BRANCH at COMMIT, or on COMMIT detached when BRANCH is empty.
@@ -67,38 +84,54 @@ go_back() {
   fi
 }
 
+# The published tag of an update's REF: main, a vX.Y.Z tag or a commit's short SHA.
+published_tag() {
+  if [[ $1 =~ ^[0-9a-f]{7}$ ]]; then printf '%s\n' "$1"; else image_tag_for "$1" 0; fi
+}
+
 # Moves to REF (default: the newest commit of the branch the checkout is on; a tag install has
-# none) and restarts on it, on REF's published images when .env names a tag (--build: on images
-# built here, for this run); when the stack does not get ready, goes back to the commit and the
-# images that ran before. A REF that moves the image tag writes it to .env once the stack is ready.
+# none) and restarts on it: on REF's published images when .env names a tag (a short SHA tag
+# follows the checkout to its new commit; --build: images built here under the current tag), else
+# on images built here. When the stack does not get ready, goes back to the commit and the images
+# that ran before. A tag that moves is written to .env once the stack is ready.
 update() {
-  local branch ref before after tag=""
+  local branch ref before after start_tag tag="" build="" kept=""
   if [[ ${1:-} == --build ]]; then
-    export IMAGE_TAG=""
+    build=--build
     shift
   fi
+  start_tag=$(image_tag)
   branch=$(git symbolic-ref -q --short HEAD || true)
   ref=${1:-$branch}
   [[ -n $ref ]] || die "the checkout is on $(git describe --tags --always), not on a branch; name the tag or branch to move to: make prod-update REF=<ref>"
-  if [[ -n $(image_tag) ]]; then
-    [[ -z ${1:-} ]] || tag=$(image_tag_for "$ref" 0)
-    keep_running_images
+  if [[ -n $start_tag ]]; then
+    [[ -z ${1:-} || -n $build ]] || tag=$(published_tag "$ref")
+    keep_running_images && kept=1
   fi
-  [[ -z $tag ]] || export IMAGE_TAG=$tag
   before=$(git rev-parse HEAD)
   if ! checkout "$PWD" "" "$ref"; then
     go_back "$before" "$branch" || die "could not move to $ref, nor back to $before"
     die "could not move to $ref; the stack still runs $before"
   fi
   after=$(git rev-parse HEAD)
-  if up && ready; then
-    [[ -z $tag ]] || render_env .env .env "" "$tag"
+  if [[ -z $tag && -z $build && $start_tag =~ ^[0-9a-f]{7}$ ]]; then tag=${after:0:7}; fi
+  [[ -z $tag ]] || export IMAGE_TAG=$tag
+  if up "$build" && ready; then
+    [[ -z $tag || $tag == "$start_tag" ]] || render_env .env .env "" "$tag"
     log "Updated $before -> $after; the stack is ready"
     return 0
   fi
   printf 'error: %s did not get ready; rolling back to %s\n' "$after" "$before" >&2
   go_back "$before" "$branch" || die "could not check out $before; the checkout has local changes"
-  if [[ -n $(image_tag) ]]; then export IMAGE_TAG=rollback; fi
+  if [[ -n $start_tag ]]; then
+    [[ -n $kept ]] || die "update to $after failed; the checkout is back on $before, but the stack was not running before, so there are no images to go back to; see make prod-logs"
+    # The tag's local images become the ones that ran, so every prod target runs them again.
+    export IMAGE_TAG=$start_tag
+    if ! docker tag "$API_IMAGE:rollback" "$API_IMAGE:$start_tag" ||
+      ! docker tag "$WEB_IMAGE:rollback" "$WEB_IMAGE:$start_tag"; then
+      die "update to $after failed, and the images that ran before could not be tagged back"
+    fi
+  fi
   if up --no-pull && ready; then
     die "update to $after failed; rolled back to $before, which is ready again"
   fi
@@ -184,7 +217,7 @@ restore_volume() {
 }
 
 restore() {
-  local file current="" restored
+  local file current="" current_tag="" restored
   [[ -n $1 ]] || die "usage: ops.sh restore FILE"
   file=$(from_caller "$1")
   [[ -f $file ]] || die "no backup file $file"
@@ -194,6 +227,7 @@ restore() {
   # Without .env no stack runs from here, and compose would refuse to read its files.
   if [[ -f .env ]]; then
     current=$(env_value DOMAIN .env)
+    ! grep -q '^IMAGE_TAG=' .env || current_tag="IMAGE_TAG=$(env_value IMAGE_TAG .env)"
     log "Stopping the stack"
     prod_compose --profile '*' down
     cp -p .env .env.before-restore
@@ -204,6 +238,11 @@ restore() {
   if [[ $restored == *.sslip.io && -n $current && $restored != "$current" ]]; then
     log "Keeping DOMAIN=$current: the backup's $restored is the old host's address"
     render_env .env .env "$current"
+  fi
+  # A backup from before the published images names no image tag: this host keeps its own.
+  if [[ -n $current_tag ]] && ! grep -q '^IMAGE_TAG=' .env; then
+    log "Keeping $current_tag: the backup's .env names no image tag"
+    render_env .env .env "" "${current_tag#IMAGE_TAG=}"
   fi
   log "Restoring the Redis data"
   if ! restore_volume stack-redis "$tmp/redis" "$REDIS_RESTORE"; then

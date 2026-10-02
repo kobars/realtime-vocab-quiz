@@ -282,16 +282,18 @@ FAKE_READY = '[[ $(cat "$STATE") != "${BAD_READY:-}" ]]'
 
 
 # compose's Redis counts one more save after each BGSAVE; each cp writes a file. The Redis restore
-# fails on $REDIS_FAILS. The running api-1 and web containers run the images old-api and old-web;
-# up fails on $BAD_UP on the published images (built ones fail in make).
+# fails on $REDIS_FAILS. The running api-1 and web containers run the images old-api and old-web
+# (none run on $STOPPED); up fails on $BAD_UP on the published images (built ones fail in make),
+# and the pull on $PULL_DENIED, as an anonymous pull of a private package does.
 FAKE_DOCKER = """echo "docker $*" >> "$LOG"
 saves="$(cat "$LOG.saves" 2>/dev/null || echo 0)"
 case "$*" in
   *" up -d "*)
     echo "up on ${IMAGE_TAG-the .env tag} @ $(cat "$STATE")" >> "$LOG"
     [[ $(cat "$STATE") != "${BAD_UP:-}" || $* != *compose.images.yaml* ]] ;;
-  *" ps -q api-1") echo c-api ;;
-  *" ps -q web") echo c-web ;;
+  *" pull --quiet") [[ -z ${PULL_DENIED:-} ]] ;;
+  *" ps -q api-1") [[ -n ${STOPPED:-} ]] || echo c-api ;;
+  *" ps -q web") [[ -n ${STOPPED:-} ]] || echo c-web ;;
   "inspect --format {{.Image}} c-api") echo old-api ;;
   "inspect --format {{.Image}} c-web") echo old-web ;;
   *"redis-cli BGSAVE SCHEDULE") echo $((saves + 1)) > "$LOG.saves" ;;
@@ -413,12 +415,12 @@ PULL_ENV = OLD_ENV + "IMAGE_TAG=main\n"
         ({}, ["up on the .env tag @ new"], "Updated old -> new"),
         (
             {"BAD_UP": "new"},
-            ["up on the .env tag @ new", "up on rollback @ old"],
+            ["up on the .env tag @ new", "up on main @ old"],
             "rolled back to old, which is ready again",
         ),
         (
             {"BAD_READY": "new"},
-            ["up on the .env tag @ new", "up on rollback @ old"],
+            ["up on the .env tag @ new", "up on main @ old"],
             "rolled back to old, which is ready again",
         ),
     ],
@@ -426,16 +428,26 @@ PULL_ENV = OLD_ENV + "IMAGE_TAG=main\n"
 def test_an_update_on_published_images_rolls_back_to_the_images_that_ran(
     tmp_path: Path, env: dict[str, str], ups: list[str], message: str
 ) -> None:
-    """A pull replaces the tag's local images, so the running ones are kept as :rollback first."""
+    """A pull replaces the tag's local images, so the running ones are kept as :rollback first;
+    a rollback makes them the tag's local images again, so every prod target runs them."""
     code, log, out, _ = _ops(tmp_path, "update", dot_env=PULL_ENV, **env)
     assert code == (0 if env == {} else 1), out
     assert message in out
     tags = [c for c in log if c.startswith("docker tag ")]
-    assert tags == [
+    assert tags[:2] == [
         "docker tag old-api ghcr.io/kobars/realtime-vocab-quiz-api:rollback",
         "docker tag old-web ghcr.io/kobars/realtime-vocab-quiz-web:rollback",
     ]
-    assert log.index(tags[-1]) < next(i for i, c in enumerate(log) if c.startswith("git merge"))
+    assert tags[2:] == (
+        []
+        if env == {}
+        else [
+            f"docker tag ghcr.io/kobars/realtime-vocab-quiz-{name}:rollback "
+            f"ghcr.io/kobars/realtime-vocab-quiz-{name}:main"
+            for name in ("api", "web")
+        ]
+    )
+    assert log.index(tags[1]) < next(i for i, c in enumerate(log) if c.startswith("git merge"))
     pulls = [c for c in log if c.endswith(" pull --quiet")]
     assert len(pulls) == 1  # the rollback runs the kept images without a pull
     assert all("-f compose.images.yaml" in c for c in [*pulls, *log] if " compose " in c)
@@ -460,7 +472,7 @@ def test_a_failed_update_to_a_release_tag_leaves_the_env_tag(tmp_path: Path) -> 
     assert code == 1, out
     assert list(dict.fromkeys(c for c in log if c.startswith("up on "))) == [
         "up on v2.0.0 @ v2.0.0",
-        "up on rollback @ old",
+        "up on main @ old",
     ]
     assert (repo / ".env").read_text(encoding="utf-8") == PULL_ENV
 
@@ -474,14 +486,66 @@ def test_an_update_to_a_branch_needs_build_on_published_images(tmp_path: Path) -
         tmp_path, "update", "--build", "my-branch", dot_env=PULL_ENV, DETACHED="1"
     )
     assert code == 0, out
-    assert [c for c in log if c.startswith("make")] == ["make build IMAGE_TAG=dev @ my-branch"]
+    assert [c for c in log if c.startswith("make")] == ["make build IMAGE_TAG=main @ my-branch"]
 
 
-def test_an_update_with_build_builds_here_despite_the_image_tag(tmp_path: Path) -> None:
+BUILT_AS_MAIN = [
+    "docker tag elsaquiz-api:main ghcr.io/kobars/realtime-vocab-quiz-api:main",
+    "docker tag elsaquiz-web:main ghcr.io/kobars/realtime-vocab-quiz-web:main",
+]
+
+
+def test_an_update_with_build_builds_here_under_the_image_tag(tmp_path: Path) -> None:
+    """The build takes the published names, so every prod target runs it until a pull."""
     code, log, out, _ = _ops(tmp_path, "update", "--build", dot_env=PULL_ENV)
     assert code == 0, out
-    assert [c for c in log if c.startswith("make")] == ["make build IMAGE_TAG=dev @ new"]
-    assert not any("compose.images.yaml" in c or c.startswith("docker tag") for c in log)
+    assert [c for c in log if c.startswith("make")] == ["make build IMAGE_TAG=main @ new"]
+    assert [c for c in log if c.startswith("docker tag elsaquiz-")] == BUILT_AS_MAIN
+    assert not any(c.endswith(" pull --quiet") for c in log)
+    assert all("-f compose.images.yaml" in c for c in log if " compose " in c)
+
+
+@pytest.mark.parametrize("args", [["up"], ["update"]])
+def test_images_that_cannot_be_pulled_are_built_here(tmp_path: Path, args: list[str]) -> None:
+    """A new GHCR package is private, and a tag is published only after its push: the host
+    still starts, on images built from its checkout."""
+    code, log, out, _ = _ops(tmp_path, *args, dot_env=PULL_ENV, PULL_DENIED="1")
+    assert code == 0, out
+    assert "could not pull the published main images" in out
+    assert "building them here instead" in out
+    assert [c for c in log if c.startswith("make")] == [
+        f"make build IMAGE_TAG=main @ {'new' if args == ['update'] else 'old'}"
+    ]
+    assert [c for c in log if c.startswith("docker tag elsaquiz-")] == BUILT_AS_MAIN
+    assert any(c.startswith("up on ") for c in log)
+
+
+def test_an_update_of_a_stopped_stack_starts_it_but_cannot_roll_back(tmp_path: Path) -> None:
+    code, log, out, _ = _ops(tmp_path, "update", dot_env=PULL_ENV, STOPPED="1")
+    assert code == 0, out
+    assert "no images are kept to roll back to" in out
+    assert not any(c.startswith("docker tag") for c in log)
+    retry = tmp_path / "failed"
+    retry.mkdir()
+    code, log, out, _ = _ops(retry, "update", dot_env=PULL_ENV, STOPPED="1", BAD_READY="new")
+    assert code == 1
+    assert "there are no images to go back to" in out
+    assert BACK == [c for c in log if c.startswith(("git checkout", "git reset"))][-2:]
+
+
+def test_a_short_sha_tag_follows_the_checkout_and_a_short_sha_ref_is_published(
+    tmp_path: Path,
+) -> None:
+    """A commit's tag never moves: an update runs the new commit's images and keeps its tag.
+    (The stub git names the new commit "new", so its short SHA is "new" too.)"""
+    code, log, out, repo = _ops(tmp_path, "update", dot_env=OLD_ENV + "IMAGE_TAG=0a1b2c3\n")
+    assert code == 0, out
+    assert next(c for c in log if c.startswith("up on ")) == "up on new @ new"
+    assert _env(repo / ".env")["IMAGE_TAG"] == "new"
+    code, log, out, repo = _ops(tmp_path, "update", "1a2b3c4", DETACHED="1")
+    assert code == 0, out
+    assert next(c for c in log if c.startswith("up on ")) == "up on 1a2b3c4 @ 1a2b3c4"
+    assert _env(repo / ".env")["IMAGE_TAG"] == "1a2b3c4"
 
 
 BOTH = "-f compose.yaml -f compose.prod.yaml"
@@ -561,6 +625,19 @@ def test_a_restore_onto_a_new_host_keeps_its_own_sslip_io_name(tmp_path: Path) -
         "ADMIN_TOKEN": "old",
     }
     assert (repo / ".env").stat().st_mode & 0o077 == 0
+
+
+def test_a_restore_of_a_backup_without_an_image_tag_keeps_the_hosts_own(tmp_path: Path) -> None:
+    """A backup from before the published images would otherwise switch the host to building."""
+    backup, repo = _backup(tmp_path)
+    (repo / ".env").write_text(PULL_ENV.replace("old", "fresh"), encoding="utf-8")
+    code, log, out, _ = _ops(tmp_path, "restore", str(backup))
+    assert code == 0, out
+    assert "Keeping IMAGE_TAG=main" in out
+    assert _env(repo / ".env")["ADMIN_TOKEN"] == "old"
+    assert _env(repo / ".env")["IMAGE_TAG"] == "main"
+    assert _env(repo / ".env")["COMPOSE_FILE"].endswith(":compose.images.yaml")
+    assert not any(c.startswith("make") for c in log)
 
 
 def test_a_snapshot_that_does_not_load_puts_the_previous_env_back_and_restarts(

@@ -383,7 +383,7 @@ The Dockerfiles, `compose.yaml`, the CI Redis service and the integration-test f
 
 - A small Droplet runs the stack, and an update is a pull: about the time to download two images.
 - The `main` images trail a merge by the workflow's run time; `make prod-update` started earlier pulls the previous `main` images with the new checkout's config.
-- A new GHCR package starts private: each is set to public once, so a VM pulls without a login.
+- A new GHCR package starts private: each is set to public once, so a VM pulls without a login. Until then, and before a tag's first publish, the pull fails and the host builds the images itself under the published names, so a fresh install still starts.
 - The tag `realtime-vocab-quiz` marks what `make do-destroy` deletes: one Droplet per account and tag at a time, and nothing else with that tag should exist.
 
 <!-- AI-ASSISTED-END -->
