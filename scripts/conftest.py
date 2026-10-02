@@ -28,7 +28,7 @@ class Repo:
             text=True,
         ).stdout
 
-    def commit(self, files: Mapping[str, str | None], message: str = "") -> str:
+    def commit(self, files: Mapping[str, str | bytes | None], message: str = "") -> str:
         """Write each file (None deletes it), commit everything and return the commit."""
         for name, text in files.items():
             if text is None:
@@ -36,7 +36,10 @@ class Repo:
                 continue
             path = self.path / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
+            if isinstance(text, bytes):
+                path.write_bytes(text)
+            else:
+                path.write_text(text, encoding="utf-8")
         self.git("add", "-A")
         self.git("commit", "-q", "--allow-empty", "-m", message or f"Change files\n\n{TRAILER}")
         return self.git("rev-parse", "HEAD").strip()

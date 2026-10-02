@@ -58,9 +58,20 @@ def test_lock_and_generated_files_are_left_out(pr_repo: Repo) -> None:
             "web/src/protocol/types.generated.ts": "export type A = 1\n",
             "contracts/schema/protocol.json": "{}\n",
             "web/src/components/ui/button/Button.vue": "<template />\n",
+            "web/src/components/ui/ui.test.ts": "test('a', () => {})\n",
         }
     )
-    assert list(review_budget.review_input(base, "HEAD")) == ["app.py"]
+    assert list(review_budget.review_input(base, "HEAD")) == [
+        "app.py",
+        "web/src/components/ui/ui.test.ts",
+    ]
+
+
+def test_a_file_that_is_not_utf8_is_still_counted(pr_repo: Repo) -> None:
+    base = pr_repo.git("rev-parse", "HEAD").strip()
+    pr_repo.commit({"latin.txt": b"caf\xe9\n"})
+    (text,) = review_budget.review_input(base, "HEAD").values()
+    assert text.endswith("caf\udce9\n")
 
 
 def test_a_renamed_file_counts_its_diff_and_its_new_contents(pr_repo: Repo) -> None:

@@ -87,7 +87,7 @@ def main(count: Callable[[str], int] | None = None) -> int:
             f"::{name} title=Review budget::{message} ({total:,} tokens, {name} at {threshold:,})"
         )
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
-        with Path(summary).open("a", encoding="utf-8") as file:
+        with Path(summary).open("a", encoding="utf-8", errors="replace") as file:
             file.write(_step_summary(total, tokens, name))
     return 1 if name == "error" else 0
 

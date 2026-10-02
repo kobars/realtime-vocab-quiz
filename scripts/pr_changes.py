@@ -19,11 +19,17 @@ class Change:
 
 
 def git(*args: str) -> str:
+    """Run git and return its output; bytes that are not UTF-8 decode as lone surrogates.
+
+    A path read this way goes back to git unchanged, because subprocess encodes arguments
+    with the same error handler.
+    """
     return subprocess.run(
         ["git", "--literal-pathspecs", *args],  # noqa: S607
         check=True,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="surrogateescape",
     ).stdout
 
 
