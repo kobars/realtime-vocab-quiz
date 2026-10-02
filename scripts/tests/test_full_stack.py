@@ -103,20 +103,26 @@ def test_a_refused_upgrade_is_not_replayed_and_a_503_takes_no_node_out() -> None
     assert _directive("server api-[12]:8000") == ["resolve max_fails=0"] * 2
 
 
+def test_the_edge_ceilings_hold_for_the_whole_stack_behind_any_proxy() -> None:
+    """Behind Caddy, $remote_addr names each client: the zones key on one constant instead, so
+    they stay stack-wide ceilings, and the nodes limit each address."""
+    assert re.search(r'map "" \$whole_stack \{\s*default stack;\s*\}', NGINX)
+    assert _directive("limit_req_zone") == ["$whole_stack zone=identity:10m rate=1000r/s"]
+    assert _directive("limit_conn_zone") == ["$whole_stack zone=api_conn:10m"]
+
+
 def test_the_identity_rate_limit_lets_a_load_run_join() -> None:
-    """Every client shares one address at the edge: 5,000 sockets, a session and a ticket each."""
+    """The ceiling holds for the whole stack: 5,000 sockets, a session and a ticket each."""
     (rate,) = re.findall(r"zone=identity:10m rate=(\d+)r/s", NGINX)
     for burst in re.findall(r"limit_req zone=identity burst=(\d+) nodelay", NGINX):
         assert int(burst) + 10 * int(rate) >= 2 * 5_000
 
 
 def test_the_edge_cuts_slow_requests_and_caps_the_api_requests_in_flight() -> None:
-    """Every client shares one address at the edge, so the cap holds for the whole stack: above
-    the bot swarm's 100 HTTP connections per process at 10 processes."""
+    """The cap holds for the whole stack: above the bot swarm's 100 HTTP connections per process
+    at 10 processes."""
     assert _directive("client_header_timeout") == ["10s"]
     assert _directive("client_body_timeout") == ["10s"]
-    (zone,) = _directive("limit_conn_zone")
-    assert zone == "$binary_remote_addr zone=api_conn:10m"
     (api,) = re.findall(r"location /api/ \{(.*?)\n        \}", NGINX, re.DOTALL)
     (cap,) = re.findall(r"^            limit_conn api_conn (\d+);", api, re.MULTILINE)
     assert int(cap) >= 10 * 100
@@ -163,6 +169,7 @@ def test_caddy_is_hardened_and_never_on_the_stack_network() -> None:
     for key in ("read_only", "tmpfs", "cap_drop", "security_opt", "ulimits", "restart"):
         assert caddy[key] == FULL["nginx"][key]
     assert caddy["cap_add"] == ["NET_BIND_SERVICE"]
+    assert caddy["user"].split(":")[0] not in ("", "0", "root")  # the image's default is root
     assert caddy["networks"] == ["edge"]  # apart from Redis and the API nodes
     assert PROD["services"]["nginx"]["networks"] == ["stack", "edge"]
 
@@ -204,6 +211,8 @@ def test_the_public_host_example_env_names_the_origin_and_the_default_cap() -> N
     assert env["ALLOWED_ORIGINS"] == "https://${DOMAIN}"
     assert env["ADMIN_TOKEN"] == env["REDIS_PASSWORD"] == ""  # a comment would be the value
     assert int(env["PER_IP_CONN_CAP"]) == Settings.model_fields["per_ip_conn_cap"].default
+    # Plain `docker compose`, make demo's and make down's included, then acts on the HTTPS stack.
+    assert env["COMPOSE_FILE"] == "compose.yaml:compose.prod.yaml"
     assert re.fullmatch(r"\d+[mg]b", env["REDIS_MAXMEMORY"])
 
 
@@ -214,3 +223,28 @@ def test_the_public_host_targets_run_both_compose_files() -> None:
         recipe = re.search(rf"^{target}:.*\n\t(.*)", makefile, re.MULTILINE)
         assert recipe is not None
         assert recipe[1].startswith("$(PROD_COMPOSE) ")
+
+
+def test_prod_up_recreates_the_edge_so_a_pulled_config_change_applies() -> None:
+    """git replaces a changed file, and a running container keeps the old bind-mounted one."""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    (recipe,) = re.findall(r"^prod-up:.*\n((?:\t.*\n)+)", makefile, re.MULTILINE)
+    assert recipe.splitlines()[-1].endswith("--no-deps --force-recreate nginx caddy")
+
+
+def test_caddy_keeps_the_admin_token_and_the_socket_ticket_out_of_its_logs() -> None:
+    """A failed upstream request is logged with its headers and URI; Caddy redacts only
+    Authorization and cookies by itself."""
+    caddyfile = (ROOT / "infra" / "caddy" / "Caddyfile").read_text(encoding="utf-8")
+    (global_options,) = re.findall(r"\A(?:#.*\n)*\{\n(.*?)\n\}\n", caddyfile, re.DOTALL)
+    assert re.search(r"^\t\tformat filter \{", global_options, re.MULTILINE)
+    assert "request>headers>X-Admin-Token delete" in global_options
+    assert re.search(r"request>uri query \{\s*replace ticket REDACTED\s*\}", global_options)
+
+
+def test_the_https_ci_job_starts_from_the_example_env() -> None:
+    """Its .env is the shipped example, whose COMPOSE_FILE every docker compose call there uses."""
+    stack = (ROOT / ".github" / "workflows" / "stack.yml").read_text(encoding="utf-8")
+    (prod,) = re.findall(r"^  prod:\n(.*?)\n  [a-z-]+:\n", stack, re.DOTALL | re.MULTILINE)
+    assert "cp .env.prod.example .env" in prod
+    assert " -f compose" not in prod  # COMPOSE_FILE from the example's .env

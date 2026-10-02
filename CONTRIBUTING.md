@@ -94,7 +94,7 @@ Every pull request and every push to `main` runs these GitHub Actions workflows:
   marks `linguist-generated` (lock files, generated contracts, shadcn-vue components).
 - `containers.yml`: the container and infrastructure files. hadolint (`.hadolint.yaml`),
   shellcheck, `docker compose config` (alone and with `compose.prod.yaml`), `scripts/check_nginx.sh` (`nginx -t` on the web image's
-  site and on any `nginx.conf` under `infra/`), Trivy on the configuration (fails on any
+  site and on any `nginx.conf` under `infra/`, also with the real-ip template of `compose.prod.yaml` rendered), Trivy on the configuration (fails on any
   finding) and on both images (fails on a CRITICAL or HIGH finding that has a fix), and
   `scripts/smoke_images.sh`. The smoke test runs each image as a non-root user on a read-only
   root filesystem until its healthcheck passes, then checks that the web image sends every

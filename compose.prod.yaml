@@ -12,10 +12,13 @@ services:
     profiles: [full]
     image: caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
     restart: unless-stopped
+    # Not root: the image's /data/caddy and /config/caddy, copied into new volumes, are writable
+    # by any user.
+    user: "65532:65532"
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
-    cap_add: [NET_BIND_SERVICE] # 80 and 443
+    cap_add: [NET_BIND_SERVICE] # 80 and 443; the caddy binary also needs it to start
     security_opt: ["no-new-privileges:true"]
     ulimits:
       nofile: 65536

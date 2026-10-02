@@ -114,14 +114,20 @@ jobs:
           enable-cache: true
           cache-dependency-glob: api/uv.lock
       - name: stack settings
-        run: printf 'DOMAIN=localhost\nALLOWED_ORIGINS=https://localhost\nTLS_ISSUER=internal\nADMIN_TOKEN=%s\nREDIS_PASSWORD=%s\n' "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" > .env
+        # The shipped example, edited as docs/operations.md does, plus Caddy's local CA. Its
+        # COMPOSE_FILE makes every docker compose call below run the override too.
+        run: |
+          cp .env.prod.example .env
+          sed -i "s/^DOMAIN=.*/DOMAIN=localhost/" .env
+          sed -i "s/^ADMIN_TOKEN=$/&$(openssl rand -hex 24)/; s/^REDIS_PASSWORD=$/&$(openssl rand -hex 24)/" .env
+          echo TLS_ISSUER=internal >> .env
       - run: make prod-up
       - name: trust Caddy's local CA
         # Caddy writes its root certificate once it has issued the first one. The tests trust it
         # next to the system's CAs, which uv needs to download Python.
         run: |
           for _ in $(seq 30); do
-            docker compose -f compose.yaml -f compose.prod.yaml cp caddy:/data/caddy/pki/authorities/local/root.crt caddy-root.crt && break
+            docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt caddy-root.crt && break
             sleep 1
           done
           curl --fail --silent --show-error --retry 10 --retry-all-errors --cacert caddy-root.crt "$STACK_URL/api/readyz"
@@ -130,7 +136,7 @@ jobs:
         env:
           SSL_CERT_FILE: ${{ github.workspace }}/ca-bundle.crt
       - if: failure()
-        run: docker compose -f compose.yaml -f compose.prod.yaml --profile full logs --no-color --timestamps > stack-logs.txt
+        run: docker compose --profile full logs --no-color --timestamps > stack-logs.txt
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

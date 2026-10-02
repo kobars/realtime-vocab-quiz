@@ -28,8 +28,9 @@ player's address from Caddy, so the per-address caps count every player apart.
    `{"status":"ready"}`.
 5. `make prod-demo` starts a fresh 60-minute quiz and prints its HTTPS player URL.
    `make prod-logs` follows the logs and `make prod-down` stops the stack; the quiz data and
-   the certificate stay in their volumes.
-6. To update: `git pull && make prod-up`.
+   the certificate stay in their volumes. The example's `COMPOSE_FILE` makes plain
+   `docker compose` and the other make targets act on this stack too.
+6. To update: `git pull && make prod-up`, which also recreates nginx and Caddy for new config.
 
 The admin API stays the mock one (`ADMIN_MOCK=1`): anyone who holds `ADMIN_TOKEN` can create and
 end quizzes, and the token is its only guard, so keep `.env` private.

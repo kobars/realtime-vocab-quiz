@@ -85,8 +85,10 @@ new-quiz: ## Start a fresh 60-min quiz on the running stack; print its ID and pl
 demo-end: ## End quiz ID=<id> now as the mock host; its players see the final results
 	$(if $(ID),,$(error set ID=<quiz id>, as make demo printed it))
 	docker compose --progress quiet run --rm -T seed python /opt/seed.py --end '$(ID)'
+# The edge's config files are bind-mounted: a pulled change shows only in a new nginx or Caddy container.
 prod-up: build ## Build and start the full stack behind HTTPS on a public host (.env from .env.prod.example)
 	$(PROD_COMPOSE) --profile full up -d --wait --wait-timeout 180
+	$(PROD_COMPOSE) --profile full up -d --wait --wait-timeout 180 --no-deps --force-recreate nginx caddy
 prod-down: ## Stop the public host's stack; its data and certificates stay
 	$(PROD_COMPOSE) --profile '*' down
 prod-logs: ## Follow the logs of the public host's stack

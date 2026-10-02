@@ -44,12 +44,29 @@ async def test_https_replies_tell_browsers_to_stay_on_https(http: httpx.AsyncCli
     assert reply.headers["Strict-Transport-Security"] == "max-age=31536000"
 
 
+def _local_caddy() -> str:
+    """The docker binary, when this folder's compose.prod.yaml stack runs Caddy; skip otherwise,
+    as for a deployed host checked from another machine."""
+    docker = shutil.which("docker")
+    if docker:
+        ps = subprocess.run(  # noqa: S603 - docker with fixed arguments
+            [docker, *PROD_COMPOSE, "ps", "--status", "running", "--services"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        if "caddy" in ps.stdout.split():
+            return docker
+    pytest.skip("no local compose.prod.yaml stack: the check runs in its Caddy container")
+
+
 def test_two_client_addresses_behind_the_proxy_get_two_session_buckets() -> None:
     """Each node allows one address a bucket of 2 x PER_IP_CONN_CAP sessions, and nginx spreads
     the requests over both nodes: once the first address is refused, the second is not."""
     bound = 8 * Settings().per_ip_conn_cap  # make test-system exports .env
-    docker = shutil.which("docker") or pytest.fail("the check runs in the Caddy container")
-    exec_ = [docker, *PROD_COMPOSE, "exec", "-T", "caddy", "sh", "-c", SESSIONS, "sh"]
+    exec_ = [_local_caddy(), *PROD_COMPOSE, "exec", "-T", "caddy", "sh", "-c", SESSIONS, "sh"]
     run = subprocess.run(  # noqa: S603 - docker with fixed arguments
         [*exec_, "198.51.100.1", "198.51.100.2", str(bound)],
         cwd=REPO,
@@ -58,5 +75,6 @@ def test_two_client_addresses_behind_the_proxy_get_two_session_buckets() -> None
         check=True,
         timeout=120,
     )
+    assert len(run.stdout.split()) == 3, f"no status from nginx: {run.stdout!r} {run.stderr!r}"
     accepted, first, second = run.stdout.split()
     assert (first, second) == ("429", "201"), f"after {accepted} sessions from the first address"
