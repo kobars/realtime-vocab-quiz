@@ -372,9 +372,9 @@ async def test_host_mark_survives_a_clock_step_back(
     await started(store, quiz_id, "a")
     assert await store.end_quiz(quiz_id, "host") == End("marked")
     await advance(-1)
-    assert (await store.snapshot(quiz_id, None)).status == "ended"
-    assert (await store.ranks_of(quiz_id, [])).status == "ended"
-    assert (await store.standings_page(quiz_id, 0, 10)).final
+    assert (await store.snapshot(quiz_id, None)).status == "open"  # until it is announced
+    assert (await store.ranks_of(quiz_id, [])).status == "open"
+    assert not (await store.standings_page(quiz_id, 0, 10)).final
     assert await refused(store.join(quiz_id, "b", "B", "c-b")) == ErrorCode.QUIZ_ENDED
     late = store.apply_answer(quiz_id, "a", 0, 0, "s1", "c-a")
     assert await refused(late) == ErrorCode.QUIZ_ENDED

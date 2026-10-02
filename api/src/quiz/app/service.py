@@ -107,12 +107,18 @@ class QuizService:
             self._refills.pop(quiz_id, None)
 
     async def _write[T](self, quiz_id: str, call: Awaitable[T]) -> T:
-        """Run a store write; its refusal at the deadline announces the end (redis.md §3.1)."""
+        """Run a store write; its refusal at the deadline announces the end (redis.md §3.1).
+
+        Before the deadline the refusal comes from a host mark that may not be durable yet,
+        so it is ``UNAVAILABLE``, which clients retry, never the final ``QUIZ_ENDED``."""
         try:
             return await call
         except DomainError as error:
             if error.code is ErrorCode.QUIZ_ENDED and error.end_seq is None:
-                await self._store.end_quiz(quiz_id, "deadline")  # not_due: a host mark only
+                end = await self._store.end_quiz(quiz_id, "deadline")
+                if end.status == "not_due":
+                    text = "the end is being confirmed"
+                    raise DomainError(ErrorCode.UNAVAILABLE, text) from error
             raise
 
     async def handle(self, conn: Connection, msg: m.ClientMessage) -> Outcome:

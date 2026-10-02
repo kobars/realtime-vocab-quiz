@@ -360,6 +360,21 @@ async def test_first_writes_after_the_deadline_announce_the_end(
     assert (snapshot.status, error.code, store.ends) == ("ended", E.QUIZ_ENDED, 3)
 
 
+async def test_an_unannounced_host_mark_is_unavailable_and_reads_open(
+    service: QuizService, store: SpyStore
+) -> None:
+    conn = await joined(service)
+    await send(service, conn, m.Next(questionIndex=0))
+    assert await store.end_quiz(QUIZ, "host") == End("marked")  # not announced yet
+    assert await refused(service, conn, answer(0)) == (E.UNAVAILABLE, None)
+    late = Connection("c-b", "b")
+    join = m.Join(quizId=QUIZ, displayName="B")
+    assert (await refused(service, late, join), late.read_only) == ((E.UNAVAILABLE, None), False)
+    assert (await service.snapshot(QUIZ, "a")).status == "open"
+    assert await store.end_quiz(QUIZ, "host") == End("ended", 1)
+    assert await refused(service, conn, answer(0)) == (E.QUIZ_ENDED, None)
+
+
 async def test_clock_step_back_counts_once_and_never_on_a_replay(
     service: QuizService, store: SpyStore, metric: Callable[..., float]
 ) -> None:

@@ -96,7 +96,9 @@ class MemoryStore:
         return quiz
 
     def _status(self, quiz: _Quiz) -> Literal["open", "ended"]:
-        return "open" if quiz.state.is_open(self._clock()) else "ended"
+        """Ended once announced or due; a host mark alone still reads open (redis.md §3.1)."""
+        due = self._clock() >= quiz.deadline_ms
+        return "ended" if quiz.end_seq is not None or due else "open"
 
     def _shown(self, rows: list[Row]) -> list[Row]:
         """A frame's entries: every row up to ``full_list_max`` players, else the top N."""
@@ -235,7 +237,7 @@ class MemoryStore:
             raise DomainError(ErrorCode.INVALID_MESSAGE, msg)
         quiz = self._quiz(quiz_id)
         async with quiz.lock:
-            rows, final = quiz.rows(), not quiz.state.is_open(self._clock())
+            rows, final = quiz.rows(), self._status(quiz) == "ended"
             return port.Page(quiz.state.seq, len(rows), final, tuple(rows[offset : offset + limit]))
 
     async def snapshot(self, quiz_id: str, user_id: str | None) -> port.Snapshot:

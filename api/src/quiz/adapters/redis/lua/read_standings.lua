@@ -1,7 +1,9 @@
 -- AI-ASSISTED: read_standings of docs/spec/redis.md §3: every standings read at one seq.
 -- ARGV: offset, limit (0: the broadcast rows; -1: no rows), topN, fullListMax, then user ids. Returns ok, seq,
 -- playerCount, onlineCount, status, the rows, then per user {rank, name, total} or nil. Writes nothing.
-local meta = redis.call('HMGET', KEYS[K.meta], 'deadlineMs', 'endedMs')
+-- The status is ended once quiz_ended is announced or the deadline passed: a host mark alone is not
+-- durable yet, and clients act on ended for good (redis.md §3.1).
+local meta = redis.call('HMGET', KEYS[K.meta], 'deadlineMs', 'endSeq')
 if not meta[1] then
   return {'QUIZ_NOT_FOUND'}
 end
