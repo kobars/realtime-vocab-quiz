@@ -1,3 +1,5 @@
 # Video sites and claude.ai answer CI runners with bot walls, 403s and 429s; these links are checked by hand.
 ^https://www\.youtube\.com/
 ^https://claude\.ai/
+# The local stack and dev servers (localhost, 127.0.0.1) run only on a developer's machine.
+^https?://(localhost|127\.0\.0\.1)([:/]|$)

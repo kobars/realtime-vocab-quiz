@@ -527,3 +527,44 @@ def test_a_failed_scheduled_run_of_each_workflow_is_reported_in_an_issue(workflo
     others = [j for j in _job_ids(path) if j != "scheduled-failure"]
     assert needed
     assert set(needed) <= set(others), needed
+
+
+def _link_ignores() -> list[re.Pattern[str]]:
+    """Return the URL patterns of .lycheeignore, which the online link check skips."""
+    lines = (ROOT / ".lycheeignore").read_text(encoding="utf-8").splitlines()
+    return [re.compile(line) for line in lines if line.strip() and not line.startswith("#")]
+
+
+def _loopback_links() -> set[str]:
+    """Return every http(s) link to localhost or 127.0.0.1 in the tracked Markdown files."""
+    files = subprocess.run(
+        ["git", "ls-files", "*.md"],  # noqa: S607
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    loopback = re.compile(r"https?://(?:localhost|127\.0\.0\.1)[^\s<>)\]`'\"]*")
+    return {
+        url for name in files for url in loopback.findall((ROOT / name).read_text(encoding="utf-8"))
+    }
+
+
+def test_the_online_link_check_skips_the_local_dev_server_links() -> None:
+    # The dev servers run only on a developer's machine, so the weekly run cannot reach them.
+    links = _loopback_links()
+    assert "http://localhost:5173/q/VOCAB-42" in links
+    unmatched = [url for url in links if not any(p.search(url) for p in _link_ignores())]
+    assert not unmatched
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/astral-sh/uv",
+        "http://localhost.example.com/",
+        "https://localhost-x.dev/",
+    ],
+)
+def test_the_online_link_check_still_checks_public_links(url: str) -> None:
+    assert not any(p.search(url) for p in _link_ignores())
