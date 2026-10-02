@@ -30,6 +30,25 @@ Every commit carries the trailer `AI-Assisted: Claude Code (<model>)`, and every
 the AI wrote or changed carries an `AI-ASSISTED:` marker. Dependabot's commits are the
 exception: a bot writes them, so they carry no trailer, and a PR made only of them has no entry.
 
+**How AI-written code was verified.** No AI output counted as done on its own say-so:
+
+- **Tests first.** New behavior gets a test that fails without the change, and the entry says so:
+  [PR-156](PR-156.md) wrote its skip check test-first and broke `score_answer.lua` on purpose to
+  see the invariants test fail; in [PR-122](PR-122.md) the Redis guard's test fails without the
+  fixture and passes with it.
+- **One gate, run twice.** `make check` runs before every push and CI runs it again with the
+  Redis, stack, container and security workflows. In [PR-196](PR-196.md) a `make check` test
+  found DESIGN.md missing a new route and script; in [PR-147](PR-147.md) the CI secret scan
+  flagged an inline token in a README command.
+- **Two independent reviewers per PR.** Claude Code `/code-review` and Codex review each PR
+  (**Tools** above names the exceptions), and every finding is checked against the code and
+  marked confirmed or refuted before anything is fixed: 7 confirmed and 4 refuted in [PR-180](PR-180.md), 9 confirmed and 1 refuted in
+  [PR-175](PR-175.md).
+- **End to end and under load.** System tests and browser specs run against the composed stack
+  ([PR-161](PR-161.md), which removed nginx's `Upgrade` header to see four tests fail), and the
+  bot swarm measures the latency target on two nodes ([PR-168](PR-168.md); since
+  [PR-176](PR-176.md) a run that misses it fails).
+
 **Where to start**, one or two entries per area:
 
 - Scoring and the Redis store: [PR-10](PR-10.md) (the scoring rule), [PR-61](PR-61.md) (the serve and score scripts).
