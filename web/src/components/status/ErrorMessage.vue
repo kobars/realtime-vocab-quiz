@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: a short message for the errors the player should see, and the blocking clay card for the store's blocked state: "Use this tab", "Reload" or "Try again" (UI spec §3.7, §4.3). -->
+<!-- AI-ASSISTED: a short message for the errors the player should see, and the blocking clay card for the store's blocked state: "Use this tab", "Reload", "Try again" or "Back to join" (UI spec §3.7, §4.3). -->
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
@@ -45,7 +45,21 @@ function act(): void {
     <p class="text-xl font-extrabold">
       {{ strings.blocked[store.blocked].title }}
     </p>
+    <!-- A quiz that no longer exists has nothing to join again: the action leaves for the join screen. -->
     <Button
+      v-if="store.blocked === 'gone'"
+      ref="button"
+      as-child
+    >
+      <RouterLink
+        to="/"
+        data-test="back"
+      >
+        {{ strings.blocked.gone.action }}
+      </RouterLink>
+    </Button>
+    <Button
+      v-else
       ref="button"
       @click="act"
     >

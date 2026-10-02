@@ -15,6 +15,7 @@ export const strings = {
     nameTooLong: 'Use at most 32 characters',
     notFound: 'No quiz with this ID',
     failed: 'Could not join, try again',
+    resume: (quizId: string) => `Resume quiz ${quizId}`,
     ended: 'This quiz has ended. You can still see the final results.',
     preview: {
       open: 'Open',
@@ -35,6 +36,7 @@ export const strings = {
     rule: 'Correct answers score 100–150 points, more when faster; wrong or late answers score 0.',
     start: 'Start',
     continue: 'Continue',
+    loading: 'Loading the question…',
     secondsLeft: (seconds: number) => `${seconds} seconds left`,
     checking: 'Checking…',
     timeUp: "Time's up: an answer now scores 0.",
@@ -72,6 +74,7 @@ export const strings = {
     version: { title: 'A new version is available.', action: 'Reload' },
     policy: { title: "Can't connect to this quiz.", action: 'Reload' },
     unreachable: { title: "Still can't connect.", action: 'Try again' },
+    gone: { title: 'This quiz is no longer available.', action: 'Back to join' },
   },
   leaderboard: {
     title: 'Leaderboard',
