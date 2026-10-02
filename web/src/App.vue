@@ -1,12 +1,22 @@
-<!-- AI-ASSISTED: the app layout: a sticky clay header with the wordmark, the routed screen and the toast outlet. -->
+<!-- AI-ASSISTED: the app layout: a skip link to the main region, a sticky clay header with the wordmark, the routed screen and the toast outlet (UI spec §6.2). -->
 <script setup lang="ts">
 import { Sparkles } from '@lucide/vue'
+import { useTemplateRef } from 'vue'
 import { Toaster } from '@/components/ui/sonner'
 import { strings } from '@/strings'
+
+const main = useTemplateRef<HTMLElement>('main')
 </script>
 
 <template>
   <div class="flex min-h-dvh flex-col">
+    <!-- Above the window until it has the focus. It moves the focus itself: the router would read a hash as a route change. -->
+    <a
+      href="#main"
+      data-test="skip-link"
+      class="fixed top-2 left-4 z-20 inline-flex min-h-11 -translate-y-[calc(100%+1rem)] items-center rounded-lg border-clay bg-card px-4 font-bold text-primary shadow-press focus-visible:translate-y-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+      @click.prevent="main?.focus()"
+    >{{ strings.skipLink }}</a>
     <header class="sticky top-0 z-10 border-b-clay bg-background supports-[backdrop-filter]:bg-background/95 supports-[backdrop-filter]:backdrop-blur-sm">
       <div class="mx-auto flex h-16 max-w-5xl items-center px-4">
         <RouterLink
@@ -24,7 +34,12 @@ import { strings } from '@/strings'
         </RouterLink>
       </div>
     </header>
-    <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:py-10">
+    <main
+      id="main"
+      ref="main"
+      tabindex="-1"
+      class="mx-auto w-full max-w-5xl flex-1 px-4 py-6 focus:outline-none sm:py-10"
+    >
       <RouterView />
     </main>
     <Toaster />

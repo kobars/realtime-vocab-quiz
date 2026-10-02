@@ -1,6 +1,7 @@
 // AI-ASSISTED: every piece of UI copy in one module, so a translation can be added later.
 export const strings = {
   appName: 'Vocab Quiz',
+  skipLink: 'Skip to content',
   join: {
     title: 'Real-time vocabulary quiz',
     quizIdLabel: 'Quiz ID',

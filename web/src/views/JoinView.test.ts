@@ -206,6 +206,19 @@ describe('preview', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
+  it('announces "no quiz" in the polite preview region, which a lookup that ends after the focus left still reaches', async () => {
+    preview = { status: 404, body: missing }
+    const { wrapper, id, name } = await screen()
+    await id.setValue('NOPE-1')
+    await id.trigger('blur')
+    ;(name.element as HTMLElement).focus()
+    await flushPromises()
+    const region = wrapper.get('[data-test="preview-status"]')
+    expect([region.attributes('aria-live'), region.text()]).toEqual(['polite', strings.join.notFound])
+    await id.setValue('NOPE-12')
+    expect(region.text()).toBe('')
+  })
+
   it.each([
     ['a server error', 503, {}],
     ['a network failure', 0, null],

@@ -86,4 +86,18 @@ describe('app shell', () => {
     expect(missing.get('main h1').text()).toBe(strings.notFound.title)
     expect(missing.get('main a').attributes('href')).toBe('/')
   })
+
+  it('the skip link comes first in the tab order and moves the focus to the main region, without a route change', async () => {
+    const router = await at('/missing')
+    const app = mount(App, { attachTo: document.body, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const focusable = app.findAll('a[href], button, input, [tabindex]:not([tabindex="-1"])')
+    expect(focusable[0]?.text()).toBe(strings.skipLink)
+    expect(focusable[0]?.attributes('href')).toBe('#main')
+    await focusable[0]?.trigger('click')
+    expect(document.activeElement).toBe(app.get('main').element)
+    expect(app.get('main').attributes()).toMatchObject({ id: 'main', tabindex: '-1' })
+    expect(router.currentRoute.value.fullPath).toBe('/missing')
+    app.unmount()
+  })
 })
