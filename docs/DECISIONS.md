@@ -333,7 +333,7 @@ The Dockerfiles, `compose.yaml`, the CI Redis service and the integration-test f
 ### Decision
 
 - Every image is written as `name:tag@sha256:<digest>`, where the digest is the multi-platform index, so the same line builds on amd64 CI runners and arm64 laptops: each `FROM`, the `COPY --from` uv image, both Redis services of `compose.yaml`, the CI Redis service, the test fixture's Redis and the tool images that `docker run` pulls (hadolint in `.github/workflows/containers.yml`, lychee in `scripts/check_links.sh`). The API and web images that `make build` makes keep their local tag. Redis is pinned to a minor version (`8.10-alpine`).
-- Dependabot (`docker` for both Dockerfiles, `docker-compose` for `compose.yaml`) proposes new digests weekly, after its 7-day cooldown.
+- Dependabot (`docker` for the Dockerfiles, `docker-compose` for `compose.yaml`) proposes new digests weekly, after its 7-day cooldown.
 - The runtime stages keep the OS package upgrade.
 
 ### Alternatives considered

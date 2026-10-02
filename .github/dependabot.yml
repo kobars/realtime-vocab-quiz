@@ -28,9 +28,9 @@ updates:
     groups:
       npm:
         update-types: [minor, patch]
-  # Updates the base image digests in both Dockerfiles.
+  # Updates the base image digests in the Dockerfiles.
   - package-ecosystem: docker
-    directories: [/api, /web]
+    directories: [/api, /web, /load]
     schedule:
       interval: weekly
     cooldown:
