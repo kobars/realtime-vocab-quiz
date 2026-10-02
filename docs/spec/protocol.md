@@ -1,7 +1,7 @@
 <!-- AI-ASSISTED: wire protocol v1 of the self-paced quiz, drafted with Claude Code and checked by hand against the domain spec. -->
 # Protocol spec: the WebSocket message catalog v1
 
-This document is the wire contract between the server, the Vue client, the load bots and the tests. The quiz rules behind each reply are in `docs/spec/domain.md` (where the two disagree, the domain spec wins). The contracts package turns this catalog into Pydantic models in `api/src/quiz/contracts/`, and the client imports TypeScript types generated from them. The transport choice is ADR-003 and the protocol, standings policy and tick are ADR-004 (`docs/DECISIONS.md`).
+This document is the wire contract between the server, the Vue client, the load bots and the tests. The quiz rules behind each reply are in `docs/spec/domain.md` (where the two disagree, the domain spec wins). The contracts package turns this catalog into Pydantic models in `api/src/quiz/contracts/`, and the client imports TypeScript types generated from them. The transport choice is [ADR-003](../adr/003-raw-websocket-transport.md) and the protocol, standings policy and tick are [ADR-004](../adr/004-wire-protocol-standings-and-tick.md).
 
 ## 1. Envelope and connection
 

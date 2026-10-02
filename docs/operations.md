@@ -243,7 +243,7 @@ A second target runs the same stack on [Fly.io](https://fly.io) Machines in one 
 reads or stores a token; it stops with "run fly auth login" when flyctl is logged out), and `uv`
 for `make fly-demo`. [infra/fly/](../infra/fly/) holds one config per app, and
 [scripts/deploy/fly.sh](../scripts/deploy/fly.sh) drives flyctl
-([ADR-014](DECISIONS.md#adr-014--flyio-as-a-second-target-three-apps-flycast-to-the-api-redis-on-a-volume)):
+([ADR-014](adr/014-flyio-second-target.md)):
 
 | App | Machines | Reached at |
 |---|---|---|

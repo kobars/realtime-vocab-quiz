@@ -1,7 +1,7 @@
 <!-- AI-ASSISTED: Redis key schema, script contracts and cross-node coalescing design, drafted with Claude Code and checked by hand against the domain and protocol specs. -->
 # Redis spec: keys, scripts and coalescing across nodes
 
-This document is the store design behind the quiz rules. It keeps the consistency contract (domain §8, C1–C6) true when two or more API nodes serve the same quiz against one Redis, with no node owning a quiz. The rules themselves are in `docs/spec/domain.md` and the messages in `docs/spec/protocol.md`; where this file disagrees with the domain spec, the domain spec wins. The decisions are ADR-005 to ADR-008 in `docs/DECISIONS.md`.
+This document is the store design behind the quiz rules. It keeps the consistency contract (domain §8, C1–C6) true when two or more API nodes serve the same quiz against one Redis, with no node owning a quiz. The rules themselves are in `docs/spec/domain.md` and the messages in `docs/spec/protocol.md`; where this file disagrees with the domain spec, the domain spec wins. The decisions are [ADR-005](../adr/005-redis-sorted-set-and-lua-scoring.md) to [ADR-008](../adr/008-one-redis-schema.md).
 
 ## 1. Principles
 
