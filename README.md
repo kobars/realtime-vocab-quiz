@@ -97,9 +97,9 @@ dropped) and `/ws` to the nodes, round-robin. Only nginx publishes a port:
 cp .env.example .env                        # then set ADMIN_TOKEN and REDIS_PASSWORD
 make build                                  # the images the stack runs
 docker compose --profile full up -d --wait  # returns once every service is healthy
-make smoke-full                             # the smoke run below
 make test-system                            # the system tests, through nginx (STACK_URL)
 make test-browser                           # the browser specs (Chromium; once: pnpm -C web exec playwright install chromium)
+make smoke-full                             # the smoke run below
 make down                                   # stops the stack and the development Redis
 ```
 
@@ -112,17 +112,22 @@ is open already; after that hour a run needs another quiz
 (`uv run --project api python load/smoke_full.py --quiz-ids BIZ-20`) or a fresh stack
 Redis (`docker compose --profile full down -v`).
 
-`make test-system` (`api/tests/system/`) and `make test-browser` (`web/e2e/`, Playwright with
-an axe accessibility scan) drive a running stack at `STACK_URL` (default
-`http://localhost:8080`) and read its `ADMIN_TOKEN` from `.env` to start their quizzes. The
-system tests check what only the composed stack shows: a score on one node reaches a socket on
-the other within 500 ms (an accepted upgrade names its node in `X-Node-Id`), a foreign `Origin`
-gets 403, a spoofed `X-Forwarded-For` does not lift the per-address connection cap, `/api/metrics`
-is 404, a body above nginx's limit gets 413, and the security headers are sent. The browser specs
-join by ID, answer, watch another player's score arrive, and open an ended quiz read-only. The
-stack workflow (`.github/workflows/stack.yml`, gate job `stack-required`) runs both on every pull
-request that changes `api/`, `web/`, `infra/`, a compose file, a Dockerfile or the `Makefile`, and
-nightly; it uploads the Playwright report, and the stack's logs when a suite fails.
+`make test-system` (`api/tests/system/`) and `make test-browser` (`web/e2e/`, Playwright with an
+axe accessibility scan) drive a running stack at `STACK_URL` (default
+`http://localhost:$QUIZ_PORT`) and read its `ADMIN_TOKEN` from `.env` to start their quizzes. The
+two suites start different quizzes, which keep their players for 24 h in the stack's Redis volume,
+so running a suite again needs a fresh stack: `docker compose --profile full down -v`, then `up`
+again. The browser specs start `VOCAB-42`, which `make smoke-full` reuses while it is open, so
+they run before it. The system tests check what only the composed stack shows: a score on one node
+reaches a socket on the other within 500 ms (an accepted upgrade names its node in `X-Node-Id`), a
+foreign `Origin` gets 403, a spoofed `X-Forwarded-For` does not lift the per-address connection
+cap (skipped when `PER_IP_CONN_CAP` is above 100), `/api/metrics` is 404, a body above nginx's
+limit gets 413, and the security headers are sent. The browser specs join by ID, answer, watch
+another player's score arrive, and open an ended quiz read-only. The stack workflow
+(`.github/workflows/stack.yml`, gate job `stack-required`) runs both on every pull request that
+changes `api/`, `web/`, `infra/`, a compose file, a Dockerfile, the `Makefile` or the `.nvmrc` and
+`.python-version` files, and nightly; it uploads the Playwright report, and the stack's logs when
+a suite fails.
 
 The nodes publish no port, so check `/healthz` and `/readyz` on one from inside its
 container:

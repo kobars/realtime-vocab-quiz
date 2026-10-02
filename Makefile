@@ -7,9 +7,9 @@ step = @printf '==> %s\n' '$(1)'; $(2) || { printf 'make: step "%s" failed\n' '$
 PYTEST = cd api && uv run --locked pytest
 # The tests that need neither Redis nor a running stack.
 UNIT_MARKERS = not integration and not acceptance and not system
-# The full stack's nginx, for the system and browser tests; they read its ADMIN_TOKEN from .env.
-STACK_URL ?= http://localhost:8080
-STACK_ENV = set -a; [ ! -f .env ] || . ./.env; STACK_URL='$(STACK_URL)'; set +a
+# The system and browser tests read the full stack's ADMIN_TOKEN from .env and reach its nginx at
+# STACK_URL, by default on the port that compose publishes (QUIZ_PORT).
+STACK_ENV = set -a; [ ! -f .env ] || . ./.env; STACK_URL='$(STACK_URL)'; : "$${STACK_URL:=http://localhost:$${QUIZ_PORT:-8080}}"; set +a
 VITEST = pnpm -C web exec vitest run
 # With REPORTS set to a folder (CI sets it), each test step also writes a JUnit report there.
 pytest_junit = $(if $(REPORTS),--junitxml=$(abspath $(REPORTS))/$(1).xml)
