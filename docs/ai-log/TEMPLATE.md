@@ -3,7 +3,8 @@
 - **Tool:** <tool and model, for example Claude Code (claude-opus-5-5)>
 - **Task:** <what the PR set out to do>
 - **Prompt / interaction:** <the nature of the interaction, in one or two sentences>
-- **What was wrong or changed:** <mistakes in the AI output and how they were fixed; "nothing" if none>
+- **What was wrong or changed:** <"nothing" if none; else one sub-bullet per mistake in the AI output>
+  - <mistake> → <how it was found> → <fix> (<test>)
 - **Verification:** <the command that was run, its result, and a test path that exists>
 - **Reviewed by:** <the reviewer>
 - **Date:** <YYYY-MM-DD>
