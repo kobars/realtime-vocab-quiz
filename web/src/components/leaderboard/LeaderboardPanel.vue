@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: the live leaderboard panel: player counts, the top 10, my row pinned below it when I am further down (on an opaque dock that sticks to the bottom of the window while the list scrolls), and "Show all players", whose paged list takes the place of the top 10 while it is open, in a clay card (UI spec §3.5). -->
+<!-- AI-ASSISTED: the live leaderboard panel: player counts, the top 10, my row pinned below it when I am further down, and "Show all players", whose paged list takes the place of the top 10 while it is open, in a clay card (UI spec §3.5). -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Badge, Card } from '@quiz/clay'
@@ -46,14 +46,7 @@ const all = ref(false)
         :my-user-id="me"
         :replacements="store.replacements"
       />
-      <!-- The dock is opaque card colour around my row, so a row scrolling under it is hidden behind a clean edge instead of showing beside or through it. Its padding replaces the card's gap on either side. -->
-      <div
-        v-if="pinned"
-        data-test="pinned-dock"
-        class="sticky bottom-0 z-1 -my-2 bg-card py-2"
-      >
-        <PinnedRow />
-      </div>
+      <PinnedRow v-if="pinned" />
     </template>
     <!-- With every player in the top 10 there is nothing more to show. -->
     <AllPlayers
