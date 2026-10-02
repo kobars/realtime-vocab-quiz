@@ -1,0 +1,13 @@
+#cloud-config
+# AI-ASSISTED: user data for a fresh Ubuntu 22.04 or 24.04 VM, for example a DigitalOcean Droplet's
+# "User data" field: on first boot it runs scripts/deploy/install.sh as root and logs to
+# /var/log/quiz-install.log (docs/operations.md, "Deploy to a VM"). Leave DOMAIN empty to serve on
+# <ip>.sslip.io; with a domain, point its A record at the VM within 30 minutes of the first boot.
+runcmd:
+  - - bash
+    - -c
+    - |
+      set -o pipefail
+      DOMAIN=
+      curl -fsSL --retry 5 https://raw.githubusercontent.com/kobars/realtime-vocab-quiz/main/scripts/deploy/install.sh \
+        | bash -s -- ${DOMAIN:+--domain "$DOMAIN" --dns-wait 1800} 2>&1 | tee -a /var/log/quiz-install.log

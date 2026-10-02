@@ -24,6 +24,8 @@ reports/
 
 # Local environment and work trees
 .env
+.env.before-restore
+backups/
 .worktrees/
 
 # Editors and OS

@@ -16,6 +16,9 @@
 **/.coverage*
 **/htmlcov
 **/.env
+# make prod-backup and make prod-restore: secrets and TLS private keys
+.env.before-restore
+backups
 **/.DS_Store
 api/tests
 docs

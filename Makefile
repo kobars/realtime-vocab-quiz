@@ -62,8 +62,9 @@ ui_run = mkdir -p web/node_modules && docker run --rm --platform linux/amd64 --i
 BOTS ?= 20
 # The full stack on a public host, behind Caddy's HTTPS (docs/operations.md, "Deploy to a VM").
 PROD_COMPOSE = docker compose -f compose.yaml -f compose.prod.yaml
+export PROD_COMPOSE # scripts/deploy/ops.sh runs the same files
 
-.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget prod-up prod-down prod-logs prod-demo
+.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget prod-up prod-down prod-logs prod-demo prod-update prod-backup prod-restore
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -95,6 +96,13 @@ prod-logs: ## Follow the logs of the public host's stack
 	$(PROD_COMPOSE) --profile full logs -f --tail 100
 prod-demo: ## Start a fresh 60-min quiz on the public host's stack; print its HTTPS player URL
 	$(PROD_COMPOSE) --progress quiet run --rm -T seed
+prod-update: ## Pull (or move to REF), rebuild and restart the public host's stack; roll back if not ready
+	scripts/deploy/ops.sh update $(if $(REF),'$(REF)')
+prod-backup: ## Back up the public host's quiz data, certificates and .env to FILE (default: backups/)
+	scripts/deploy/ops.sh backup $(if $(FILE),'$(FILE)')
+prod-restore: ## Restore FILE, a make prod-backup file, onto the public host's stack and restart it
+	$(if $(FILE),,$(error set FILE=<backup .tar.gz>, as make prod-backup printed it))
+	scripts/deploy/ops.sh restore '$(FILE)'
 smoke-full: ## Smoke-test the running full stack through nginx, stopping one API node
 	uv run --project api --locked python load/smoke_full.py
 dev-api: ## Run one API node on :8001 for the Vite dev server (pnpm -C web dev)

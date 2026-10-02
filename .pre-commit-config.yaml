@@ -1,4 +1,4 @@
-# AI-ASSISTED: pre-commit hooks: ruff, ESLint, typos and Markdown links.
+# AI-ASSISTED: pre-commit hooks: ruff, ESLint, shellcheck, typos and Markdown links.
 # make check runs them on every file, so the hooks and CI check the same things.
 # Install once with `uv run --project api pre-commit install`; the hooks use the locked tools.
 repos:
@@ -21,6 +21,11 @@ repos:
         files: ^web/.*\.(js|ts|vue)$
         # Each eslint process builds the TypeScript program for the type-aware rules, so one process lints every file.
         require_serial: true
+      - id: shellcheck
+        name: shellcheck
+        entry: uv run --project api --locked shellcheck
+        language: system
+        types: [shell]
       - id: typos
         name: typos
         entry: uv run --project api --locked typos --force-exclude
