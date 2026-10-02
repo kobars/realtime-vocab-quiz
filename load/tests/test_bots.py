@@ -234,6 +234,34 @@ async def test_a_cohort_limit_stops_each_slot_after_its_players(app_url: str) ->
     assert (rec.counts["cohorts"], rec.counts["answers"], quiz["players"]) == (3, 30, 3)
 
 
+async def test_a_failed_play_does_not_use_up_a_cohort(monkeypatch: pytest.MonkeyPatch) -> None:
+    names: list[str] = []
+
+    async def fails_once(p: Player, *_: object) -> None:
+        names.append(p.name)
+        if len(names) == 1:
+            problem = "the stack is still starting"
+            raise httpx.ConnectError(problem)
+
+    monkeypatch.setattr(bots, "play", fails_once)
+    rec, _ = await swarm(
+        parse(["--bots", "1", "--cohorts", "1", "--duration", "10", "--ramp", "0"])
+    )
+    assert (names, rec.counts["bot_errors"]) == (["bot-0-0", "bot-0-1"], 1)
+
+
+def test_a_cohort_limited_run_rates_its_messages_over_the_time_it_ran(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def quick(p: Player, *_: object) -> None:
+        p.rec.counts["msgs_in"] += 300
+        await asyncio.sleep(0.5)
+
+    monkeypatch.setattr(bots, "play", quick)
+    result = bots.run(parse(["--bots", "1", "--cohorts", "1", "--duration", "3600", "--ramp", "0"]))
+    assert result["msgs_in_per_s"] >= 300  # 300 messages in about half a second, not over the hour
+
+
 async def test_a_quiz_end_before_the_deadline_ends_the_cpu_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
