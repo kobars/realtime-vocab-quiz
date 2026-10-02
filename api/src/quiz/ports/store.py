@@ -215,9 +215,12 @@ class Store(Protocol):
         ...
 
     async def renew_presence(
-        self, quiz_id: str, stale_ms: int, pairs: Sequence[tuple[str, str]]
+        self, quiz_id: str, stale_ms: int, sweep_ms: int, pairs: Sequence[tuple[str, str]]
     ) -> Renewed:
-        """Renew each (user id, connection id) still held; drop entries unseen for ``stale_ms``."""
+        """Renew each (user id, connection id) still held; drop entries unseen for ``stale_ms``.
+
+        Only the first call of a quiz in each ``sweep_ms`` window, from any node, looks for
+        stale entries: the others renew their own pairs alone."""
         ...
 
 

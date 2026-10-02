@@ -22,7 +22,7 @@ def test_quiz_ended_refusal_carries_end_seq() -> None:
 
 
 def test_port_renews_presence() -> None:
-    assert params(Store.renew_presence) == ["self", "quiz_id", "stale_ms", "pairs"]
+    assert params(Store.renew_presence) == ["self", "quiz_id", "stale_ms", "sweep_ms", "pairs"]
     assert get_type_hints(Store.renew_presence)["return"] is Renewed
     assert [f.name for f in fields(Renewed)] == ["status", "removed"]
 

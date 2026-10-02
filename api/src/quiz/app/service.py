@@ -85,7 +85,9 @@ def rank_update(snap: m.Snapshot, you: m.You) -> m.RankUpdate | None:
     """``rank_update`` for a player outside the snapshot's entries (§4), which the limits cut."""
     if you.rank <= len(snap.entries):
         return None
-    return m.RankUpdate(atSeq=snap.atSeq, rank=you.rank, score=you.score, playerCount=snap.playerCount)
+    return m.RankUpdate(
+        atSeq=snap.atSeq, rank=you.rank, score=you.score, playerCount=snap.playerCount
+    )
 
 
 def _standing(snap: m.Snapshot) -> Standing:

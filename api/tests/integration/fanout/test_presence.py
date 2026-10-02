@@ -1,4 +1,5 @@
-# AI-ASSISTED: the presence renew loop: another node drops presence that no live node renews.
+# AI-ASSISTED: the presence renew loop: another node drops presence that no live node renews, and
+# one renew per sweep window scans the quiz's presence hash, whichever node sends it.
 import asyncio
 import uuid
 from typing import cast
@@ -60,6 +61,30 @@ async def test_another_nodes_renew_drops_presence_that_no_live_node_renews(
     await renewer.stop()
     assert await redis_client.hkeys(keys.present) == ["b"]  # the live connection stays
     assert await redis_client.exists(keys.dirty)
+
+
+async def calls(redis_client: Redis, command: str) -> int:
+    """How often Redis ran ``command`` since its start, from scripts too."""
+    stats = await redis_client.info("commandstats")
+    return int(stats.get(f"cmdstat_{command}", {}).get("calls", 0))
+
+
+async def test_two_nodes_scan_the_presence_hash_once_per_sweep_window(
+    redis_store: RedisStore, redis_client: Redis
+) -> None:
+    quiz_id = f"T-{uuid.uuid4().hex[:12].upper()}"
+    create = redis_store.create_quiz
+    await create(quiz_id, (Question("q0", 1),), window_ms=60_000, time_limit_ms=20_000)
+    for user in ("a", "b"):
+        await redis_store.join(quiz_id, user, user.upper(), f"c-{user}")
+    window, stale = 1_000, GRACE_MS + RENEW_MS
+    before = await calls(redis_client, "hgetall")
+    for node in ([("a", "c-a")], [("b", "c-b")]):  # both nodes renew in one window
+        await redis_store.renew_presence(quiz_id, stale, window, node)
+    assert await calls(redis_client, "hgetall") == before + 1
+    await asyncio.sleep(window / 1000)
+    await redis_store.renew_presence(quiz_id, stale, window, [("b", "c-b")])
+    assert await calls(redis_client, "hgetall") == before + 2
 
 
 async def test_a_failed_renew_is_logged_and_the_next_one_still_runs(

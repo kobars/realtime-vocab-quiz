@@ -1,6 +1,6 @@
 -- AI-ASSISTED: helpers the loader puts in front of every quiz script (docs/spec/redis.md §1-§2).
--- The loader defines K (the KEYS index of each QuizKeys field), DATA_KEYS and QUIZ_TTL_MS above
--- this file, from keys.py, so the KEYS order and the TTL exist once. The standings limits are
+-- The loader defines K (the KEYS index of each QuizKeys field), DATA_KEYS, QUIZ_TTL_MS and
+-- REFRESH_MARGIN_MS above this file, from keys.py, so the KEYS order and the TTL exist once. The standings limits are
 -- settings: each script that needs them takes them through ARGV.
 
 -- The one server clock, in integer ms.
@@ -15,10 +15,22 @@ local function set_dirty(now)
   redis.call('SET', KEYS[K.dirty], now, 'NX')
 end
 
--- Give every data key the quiz TTL, so a quiz expires as a whole (the tick token keeps its own).
-local function refresh()
-  for _, i in ipairs(DATA_KEYS) do
-    redis.call('PEXPIRE', KEYS[i], QUIZ_TTL_MS)
+-- Keep every data key on the quiz TTL, so a quiz expires as a whole (the tick and sweep tokens keep
+-- their own). Once the meta TTL has dropped by REFRESH_MARGIN_MS, every data key gets the full TTL
+-- again; until then only the keys a script may have created (the KEYS indexes it passes) need one,
+-- and a new key gets the meta's, so no key outlives the quiz.
+local function refresh(...)
+  local ttl = redis.call('PTTL', KEYS[K.meta])
+  if ttl < QUIZ_TTL_MS - REFRESH_MARGIN_MS then
+    for _, i in ipairs(DATA_KEYS) do
+      redis.call('PEXPIRE', KEYS[i], QUIZ_TTL_MS)
+    end
+    return
+  end
+  for _, i in ipairs({...}) do
+    if redis.call('PTTL', KEYS[i]) == -1 then
+      redis.call('PEXPIRE', KEYS[i], ttl)
+    end
   end
 end
 

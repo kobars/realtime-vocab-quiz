@@ -657,10 +657,11 @@ Test paths are under `api/tests/` (server) or `web/src/` (client). "Not tested" 
 **Known limits.**
 
 - **A crash leaves stale presence.** The 10 s grace timer lives in the node; when the node dies,
-  `leave` never runs. Every node renews its own players' presence every 3 s, and that call drops
-  the entries no node renewed for 13 s (`fanout/presence.py`, `renew_presence.lua`), so another
-  node that serves the quiz clears them 13–16 s later. If no other node serves the quiz, they
-  stay until one does or the keys expire. Until then the online count is too high; scores and
+  `leave` never runs. Every node renews its own players' presence every 3 s, and the first renew
+  of a quiz in each 3 s window, from any node, drops the entries no node renewed for 13 s
+  (`fanout/presence.py`, `renew_presence.lua`), so another node that serves the quiz clears
+  them 13–16 s later. If no other node serves the quiz, they stay until one does or the keys
+  expire. Until then the online count is too high; scores and
   standings are not affected.
 - **No epoch on a Redis failover.** `seq` can go back after a failover or a restore; a client
   resyncs on a lower `seq`, but a counter that climbs past its `lastSeq` first goes unnoticed

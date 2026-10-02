@@ -34,7 +34,7 @@ if replaced then
   redis.call('PUBLISH', KEYS[K.control],
     cjson.encode({type = 'session_replaced', uid = uid, connId = replaced}))
 end
-refresh()
+refresh(K.serve, K.names, K.totals, K.board, K.present, K.dirty, K.replaced)
 
 local serve = cjson.decode(redis.call('HGET', KEYS[K.serve], uid))
 local cursor, finished = serve[1], serve[3]

@@ -42,9 +42,9 @@ if c >= 0 then  -- close question c as a skip unless it is already answered
 end
 if i == n then
   redis.call('HSET', KEYS[K.serve], uid, cjson.encode({c, serve_ms, 1}))
-  refresh()
+  refresh(K.answered)
   return finished_reply()
 end
 redis.call('HSET', KEYS[K.serve], uid, cjson.encode({i, now, 0}))
-refresh()
+refresh(K.answered)
 return question(i, now)

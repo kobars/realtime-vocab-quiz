@@ -14,5 +14,5 @@ local now = now_ms()
 if not meta[2] and now < tonumber(meta[1]) then
   set_dirty(now)  -- the next frame carries the lower onlineCount
 end
-refresh()
+refresh(K.dirty)
 return {'ok'}
