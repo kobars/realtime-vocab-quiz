@@ -10,7 +10,7 @@ Short on time: read §1, then §3 to §6 for the design, §9 for the measured re
 |---|---|
 | Architecture | [§3](#3-architecture): [context](#context), [containers](#containers), [walk-through](#walk-through) and [deployment](#deployment) |
 | Components | [§4](#4-components): every component, its role and what it talks to |
-| Data flow | [§5](#5-data-flow): [join](#join), [answer → leaderboard](#answer--leaderboard), reconnect, hosting and quiz end |
+| Data flow | [§5](#5-data-flow): [join](#join), [answer → leaderboard](#answer--leaderboard), [reconnect](#reconnect--resync), [hosting](#hosting-a-quiz) and [quiz end](#quiz-end) |
 | Technologies | [§6](#6-technologies-and-justification): each choice against its alternative, with its ADR |
 | AI collaboration | [§15](#15-ai-collaboration-in-design) |
 | Implemented and mocked | [§14](#14-implemented-and-mocked) |
@@ -487,7 +487,7 @@ second of answers (§11).
 
 ## 9. Performance and capacity
 
-<!-- AI-ASSISTED-BEGIN: sections 9 and 10 drafted with Claude Code from api/src/quiz/config.py, the contracts, docs/spec/ and docs/DECISIONS.md; the frame sizes were computed by encoding sample frames in compact JSON; the measured numbers are copied from the load runs in load/results/. -->
+<!-- AI-ASSISTED-BEGIN: sections 9 and 10 drafted with Claude Code from api/src/quiz/config.py, the contracts, docs/spec/ and the ADRs; the measured numbers are copied from the load runs in load/results/. -->
 
 The sizing behind these runs (assumptions, frame sizes, buffer bounds, Redis load) is in [docs/capacity.md](docs/capacity.md).
 
@@ -956,7 +956,7 @@ PRs [PR-3](docs/ai-log/PR-3.md), [PR-5](docs/ai-log/PR-5.md), [PR-7](docs/ai-log
 
 ## 16. ADR index
 
-<!-- AI-ASSISTED-BEGIN: one-line summaries drafted with Claude Code from docs/DECISIONS.md. -->
+<!-- AI-ASSISTED-BEGIN: pointer to the ADR index drafted with Claude Code from docs/DECISIONS.md. -->
 
 Each decision has its own record (context, decision, alternatives considered, consequences) under
 [docs/adr/](docs/adr/); [docs/DECISIONS.md](docs/DECISIONS.md) lists them with a one-line summary each.
