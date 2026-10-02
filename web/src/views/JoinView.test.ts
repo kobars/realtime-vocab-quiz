@@ -89,6 +89,13 @@ it('the header link is a 44 px touch target', async () => {
   expect(wrapper.get('header a').classes()).toContain('min-h-11')
 })
 
+it('the header link and the skip link use the page focus outline with no ring on top, the skip link hugging its own outline', async () => {
+  const { wrapper } = await screen()
+  const stacked = (selector: string) => wrapper.get(selector).classes().filter((c) => /(^|:)(ring|outline)-/.test(c))
+  expect([stacked('header a'), stacked('[data-test="skip-link"]')]).toEqual([[], []])
+  expect(wrapper.get('[data-test="skip-link"]').classes()).toContain('focus-hug')
+})
+
 it('keeps the app name as the wordmark text and hides its icon tile from assistive tech', async () => {
   const { wrapper } = await screen()
   const wordmark = wrapper.get('[data-test="wordmark"]')

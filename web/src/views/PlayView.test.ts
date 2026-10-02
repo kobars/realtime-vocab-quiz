@@ -109,9 +109,10 @@ it('a digit with Ctrl, Meta or Alt held sends no answer, so browser and system s
   expect(port.answer.mock.calls).toEqual([[0, 0]])
 })
 
-it('the focus ring of a choice is offset by the page color', async () => {
+it('a choice shows one focus indicator: the focus outline hugs its own outline, with no ring on top', async () => {
   const w = await playing()
-  expect(choice(w, 0).classes()).toEqual(expect.arrayContaining(['focus-visible:ring-offset-2', 'focus-visible:ring-offset-background']))
+  expect(choice(w, 0).classes()).toContain('focus-hug')
+  expect(choice(w, 0).classes().filter((c) => /(^|:)(ring|outline)-/.test(c))).toEqual([])
 })
 
 it('intro: Start has the focus and asks for question 0; after a rejoin on a closed question it reads Continue', async () => {

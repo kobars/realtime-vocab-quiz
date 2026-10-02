@@ -11,9 +11,14 @@ describe('Tailwind entry', () => {
     expect(main).not.toContain('prefers-color-scheme')
   })
 
-  it('gives every focus-visible element without ring classes a 2 px solid outline with a 2 px offset', () => {
-    // Headings and panels focused from code have no ring classes; the controls with them set outline-none.
+  it('gives every focus-visible element a 2 px solid outline with a 2 px offset', () => {
     expect(base).toContain(':focus-visible { @apply outline-2 outline-solid outline-offset-2 outline-ring; }')
+  })
+
+  it('focus-hug puts the focus outline on the control\'s own outline in --ring, or in --destructive on an invalid field', () => {
+    const rule = main.slice(main.indexOf('@utility focus-hug {'), main.indexOf('\n}', main.indexOf('@utility focus-hug {')))
+    expect(rule).toContain('&:focus-visible { outline-offset: 0; border-color: var(--ring); }')
+    expect(rule).toContain("&[aria-invalid='true']:focus-visible { border-color: var(--destructive); outline-color: var(--destructive); }")
   })
 
   it('sets the body in --font-sans at weight 500 and headings at weight 800', () => {
