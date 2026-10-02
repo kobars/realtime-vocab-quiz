@@ -20,6 +20,7 @@ MAKE = shutil.which("make") or "make"
 
 # Each call is one shell-quoted line; the Droplet's user data is copied next to the log.
 FAKE_DOCTL = """printf '%q ' "$@" >> "$LOG"; echo >> "$LOG"
+[[ -z ${FAILS:-} || $* != "$FAILS"* ]] || exit 1
 case "$*" in
   "account get") [[ -z ${SIGNED_OUT:-} ]] ;;
   "compute droplet list --tag-name realtime-vocab-quiz --format Name --no-header")
@@ -28,6 +29,7 @@ case "$*" in
     printf '%s' "${DROPLETS:-}" ;;
   "compute ssh-key list --format ID --no-header") printf '%s' "${KEYS-$'111\\n222\\n'}" ;;
   "compute firewall list --format ID,Name --no-header") printf '%s' "${FIREWALLS:-}" ;;
+  "compute tag list --format Name --no-header") printf '%s' "${TAGS:-}" ;;
   "compute domain list --format Domain --no-header") printf '%s' "${ZONES:-}" ;;
   "compute domain records list "*) printf '%s' "${RECORDS:-}" ;;
   "compute droplet create "*)
@@ -46,6 +48,7 @@ def _run(
         "doctl": FAKE_DOCTL,
         "curl": "true",  # readyz answers
         "ssh": 'echo "ssh $*"; echo "Player URL: https://quiz.example.com/play/VOCAB-42"',
+        "ssh-keygen": 'echo "ssh-keygen $*" >> "$LOG.keygen"',  # never the real known_hosts
     }
     for name, body in stubs.items():
         (bin_dir / name).write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8")
@@ -73,7 +76,15 @@ LOOKUPS = [
     ["account", "get"],
     ["compute", "droplet", "list", "--tag-name", TAG, "--format", "Name", "--no-header"],
     ["compute", "ssh-key", "list", "--format", "ID", "--no-header"],
+]
+ZONE_LOOKUPS = [
+    ["compute", "domain", "list", "--format", "Domain", "--no-header"],
+    ["compute", "domain", "records", "list", "example.com", "--format", "ID,Type,Name,Data",
+     "--no-header"],
+]  # fmt: skip
+FIREWALL_LOOKUPS = [
     ["compute", "firewall", "list", "--format", "ID,Name", "--no-header"],
+    ["compute", "tag", "list", "--format", "Name", "--no-header"],
 ]
 FIREWALL = [
     "compute", "firewall", "create", "--name", TAG, "--tag-names", TAG,
@@ -97,12 +108,14 @@ def test_deploy_creates_the_firewall_the_droplet_and_the_a_record(tmp_path: Path
         tmp_path, "deploy", "--domain", "quiz.example.com", ZONES="example.org\nexample.com\n"
     )
     assert code == 0, out
-    user_data = calls[5][calls[5].index("--user-data-file") + 1]
+    user_data = calls[9][calls[9].index("--user-data-file") + 1]
     assert calls == [
         *LOOKUPS,
+        *ZONE_LOOKUPS,
+        *FIREWALL_LOOKUPS,
+        ["compute", "tag", "create", TAG],  # before the firewall that names it
         FIREWALL,
         _droplet("quiz.example.com", "sgp1", "s-2vcpu-4gb", user_data),
-        ["compute", "domain", "list", "--format", "Domain", "--no-header"],
         [
             "compute", "domain", "records", "create", "example.com", "--record-type", "A",
             "--record-name", "quiz", "--record-data", "203.0.113.7", "--record-ttl", "300",
@@ -114,16 +127,21 @@ def test_deploy_creates_the_firewall_the_droplet_and_the_a_record(tmp_path: Path
     assert sent == template.replace("      DOMAIN=\n", "      DOMAIN=quiz.example.com\n")
     assert sent != template
     assert not Path(user_data).exists()  # removed on exit
+    # An earlier Droplet's key for a reused address goes first.
+    keygen = (tmp_path / "doctl.log.keygen").read_text(encoding="utf-8")
+    assert keygen == "ssh-keygen -R 203.0.113.7\n"
     assert "ssh -o StrictHostKeyChecking=accept-new root@203.0.113.7 make -C " in out
     assert "Player URL: https://quiz.example.com/play/VOCAB-42" in out
     assert "The quiz app is live at https://quiz.example.com/" in out
 
 
 def test_deploy_without_a_domain_serves_on_the_ips_sslip_io_name(tmp_path: Path) -> None:
-    code, calls, out = _run(tmp_path, "deploy", "--region", "nyc3", "--size", "s-1vcpu-1gb")
+    code, calls, out = _run(
+        tmp_path, "deploy", "--region", "nyc3", "--size", "s-1vcpu-1gb", TAGS=f"other\n{TAG}\n"
+    )
     assert code == 0, out
-    assert calls[5][:12] == _droplet(TAG, "nyc3", "s-1vcpu-1gb", "")[:12]
-    assert len(calls) == 6  # no domain lookup and no record
+    assert calls[:5] == [*LOOKUPS, *FIREWALL_LOOKUPS]  # no domain lookup; the tag exists
+    assert calls[5:] == [FIREWALL, _droplet(TAG, "nyc3", "s-1vcpu-1gb", calls[6][15])]
     template = (ROOT / "infra" / "deploy" / "cloud-init.yaml").read_text(encoding="utf-8")
     assert (tmp_path / "doctl.log.user-data").read_text(encoding="utf-8") == template
     assert "The quiz app is live at https://203.0.113.7.sslip.io/" in out
@@ -141,9 +159,10 @@ def test_a_domain_elsewhere_gets_no_record_and_an_existing_firewall_is_kept(
         FIREWALLS=f"fw-1 {TAG}\n",
     )
     assert code == 0, out
-    assert [c[:3] for c in calls[4:]] == [
-        ["compute", "droplet", "create"],
+    assert [c[:3] for c in calls[3:]] == [
         ["compute", "domain", "list"],
+        ["compute", "firewall", "list"],
+        ["compute", "droplet", "create"],
     ]
     assert "point its A record at 203.0.113.7 now" in out
 
@@ -159,16 +178,17 @@ def test_dry_run_prints_every_command_that_creates_and_runs_only_lookups(tmp_pat
         tmp_path, "deploy", "--domain", "quiz.example.com", "--dry-run", ZONES="example.com\n"
     )
     assert code == 0, out
-    assert calls == [*LOOKUPS, ["compute", "domain", "list", "--format", "Domain", "--no-header"]]
+    assert calls == [*LOOKUPS, *ZONE_LOOKUPS, *FIREWALL_LOOKUPS]
     skipped = [line for line in out.splitlines() if line.startswith("dry run, skipped: ")]
     assert [shlex.split(line.removeprefix("dry run, skipped: "))[:4] for line in skipped] == [
+        ["doctl", "compute", "tag", "create"],
         ["doctl", "compute", "firewall", "create"],
         ["doctl", "compute", "droplet", "create"],
         ["doctl", "compute", "domain", "records"],
         ["the", "wait"],
         ["ssh", "-o", "StrictHostKeyChecking=accept-new", "root@<droplet-ip>"],
     ]
-    assert "--record-data <droplet-ip>" in skipped[2]
+    assert "--record-data <droplet-ip>" in skipped[3]
 
 
 @pytest.mark.parametrize(
@@ -177,6 +197,16 @@ def test_dry_run_prints_every_command_that_creates_and_runs_only_lookups(tmp_pat
         ({"SIGNED_OUT": "1"}, "doctl is not signed in; run doctl auth init"),
         ({"KEYS": ""}, "the DigitalOcean account has no SSH key"),
         ({"DROPLETS": "9 quiz.example.com 198.51.100.4\n"}, f"a Droplet tagged {TAG} exists"),
+        # The install would wait for a name that also points elsewhere.
+        (
+            {"ZONES": "example.com\n", "RECORDS": "7 A quiz 198.51.100.9\n8 A www 198.51.100.9\n"},
+            "quiz.example.com has a DNS record already (A 198.51.100.9)",
+        ),
+        ({"ZONES": "example.com\n", "RECORDS": "7 AAAA quiz 2001:db8::1\n"}, "(AAAA 2001:db8::1)"),
+        # A failed lookup is not an empty answer.
+        ({"FAILS": "compute droplet list"}, ""),
+        ({"FAILS": "compute firewall list"}, ""),
+        ({"FAILS": "compute domain list"}, ""),
     ],
 )
 def test_deploy_stops_before_creating_anything(
@@ -244,6 +274,17 @@ def test_destroy_dry_run_prints_the_deletes_without_asking(tmp_path: Path) -> No
         for line in out.splitlines()
         if line.startswith("dry run, skipped: ")
     ] == DELETES
+
+
+@pytest.mark.parametrize(
+    "lookup", ["compute droplet list", "compute domain list", "compute domain records list"]
+)
+def test_destroy_deletes_nothing_when_a_lookup_fails(tmp_path: Path, lookup: str) -> None:
+    """Otherwise a failed Droplet lookup would leave a plan of the firewall alone."""
+    code, calls, out = _run(tmp_path, "destroy", stdin="yes\n", FAILS=lookup, **DESTROY_ENV)
+    assert code != 0
+    assert "To delete" not in out
+    assert not any("delete" in call for call in calls)
 
 
 def test_destroy_with_nothing_tagged_deletes_nothing(tmp_path: Path) -> None:

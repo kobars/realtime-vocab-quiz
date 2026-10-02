@@ -84,10 +84,12 @@ inbound TCP 22, 80 and 443 only, for every Droplet tagged `realtime-vocab-quiz`;
 is [infra/deploy/cloud-init.yaml](../infra/deploy/cloud-init.yaml) with `DOMAIN` filled in; and,
 when the domain is a DigitalOcean zone, its A record. For a domain hosted elsewhere it prints
 the address to point the record at. Without `DOMAIN` the stack serves on
-`<droplet-ip>.sslip.io`. It then waits up to 20 minutes for `https://DOMAIN/api/readyz`, starts
+`<droplet-ip>.sslip.io`. It then waits up to 40 minutes (the install waits up to 30 for a DNS
+record hosted elsewhere) for `https://DOMAIN/api/readyz`, starts
 a 60-minute quiz over SSH (`make prod-demo` on the Droplet) and prints its player link. It stops
-before creating anything when doctl is not signed in, the account has no SSH key or a Droplet
-with the tag exists. `DRY_RUN=1` runs only the lookups and prints each command that would create
+before creating anything when doctl is not signed in, a lookup fails, the account has no SSH key,
+a Droplet with the tag exists, or the domain's DigitalOcean zone already has an A or AAAA record
+of that name (the install needs the name to point at the new Droplet alone). `DRY_RUN=1` runs only the lookups and prints each command that would create
 something.
 
 `make do-destroy` lists the Droplets tagged `realtime-vocab-quiz`, the A records that point at

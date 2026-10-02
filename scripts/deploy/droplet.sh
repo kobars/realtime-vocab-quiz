@@ -7,8 +7,9 @@
 # --dry-run runs the lookups (doctl ... list) and prints each command that creates or deletes.
 # Runs on the Bash 3.2 that macOS ships.
 set -euo pipefail
-# The install on a new Droplet takes about five minutes, plus the wait for a DNS record.
-READY_TIMEOUT=${READY_TIMEOUT:-1200}
+# The install on a new Droplet takes about five minutes, after its wait of up to 30 minutes for a
+# DNS record hosted elsewhere.
+READY_TIMEOUT=${READY_TIMEOUT:-2400}
 # shellcheck source-path=SCRIPTDIR source=install.sh
 . "$(dirname "$0")/install.sh"
 
@@ -25,19 +26,27 @@ need_doctl() {
   doctl account get >/dev/null || die "doctl is not signed in; run doctl auth init"
 }
 
+# Each lookup is read whole before it is used, and its caller assigns it to a variable, so a
+# failed doctl call stops the script instead of reading as "nothing there".
 firewall_id() {
-  doctl compute firewall list --format ID,Name --no-header | awk -v name="$TAG" '$2 == name { print $1 }'
+  local list
+  list=$(doctl compute firewall list --format ID,Name --no-header) || return
+  awk -v name="$TAG" '$2 == name { print $1 }' <<<"$list"
 }
 
 # The longest zone on DigitalOcean that NAME is or ends in; empty when there is none.
 dns_zone() {
-  local name=$1 zone found=""
+  local name=$1 zones zone found=""
   [[ $name == *.* ]] || return 0
+  zones=$(doctl compute domain list --format Domain --no-header) || return
   while read -r zone; do
     if [[ $name == "$zone" || $name == *".$zone" ]] && ((${#zone} > ${#found})); then found=$zone; fi
-  done < <(doctl compute domain list --format Domain --no-header)
+  done <<<"$zones"
   printf '%s\n' "$found"
 }
+
+# The ID, type, name and data of ZONE's records, one per line.
+zone_records() { doctl compute domain records list "$1" --format ID,Type,Name,Data --no-header; }
 
 # The record's name inside its zone: @ for the zone itself.
 record_name() {
@@ -45,7 +54,7 @@ record_name() {
 }
 
 deploy() {
-  local domain="" region=sgp1 size=s-2vcpu-4gb name keys zone ip host
+  local domain="" region=sgp1 size=s-2vcpu-4gb name droplets keys zone="" records taken fw tags ip host
   while (($#)); do
     case $1 in
       --domain | --region | --size) [[ $# -ge 2 ]] || die "$1 needs a value" ;;
@@ -62,17 +71,30 @@ deploy() {
   [[ -z $domain || $domain =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || die "DOMAIN '$domain' is not a host name"
   need_doctl
   name=${domain:-$TAG}
-  [[ -z $(doctl compute droplet list --tag-name "$TAG" --format Name --no-header) ]] ||
-    die "a Droplet tagged $TAG exists already; make do-destroy deletes it"
-  keys=$(doctl compute ssh-key list --format ID --no-header | paste -s -d , -)
+  droplets=$(doctl compute droplet list --tag-name "$TAG" --format Name --no-header)
+  [[ -z $droplets ]] || die "a Droplet tagged $TAG exists already; make do-destroy deletes it"
+  keys=$(doctl compute ssh-key list --format ID --no-header)
+  keys=$(paste -s -d , - <<<"$keys")
   [[ -n $keys ]] || die "the DigitalOcean account has no SSH key; add yours: doctl compute ssh-key import laptop --public-key-file ~/.ssh/id_ed25519.pub"
+  # The install needs the name to resolve to this Droplet alone: a record of the name that is
+  # there already would point it elsewhere too.
+  zone=$(dns_zone "$domain")
+  if [[ -n $zone ]]; then
+    records=$(zone_records "$zone")
+    taken=$(awk -v name="$(record_name "$domain" "$zone")" '($2 == "A" || $2 == "AAAA") && $3 == name { print $2, $4 }' <<<"$records" | paste -s -d , -)
+    [[ -z $taken ]] || die "$domain has a DNS record already ($taken); delete it in the $zone zone, then run again"
+  fi
 
   # The cloud-init user data with DOMAIN filled in (empty: <ip>.sslip.io); global for the trap.
   user_data=$(mktemp)
   trap 'rm -f "$user_data"' EXIT
   sed "s/^\( *\)DOMAIN=\$/\1DOMAIN=$domain/" "$USER_DATA" >"$user_data"
 
-  if [[ -z $(firewall_id) ]]; then
+  fw=$(firewall_id)
+  if [[ -z $fw ]]; then
+    # A firewall can name only a tag that exists; the Droplet's create would make it too late.
+    tags=$(doctl compute tag list --format Name --no-header)
+    grep -qx "$TAG" <<<"$tags" || run doctl compute tag create "$TAG"
     log "Creating the firewall $TAG: inbound TCP 22, 80 and 443 only, for Droplets tagged $TAG"
     run doctl compute firewall create --name "$TAG" --tag-names "$TAG" \
       --inbound-rules "$INBOUND" --outbound-rules "$OUTBOUND"
@@ -90,7 +112,6 @@ deploy() {
     valid_ipv4 "$ip" || die "doctl did not print the Droplet's IPv4 address: '$ip'"
   fi
 
-  zone=$(dns_zone "$domain")
   if [[ -n $zone ]]; then
     log "Pointing $domain at $ip"
     run doctl compute domain records create "$zone" --record-type A \
@@ -107,13 +128,16 @@ deploy() {
     die "https://$host/api/readyz did not answer within ${READY_TIMEOUT}s; see the install log: ssh root@$ip tail -n 50 /var/log/quiz-install.log"
   fi
   log "The quiz app is live at https://$host/; starting a 60-minute quiz"
+  # DigitalOcean hands out addresses again: a known host key for this one belongs to a Droplet
+  # that is gone.
+  [[ $DRY_RUN == 1 ]] || ssh-keygen -R "$ip" >/dev/null 2>&1 || true
   run ssh -o StrictHostKeyChecking=accept-new "root@$ip" make -C "$INSTALL_DIR" prod-demo ||
     die "could not start a quiz; try: ssh root@$ip make -C $INSTALL_DIR prod-demo"
   printf '\nAnother quiz: ssh root@%s make -C %s prod-demo    Delete it all: make do-destroy\n' "$ip" "$INSTALL_DIR"
 }
 
 destroy() {
-  local plan="" id name ip zone record kind a b rest answer
+  local plan="" droplets records id name ip zone record kind a b rest answer
   case ${1:-} in
     "") ;;
     --dry-run) DRY_RUN=1 ;;
@@ -121,18 +145,19 @@ destroy() {
   esac
   need_doctl
   # One line per resource: its kind, the arguments that delete it, and what it is.
+  droplets=$(doctl compute droplet list --tag-name "$TAG" --format ID,Name,PublicIPv4 --no-header)
   while read -r id name ip; do
     [[ -n $id ]] || continue
     zone=$(dns_zone "$name")
     if [[ -n $zone ]]; then
       record=$(record_name "$name" "$zone")
+      records=$(zone_records "$zone")
       while read -r a b; do
-        plan+="record $zone $a DNS A record $name -> $b"$'\n'
-      done < <(doctl compute domain records list "$zone" --format ID,Type,Name,Data --no-header |
-        awk -v name="$record" -v ip="$ip" '$2 == "A" && $3 == name && $4 == ip { print $1, $4 }')
+        [[ -z $a ]] || plan+="record $zone $a DNS A record $name -> $b"$'\n'
+      done < <(awk -v name="$record" -v ip="$ip" '$2 == "A" && $3 == name && $4 == ip { print $1, $4 }' <<<"$records")
     fi
     plan+="droplet $id - Droplet $name ($ip)"$'\n'
-  done < <(doctl compute droplet list --tag-name "$TAG" --format ID,Name,PublicIPv4 --no-header)
+  done <<<"$droplets"
   id=$(firewall_id)
   [[ -z $id ]] || plan+="firewall $id - firewall $TAG"$'\n'
   [[ -n $plan ]] || {
