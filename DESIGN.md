@@ -646,6 +646,19 @@ first, read the correct choice, and answer it in the first tab for full points. 
 (one identity per person) and a per-player choice order are the fix; both are out of scope for
 this build (§2).
 
+<!-- AI-ASSISTED-BEGIN: drafted with Claude Code from api/src/quiz/adapters/ws/heartbeat.py and the gateway's upgrade checks. -->
+
+Transport limits before the app. API nodes sit behind nginx and are never published directly:
+uvicorn runs with no connection limit of its own and times no request body (nginx buffers each
+body first), and the gateway's caps count only accepted sockets. So the server config bounds
+what comes before: a request head is cut at 16 KiB (400) and closed
+when it is not complete `HEADER_TIMEOUT_MS` (10 s) after the connection opened or the request
+began; a WebSocket message of more than 64 fragments, empty ones included, is closed with 1009;
+on shutdown, requests still open after 5 s are cancelled. Upgrade attempts are throttled per
+client address before the ticket lookup (protocol §8).
+
+<!-- AI-ASSISTED-END -->
+
 ## 13. Observability
 
 **SLO.** 99% of leaderboard updates reach the client within 500 ms of "answer accepted" (C5),
@@ -829,5 +842,6 @@ Every decision is recorded in full (context, decision, alternatives considered, 
 | [ADR-007](docs/DECISIONS.md#adr-007--backplane-redis-pubsub-seq-and-resync-streams-as-the-next-step) | Redis pub/sub carries frames and session replacement between nodes; a gap in `seq` triggers a snapshot; Streams are the next step. |
 | [ADR-008](docs/DECISIONS.md#adr-008--one-redis-schema-for-scoring-and-fan-out) | One Redis schema: every key of a quiz under the hash tag `quiz:{<quizId>}:*`, one 24 h TTL, ready for a Cluster. |
 | [ADR-009](docs/DECISIONS.md#adr-009--repository-layout-and-the-vue-client-api-web-generated-contracts) | One repository with `api/`, `web/` and generated `contracts/`; a Vue 3, Vite, Pinia and Tailwind client using types generated from the Pydantic models. |
+| [ADR-010](docs/DECISIONS.md#adr-010--a-playful-design-system-of-our-own-clay-replaces-the-neutral-look) | Our own playful design system, "Clay": brand violet with role fills under dark text, a self-hosted rounded font, hard shadows tinted from the primary, and a dark theme that follows the OS; contrast is a test. |
 
 <!-- AI-ASSISTED-END -->

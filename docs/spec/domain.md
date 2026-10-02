@@ -23,7 +23,7 @@ A quiz (for example `VOCAB-42`) has N questions (default 10), each with 4 choice
 | State | Meaning | Entered when |
 |---|---|---|
 | `open` | Joins, serves and answers are accepted | the quiz is created (`startMs = TIME`) |
-| `ended` | Every write is refused with `QUIZ_ENDED`; the standings are final | `now ≥ deadlineMs`, or the mock host action "end now" sets `endedMs = TIME` |
+| `ended` | Every write is refused with `QUIZ_ENDED`; the standings are final | `now ≥ deadlineMs`, or the mock host action "end now" announces `quiz_ended` once its end mark (`endedMs = TIME`) is durable. Between the mark and the announcement, writes are refused with `UNAVAILABLE` and reads still say `open` (`docs/spec/redis.md` §3.1) |
 
 `ended` is final; there is no way back to `open`. The quiz is `ended` as soon as the deadline passes, even before any request notices it: the state is computed from the clock, not stored by a timer. "End now" is idempotent: a second call changes nothing. Whichever comes first (the host action, a write that is refused, or the leaderboard tick) runs the end script, which broadcasts `quiz_ended` with the final standings exactly once; `docs/spec/redis.md` defines the mechanism. How soon `quiz_ended` arrives may depend on that tick; what the final standings are never does.
 

@@ -495,7 +495,8 @@ it('keeps an answer after NOT_JOINED, joins again and resends it after the next 
   await wait(5_000)
   expect(answers(socket)).toHaveLength(1)
   socket.receive(joined())
-  expect(socket.types().slice(4)).toEqual(['resync', 'answer'])
+  // The join after NOT_JOINED, its resend at the reply deadline, then the resync and the answer after joined.
+  expect(socket.types().slice(4)).toEqual(['join', 'resync', 'answer'])
   expect(answers(socket)).toEqual([answerMsg('s-1'), answerMsg('s-1')])
 })
 
@@ -871,4 +872,114 @@ it('refresh sends one resync after the random gap wait, again after a bucket RAT
   socket.receive({ type: 'snapshot', atSeq: 4, status: 'ended' })
   await quietFor(socket, 2 * REPLY_TIMEOUT_MS)
   expect([resyncs().length, socket.types().filter((type) => type === 'join').length]).toEqual([4, 1])
+})
+
+const joins = (socket: FakeSocket) => socket.types().filter((type) => type === 'join').length
+
+it('sends a join that gets no reply again after the reply deadline, and no more once joined arrives', async () => {
+  start()
+  const socket = await connected()
+  await wait(REPLY_TIMEOUT_MS - 1)
+  expect(joins(socket)).toBe(1)
+  await wait(1)
+  expect(joins(socket)).toBe(2)
+  socket.receive(joined())
+  socket.receive({ type: 'snapshot', atSeq: 0, status: 'open' })
+  await wait(3 * REPLY_TIMEOUT_MS)
+  expect(joins(socket)).toBe(2)
+})
+
+it.each(['QUIZ_NOT_FOUND', 'QUIZ_ENDED'])('sends no join again after the final join error %s', async (code) => {
+  start()
+  const socket = await connected()
+  socket.receive({ type: 'error', code, requestType: 'join' } as Partial<ServerMessage>)
+  await wait(3 * REPLY_TIMEOUT_MS)
+  expect(joins(socket)).toBe(1)
+})
+
+it('retries a join in flight 1 s after a RATE_LIMITED that names no request, and no join once joined', async () => {
+  start()
+  const socket = await connected()
+  socket.receive(bucketDrop)
+  await wait(999)
+  expect(joins(socket)).toBe(1)
+  await wait(1)
+  expect(joins(socket)).toBe(2)
+  socket.receive(joined())
+  socket.receive({ type: 'snapshot', atSeq: 0, status: 'open' })
+  socket.receive(bucketDrop)
+  await wait(1_000)
+  expect(joins(socket)).toBe(2)
+})
+
+it('sends the join after NOT_JOINED again when it gets no reply, then repeats the next after the joined', async () => {
+  const client = start()
+  const socket = await joinedSocket()
+  client.next(3)
+  socket.receive(overload('NOT_JOINED'))
+  await wait(REPLY_TIMEOUT_MS)
+  expect(joins(socket)).toBe(3)
+  socket.receive(joined())
+  expect(socket.types().slice(-2)).toEqual(['resync', 'next'])
+})
+
+it.each([
+  ['UNAVAILABLE', answerError('UNAVAILABLE')],
+  ['RATE_LIMITED', answerError('RATE_LIMITED')],
+  ['RATE_LIMITED with no request', rateLimited],
+])('sends an answer waiting on its retry after %s once when a joined arrives first', async (_, error) => {
+  uuids('s-1')
+  const client = start(() => 0.5)
+  const socket = await joinedSocket()
+  client.answer(0, 2)
+  socket.receive(error)
+  socket.receive({ type: 'error', code: 'NOT_JOINED', requestType: 'get_leaderboard' })
+  socket.receive(joined())
+  expect(answers(socket)).toEqual([answerMsg('s-1'), answerMsg('s-1')])
+  await wait(1_000)
+  expect(answers(socket)).toHaveLength(2)
+  // One copy in flight: its final error settles it, so the next socket sends it no more.
+  socket.receive(answerError('ALREADY_ANSWERED'))
+  socket.drop()
+  await wait(1_000)
+  const next = await connected()
+  next.receive(joined())
+  expect([sockets(), answers(next)]).toEqual([2, []])
+})
+
+it('ignores the joined of a join sent again while the first was only slow: one resync, one joined event', async () => {
+  start()
+  const socket = await connected()
+  await wait(REPLY_TIMEOUT_MS)
+  expect(joins(socket)).toBe(2)
+  socket.receive(joined())
+  socket.receive(joined())
+  const resyncs = socket.types().filter((type) => type === 'resync').length
+  expect([resyncs, events.filter((event) => event.type === 'joined').length]).toEqual([1, 1])
+})
+
+it('sends the join again after UNAVAILABLE for a second join whose first already got joined', async () => {
+  start()
+  const socket = await connected()
+  await wait(REPLY_TIMEOUT_MS)
+  socket.receive(joined())
+  socket.receive({ type: 'snapshot', atSeq: 0, status: 'open' })
+  socket.receive({ type: 'error', code: 'UNAVAILABLE', requestType: 'join' } as Partial<ServerMessage>)
+  await wait(1)
+  expect(joins(socket)).toBe(3)
+  // Its joined is not ignored: the UI hears that the join that got UNAVAILABLE is done.
+  socket.receive(joined())
+  expect(events.filter((event) => event.type === 'joined')).toHaveLength(2)
+})
+
+it('keeps the backoff of a join after UNAVAILABLE when a RATE_LIMITED names no request', async () => {
+  start(() => 0.99)
+  const socket = await connected()
+  socket.receive({ type: 'error', code: 'UNAVAILABLE', requestType: 'join' } as Partial<ServerMessage>)
+  socket.receive(bucketDrop)
+  // The backoff is floor(0.99 × 250) = 247 ms; the bucket error does not move it to 1 s.
+  await wait(247)
+  expect(joins(socket)).toBe(2)
+  await wait(RETRY_AFTER_MS)
+  expect(joins(socket)).toBe(2)
 })

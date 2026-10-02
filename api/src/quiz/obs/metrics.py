@@ -1,8 +1,9 @@
 # AI-ASSISTED: the Prometheus metrics of one node, on a registry of their own.
 """Every metric the service exports. ``/metrics`` serves ``REGISTRY``. Each metric is registered
-here up front, and a labelled counter starts with each label value at 0, so a scrape shows every
-series before its first event. The scoring service counts answers and clock steps, the gateway
-open sockets, the fan-out tick its frames and durations."""
+here up front, and a labelled counter starts with each label value at 0 (``ws_errors_total``: its
+``UNAVAILABLE`` series), so a scrape shows those series before their first event. The scoring
+service counts answers, error replies and clock steps, the gateway open sockets, the fan-out tick
+its frames and durations, the log pipeline the lines it dropped."""
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -12,6 +13,8 @@ from prometheus_client import (
     Histogram,
     generate_latest,
 )
+
+from quiz.contracts import messages as m
 
 REGISTRY = CollectorRegistry()
 
@@ -28,9 +31,23 @@ TICK_DURATION = Histogram(
     buckets=(0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5),
     registry=REGISTRY,
 )
+WS_ERRORS = Counter(
+    "ws_errors_total",
+    "WebSocket error replies of the use cases by request type and code",
+    ["request", "code"],
+    registry=REGISTRY,
+)
+for _request in sorted(m.message_types(m.ClientMessage)):
+    WS_ERRORS.labels(_request, m.ErrorCode.UNAVAILABLE.value)
 REDIS_CLOCK_STEP = Counter(
     "redis_clock_step_total",
     "Answers scored with elapsed 0 because the Redis clock stepped back after the serve",
+    registry=REGISTRY,
+)
+
+LOG_LINES_DROPPED = Counter(
+    "log_lines_dropped_total",
+    "Log lines dropped because the queue to the log writer was full",
     registry=REGISTRY,
 )
 

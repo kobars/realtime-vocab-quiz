@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     store: Literal["memory", "redis"] = "memory"
     redis_url: str = "redis://127.0.0.1:6381/0"
     # A burst above the pool's size waits this long for a free connection, then UNAVAILABLE.
-    # Each quiz this process serves holds one connection for its subscription.
+    # Commands and quiz subscriptions have a pool each, both this size: each quiz this process
+    # serves holds one subscription connection.
     redis_max_connections: PositiveInt = 100
     redis_pool_timeout_ms: PositiveInt = 2_000
     node_id: Annotated[str, Field(min_length=1, max_length=64)] = Field(
@@ -42,6 +43,9 @@ class Settings(BaseSettings):
     # At most the parser's limit, so every frame above it closes with 1009.
     max_payload_bytes: Annotated[int, Field(ge=1, le=MAX_FRAME_BYTES)] = MAX_FRAME_BYTES
     heartbeat_ms: PositiveInt = 25_000
+    # A request head (request line and headers) not complete this long after the connection opened
+    # or the request began: the connection is closed.
+    header_timeout_ms: PositiveInt = 10_000
     send_buffer_soft_bytes: PositiveInt = 64 * KIB  # above it: skip and conflate leaderboards
     send_buffer_hard_bytes: PositiveInt = 256 * KIB  # above it: error, then close 1013
     grace_ms: PositiveInt = 10_000  # after a disconnect, before the player counts as gone

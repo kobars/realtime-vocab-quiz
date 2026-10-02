@@ -14,6 +14,7 @@ from quiz.ports.clock import Clock
 
 ABUSE_MS = 10_000  # dropping messages this long without a quiet second: close 1008
 QUIET_MS = 1_000  # a gap with no drop that ends an abuse streak; also the RATE_LIMITED interval
+ADDRESS_REFILL_S = 60  # a client address's bucket of identity requests or upgrades refills in it
 
 
 class Verdict(Enum):
@@ -120,6 +121,13 @@ class AddressRateLimiter:
         bucket = self.buckets.pop(address, None) or TokenBucket(self.rate_per_s, self.burst, now_ms)
         self.buckets[address] = bucket
         return bucket.take(now_ms)
+
+
+def address_limiter(per_ip_conn_cap: int, clock: Clock) -> AddressRateLimiter:
+    """Two attempts per socket one address may hold (a session and a ticket, or an upgrade and
+    its reconnect), refilled over ``ADDRESS_REFILL_S``."""
+    burst = 2 * per_ip_conn_cap
+    return AddressRateLimiter(burst / ADDRESS_REFILL_S, burst, clock)
 
 
 def _trusted(address: str, proxies: Sequence[IPv4Network | IPv6Network]) -> bool:

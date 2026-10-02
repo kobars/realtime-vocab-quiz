@@ -3,19 +3,20 @@
 
 This document is the contract for every screen of the Vue client in `web/`. It says what each screen shows, which protocol message moves the UI from one state to the next, how things move, how the client works with a keyboard and a screen reader, and which design tokens give it its look. The wire messages are in `docs/spec/protocol.md` and the quiz rules in `docs/spec/domain.md`; where this spec disagrees with them, they win.
 
-The app is called **Vocab Quiz**. It uses its own neutral look: no third-party logo, brand colors or brand name appear anywhere in the UI.
+The app is called **Vocab Quiz**. It uses its own playful design system; no third-party logo or name appears in the UI.
 
 ## 1. Chosen direction
 
-**Direction A, "Slate"**: a light, neutral surface with slate text, one indigo accent, the system font stack, soft 10 px corners and short motion with no overshoot. The tokens are in §7.2. The comparison of the three candidates is in §7.1.
+**Direction "Clay"**: a pale violet page with white cards, one brand violet with a brighter violet for gradients, three playful role colors (mint, cyan and sun) used only as fills under dark text, one rounded web font, generous 16 px and 24 px corners, a 3 px outline and hard, zero-blur shadows tinted from the primary, so cards look like pressed clay. It has a light and a dark theme; the dark theme follows the operating system. The tokens are in §7.2. It replaces direction "Slate" (§7.1), the neutral look of the first version.
 
-Why A:
+Why Clay:
 
-1. **The widest contrast margins.** Every text pair, including the success, warning and danger colors that carry answer feedback, passes WCAG AA (4.5:1) on both the page and the card background, and the main text reaches 17:1 (§7.1).
-2. **A focus ring that cannot be mistaken for feedback.** The indigo ring has 7.5:1 against the page and is a different hue from the green "correct" and red "wrong" states. In direction B the teal ring sits next to the success green, which is exactly where the player looks after answering.
-3. **Calm and fast.** The system font stack needs no web-font download and has tabular numerals for scores and the countdown; the motion tokens use one easing curve with no spring or overshoot, so rank changes read as movement, not as alarm.
+1. **A quiz is a game.** Rounded type, thick outlines and a tactile press on every button make the app feel like a game without adding any motion that runs on its own (§5).
+2. **The same contrast guarantees as before.** Every text pair, the feedback states included, passes WCAG AA (4.5:1) in both themes, and the input outline and the focus ring pass 3:1 (§6.4). `web/src/styles/contrast.test.ts` recomputes each ratio from `tokens.css`, so a token change that breaks one fails the build.
+3. **Feedback stays apart from the brand.** Success is green and danger red, both far from the violet primary and the violet focus ring; the role colors never carry text or state.
+4. **One font file, from our own origin.** Nunito Variable is served from the app's origin (the content security policy allows no font host), and one variable file covers every weight. Its default figures have equal widths, so scores and the countdown do not jitter.
 
-Switching the look later means replacing the token values in one file (§7.3); no component names a color, radius or duration directly.
+Switching the look later still means replacing the token values in one file (§7.3); no component names a color, size, radius, shadow or duration directly.
 
 ## 2. Routes and layout
 
@@ -73,7 +74,8 @@ Shown on `answer_result`.
 A panel on every quiz screen (intro, question, feedback, finished).
 
 - **Rows:** rank, display name, score (tabular numerals, right-aligned). At most 50 rows are rendered: the top 50 of the latest `leaderboard` or `snapshot` (frames up to 200 players carry everyone; the client still renders 50).
-- **My row:** highlighted with the `--highlight` tint and "(you)". If I am not in the top 50, a pinned row under the list shows my rank and score.
+- **My row:** highlighted with the `--highlight` tint inside a 3 px `--primary` outline, and "(you)". If I am not in the top 50, a pinned row under the list shows my rank and score.
+- **Look:** each row is at least 48 px tall with a 2 px outline. The rank sits in a round chip: first place on `--sun`, second on a silver tint (`--muted` with a `--border` outline), third on a bronze tint (`--warning-soft`), all under dark text; the others on `--muted`. A long name is cut with an ellipsis and keeps the full name in its `title`.
 - **Where my rank and score come from** (the pinned row and the header): each `snapshot.you` and `quiz_ended.you` sets them, because no `rank_update` follows a join or a reconnect while the standings stay the same (protocol §4). A `snapshot` with `you: null` clears them: the user is not a player. A `quiz_ended` with `you: null` and no row of mine means the node could not read my rank, so the last values stay and the client sends one `resync` after the same random 0–250 ms wait as a gap (protocol §3), with its reply deadline and retries; the final `snapshot` it gets sets them. After that, a `leaderboard` frame updates them from its `entries` up to 200 players; above 200, each `rank_update` does.
 - **Header:** "340 players · 312 online" (`playerCount`, `onlineCount`).
 - Rows are keyed by `userId`, so a rank change moves the row instead of re-drawing it (§5.1). Ties cannot happen: ranks are unique.
@@ -82,7 +84,7 @@ A panel on every quiz screen (intro, question, feedback, finished).
 ### 3.6 Finished and results
 
 - **Finished** (`finished`, or `joined` with `finished: true`): "You finished!", my score, my provisional rank, and "Your rank can still change until the quiz ends in 4:12" (from `quizRemainingMs`). The live leaderboard keeps updating next to it.
-- **Results** (`quiz_ended`, or a `snapshot` with `status: "ended"`): a podium for ranks 1–3 (the first place in the middle and highest, each step with rank, name and score), my final rank and score from `you` in a card under it ("You placed #12 of 340"), then the rest of the top 50 as a list. "Show all players" loads `get_leaderboard` pages of 100 rows, with the result in `leaderboard_page` (`final: true`). A viewer with no player (`you: null`) sees the podium and the list only.
+- **Results** (`quiz_ended`, or a `snapshot` with `status: "ended"`): a podium for ranks 1–3 (the first place in the middle and highest, each step with a decorative medal emoji hidden from assistive tech, the name, the score and the rank as text, on the place fills of §3.5; it rises once, §5.5), my final rank and score from `you` in a card under it ("You placed #12 of 340"), then the rest of the top 50 as a list. "Show all players" loads `get_leaderboard` pages of 100 rows, with the result in `leaderboard_page` (`final: true`). A viewer with no player (`you: null`) sees the podium and the list only.
 - With fewer than 3 players the podium shows only the steps it has.
 
 ### 3.7 Connection and error states
@@ -203,7 +205,7 @@ After a reconnect, the new `joined` keeps the current screen when it agrees with
 
 ## 5. Motion
 
-Every animation uses the motion tokens (§7.2) and follows one rule: **motion shows what changed, it never asks for attention.** No pulsing, flashing, shaking or confetti.
+Every animation uses the motion tokens (§7.2) and follows one rule: **motion answers a touch or shows what changed; it never asks for attention.** No pulsing, flashing, shaking, confetti or looping animation during play. The spring easing (`--ease-spring`) is only for touch feedback and one-shot entrances (§5.5); FLIP, fades and the countdown keep `--ease-standard`.
 
 ### 5.1 Rank changes (FLIP)
 
@@ -219,17 +221,26 @@ Every animation uses the motion tokens (§7.2) and follows one rule: **motion sh
 ### 5.3 The countdown ring
 
 - An SVG circle whose stroke shrinks from full to empty over the question's time, driven by `requestAnimationFrame` and `performance.now()` from the moment the `question` arrived (protocol §6). The center shows the whole seconds left (`ceil`).
-- The stroke is the accent color; in the last 5 s it turns to the warning color. No pulse.
+- 72 px, 88 px from 640 px: an 8 px `--muted` track under an 8 px `--primary` stroke with round ends, and the seconds at 24 px, weight 800.
+- In the last 5 s the stroke turns `--warning` and the track `--warning-soft`. No pulse and no scale.
 
 ### 5.4 Reduced motion
 
 With `prefers-reduced-motion: reduce` (read with VueUse `usePreferredReducedMotion`, and set in CSS by one media query on the motion tokens):
 
-- every motion token becomes `0ms`, so FLIP, fades and the tint simply snap to the end state;
+- every motion token becomes `0ms` (`--motion-fast`, `--motion-base`, `--motion-slow`, `--motion-count`, `--motion-pop` and `--stagger`), so FLIP, fades and the tint simply snap to the end state;
+- the press and lift of buttons, cards and choices, the answer pop and the podium rise do not run at all (their classes sit behind Tailwind's `motion-safe:` variant); colors and borders still change;
 - counters show the final value at once;
 - the ring updates once per second in steps, with no transition; the number in its center is unchanged.
 
 Nothing is lost: every animated change also has a static end state that carries the same information.
+
+### 5.5 Touch feedback, the answer pop and the podium rise
+
+- **Press and lift:** a button or a choice lifts by 2 px on hover (its hard shadow grows from 4 px to 6 px) and sinks by 2 px when pressed (the shadow shrinks to 2 px), over `--motion-fast` with `--ease-spring`. A card that acts as a control lifts by 4 px with `--shadow-clay-lift` over `--motion-slow`. Transforms and shadows only, never layout.
+- **Answer pop:** after a correct answer the feedback card scales from 0.85 to 1 and fades in once, over `--motion-pop` (360 ms) with `--ease-spring` (`animate-pop`). After a wrong answer it only fades in, over `--motion-slow` with `--ease-standard` (`animate-fade-in`), never a shake. The end state is the card at full size and opacity.
+- **"Show all players":** the panel fades in over `--motion-slow` with `--ease-standard` (`animate-fade-in`).
+- **Podium rise:** each step rises 16 px and fades in once, over `--motion-pop` with `--ease-spring` (`animate-rise`), third place first, then second, then first, `--stagger` (120 ms) apart. The end state is the final podium.
 
 ## 6. Accessibility
 
@@ -261,14 +272,15 @@ The key hints are visible on the choice buttons, so the shortcut is discoverable
 
 ### 6.4 Contrast and size
 
-- All text meets WCAG AA (4.5:1; 3:1 for text of 24 px and up, or 19 px bold and up). Interactive outlines (choice buttons, inputs) and the focus ring meet 3:1. The measured ratios are in §7.1.
+- All text meets WCAG AA (4.5:1) in both themes, large text included. Interactive outlines (choice buttons, inputs) and the focus ring meet 3:1. The ratios are in §7.2; `web/src/styles/contrast.test.ts` recomputes them from `tokens.css`. The lowest pairs: light muted text on muted fills 6.16:1, success on its soft fill 4.95:1, danger on its soft fill 4.81:1, the input outline on the page 3.14:1 and the focus ring on the page 4.37:1; dark primary text on the card 5.32:1 and the input outline on the card 5.32:1.
+- Role colors (mint, cyan, sun) are fills only, always under `--night` text (at least 9.46:1); they never carry text or a state on their own.
 - Body text is at least 16 px; touch targets are at least 44 × 44 px; the layout works at 320 px wide and at 200 % zoom without horizontal scrolling.
 
 ## 7. Style
 
-### 7.1 Three candidate token sets
+### 7.1 The previous direction: three candidate token sets
 
-Contrast ratios are computed with the WCAG 2.2 relative-luminance formula, against the page background and the card surface.
+The first version used direction A, "Slate", chosen from the three candidates below for its contrast margins and calm motion. Clay (§1, §7.2) replaced it and keeps those guarantees; this comparison stays as the record of the earlier choice. Contrast ratios are computed with the WCAG 2.2 relative-luminance formula, against the page background and the card surface.
 
 | | A "Slate" (light, cool) | B "Paper" (light, warm) | C "Night" (dark) |
 |---|---|---|---|
@@ -288,42 +300,69 @@ Contrast ratios are computed with the WCAG 2.2 relative-luminance formula, again
 | Visible focus | indigo ring 7.55:1, a hue unlike success and danger | teal ring 5.12:1, close in hue to success green | pale yellow ring 15.2:1, strong |
 | Calm motion | short, no overshoot; the 200 ms FLIP ends before the next 200 ms frame | slow; even its 250 ms base step outlasts the 200 ms frames, so moves pile up | spring overshoot makes rank moves look jumpy |
 
-A wins on the criteria that matter during play (feedback colors, focus during feedback, calm leaderboard). C stays documented as a dark theme that can be added later by swapping tokens.
+A won on the criteria that matter during play (feedback colors, focus during feedback, calm leaderboard). Clay keeps those criteria: feedback colors apart from the focus ring, AA in both themes, no spring on the leaderboard.
 
-### 7.2 Tokens of direction A
+### 7.2 Tokens of direction Clay
 
-| Token | Value | Use | Contrast |
-|---|---|---|---|
-| `--background` | `#F8FAFC` | Page | — |
-| `--card` | `#FFFFFF` | Panels, choices, cards | — |
-| `--card-foreground` | `#0F172A` | Text on cards | 17.9:1 on card |
-| `--popover` / `--popover-foreground` | `#FFFFFF` / `#0F172A` | Menus, tooltips | 17.9:1 |
-| `--foreground` | `#0F172A` | Body text, headings | 17.1:1 on page |
-| `--muted-foreground` | `#475569` | Secondary text, hints | 7.2:1 on page, 6.9:1 on muted |
-| `--muted` | `#F1F5F9` | Tab list, quiet fills | — |
-| `--secondary` / `--secondary-foreground` | `#F1F5F9` / `#0F172A` | Secondary buttons ("Skip") | 16.3:1 |
-| `--border` | `#E2E8F0` | Dividers (decorative) | — |
-| `--input` | `#64748B` | Outlines of choices and inputs | 4.55:1 on page, 4.76:1 on card |
-| `--primary` | `#4338CA` | Primary button, ring stroke, my row's marker | 7.55:1 on page |
-| `--primary-foreground` | `#FFFFFF` | Text on primary | 7.90:1 |
-| `--accent` / `--accent-foreground` | `#F1F5F9` / `#0F172A` | Hover and highlighted items of ghost and outline buttons and menus (shadcn-vue's use) | 16.3:1 |
-| `--highlight` | `#EEF2FF` | My row's tint, its 1 s fade (§5.1) | text on it 16.0:1; `--primary` on it 7.07:1 |
-| `--ring` | `#4338CA` | Focus ring, 2 px, offset 2 px | 7.55:1 on page |
-| `--success` | `#15803D` | Correct mark, "+points" | 4.79:1 on page; white on it 5.02:1 |
-| `--success-soft` | `#F0FDF4` | Correct choice fill | `#166534` on it 6.81:1 |
-| `--destructive` | `#B91C1C` | Wrong mark, errors | 6.18:1 on page; white on it 6.47:1 |
-| `--destructive-soft` | `#FEF2F2` | Wrong choice fill | `#991B1B` on it 7.60:1 |
-| `--warning` | `#B45309` | Last 5 s of the ring, "Server busy" | 4.80:1 on page |
-| `--font-sans` | `ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif` | All text; `font-variant-numeric: tabular-nums` on numbers | — |
-| Type scale | 14 / 16 / 20 / 24 / 32 px, line height 1.5 (body) and 1.2 (headings) | Hint / body / choice / prompt / podium | — |
-| `--radius` | `0.625rem` (10 px) | Cards, buttons, choices; pills are fully round | — |
-| `--shadow-card` | `0 1px 2px rgb(15 23 42 / 0.06), 0 4px 12px rgb(15 23 42 / 0.06)` | Cards only | — |
-| `--motion-fast` / `--motion-base` / `--motion-slow` | `120ms` / `200ms` / `320ms` | Leave, hover / enter, FLIP / the "Show all players" panel | — |
-| `--motion-count` | `600ms` | Count-up | — |
-| `--ease-standard` | `cubic-bezier(0.2, 0, 0, 1)` | Every transition | — |
+Each row gives the light value (on `:root`) and the dark value (under `prefers-color-scheme: dark`); "same" keeps the light value.
+
+| Token | Light | Dark | Use | Contrast (light; dark) |
+|---|---|---|---|---|
+| `--background` | `#F9F6FF` | `#050024` | Page | — |
+| `--card` / `--popover` | `#FFFFFF` / `#FFFFFF` | `#171236` / `#171236` | Panels, choices, cards, menus | — |
+| `--foreground` | `#181233` | `#F9F6FF` | Body text, headings | 16.75:1 on page; 19.05:1 |
+| `--card-foreground` / `--popover-foreground` | `#181233` / `#181233` | `#F9F6FF` / `#F9F6FF` | Text on cards and menus | 17.90:1; 16.71:1 |
+| `--muted` | `#F2EEFF` | `#1E1A3C` | Tab track, quiet fills, the ring's track | — |
+| `--muted-foreground` | `#5C5478` | `#A9A3C7` | Secondary text, hints | 6.56:1 on page, 7.01:1 on card, 6.16:1 on muted; 7.44:1 on card, 6.90:1 on muted |
+| `--secondary` / `--secondary-foreground` | `#F2EEFF` / `#4B3199` | `#1E1A3C` / `#B197FF` | Secondary buttons, the default badge | 8.39:1; 6.89:1 |
+| `--accent` / `--accent-foreground` | `#F2EEFF` / `#181233` | `#1E1A3C` / `#F9F6FF` | Hover background of ghost buttons and menus (shadcn-vue's use) | 15.73:1; 15.50:1 |
+| `--border` | `#E5DCFF` | `#322066` | Card and badge outlines (decorative) | — |
+| `--input` | `#9774FF` | `#9774FF` | Outlines of choices and inputs; the first key-hint chip, under `--night` text (6.06:1) | 3.14:1 on page, 3.36:1 on card; 5.32:1 on card |
+| `--primary` | `#6441CC` | `#9774FF` | Brand violet: primary text, the ring's stroke, focused inputs, my row's border | 6.20:1 on page, 6.62:1 on card; 5.32:1 on card |
+| `--primary-foreground` | `#FFFFFF` | `#050024` | Text on primary and on the primary gradient | 6.62:1 on primary, 4.67:1 on the gradient end; 6.06:1 |
+| `--primary-hover` | `#4B3199` | `#B197FF` | The outline button's hover fill | primary-foreground on it 9.55:1; 8.47:1 |
+| `--primary-bright` | `#7D51FF` | `#B197FF` | End of the primary gradient only | — |
+| `--ring` | `#7D51FF` | `#B197FF` | Focus ring, 2 px, offset 2 px | 4.37:1 on page, 4.67:1 on card; 8.47:1 on page |
+| `--highlight` | `#E3FCF8` | `#123A35` | My row's tint, its 1 s fade (§5.1) | text on it 16.66:1; 11.68:1 |
+| `--mint` / `--cyan` / `--sun` | `#1AEDD5` / `#00C5FF` / `#FF9822` | same | Role fills: badges, key hints, icon tiles, first place | `--night` on them 13.68:1 / 10.11:1 / 9.46:1 |
+| `--night` | `#050024` | same | Text on the role fills | — |
+| `--success` | `#1F7A3A` | `#60F07F` | Correct mark, "+points" | 5.04:1 on page; 13.83:1 on page |
+| `--success-soft` | `#EBF9EF` | `#0F3A1F` | Correct choice fill | success on it 4.95:1; 8.67:1 |
+| `--destructive` | `#CC2626` | `#FF8282` | Wrong mark, errors | 5.08:1 on page; 8.50:1 on page |
+| `--destructive-foreground` | `#FFFFFF` | `#050024` | Text on the destructive button | 5.42:1; 8.50:1 |
+| `--destructive-soft` | `#FDEEEE` | `#4A1520` | Wrong choice fill | destructive on it 4.81:1; 6.18:1 |
+| `--warning` | `#A65200` | `#FFC17A` | Last 5 s of the ring, "Server busy" | 5.13:1 on page, 5.49:1 on card; 11.19:1 on card |
+| `--warning-soft` | `#FFF3E6` | `#3A2610` | The ring's track in the last 5 s, third place | warning on it 5.02:1; 8.99:1 |
+| `--gradient-primary` | `linear-gradient(135deg, var(--primary), var(--primary-bright))` | same | Primary button, progress bar, icon tiles | — |
+| `--gradient-text` | `linear-gradient(135deg, #6441CC, #385CEC)` | `linear-gradient(135deg, #B197FF, #00C5FF)` | Wordmark and the results heading, clipped to the text, with a solid `--primary` fallback | each stop at least 5.03:1 on page; 8.47:1 |
+| `--font-sans` | `"Nunito Variable", ui-rounded, system-ui, "Segoe UI", Roboto, sans-serif` | same | All text: body 500, buttons 700, headings 800 | — |
+| `--font-size-title` / `--font-size-display` | `2rem` / `2.5rem` | same | Type scale 14 / 16 / 20 / 24 / 32 px, plus 40 px display from 640 px; line height 1.5 (body) and 1.2 (headings) | — |
+| `--radius` / `--radius-card` | `1rem` / `1.5rem` | same | Buttons, inputs, choices (sm 12, md 14, xl 20 px) / cards; pills are fully round | — |
+| `--border-clay` | `3px` | same | Outline of cards, buttons, inputs and choices; badges use 2 px | — |
+| `--clay-tint` | `18%` | `35%` | Strength of the primary tint in the card shadows | — |
+| `--shadow-clay` / `--shadow-clay-lift` | `6px 6px 0 color-mix(in srgb, var(--primary) var(--clay-tint), transparent), inset 0 -4px 0 rgb(5 0 36 / 0.06)` / `10px 10px 0 color-mix(in srgb, var(--primary) var(--clay-tint), transparent), inset 0 -4px 0 rgb(5 0 36 / 0.06)` | same | Cards / a card that lifts | — |
+| `--shadow-press` / `--shadow-press-hover` / `--shadow-press-active` | `4px 4px 0 color-mix(in srgb, var(--primary) 30%, transparent), inset 0 -3px 0 rgb(5 0 36 / 0.12)` / `6px 6px 0 color-mix(in srgb, var(--primary) 30%, transparent), inset 0 -3px 0 rgb(5 0 36 / 0.12)` / `2px 2px 0 color-mix(in srgb, var(--primary) 30%, transparent), inset 0 -1px 0 rgb(5 0 36 / 0.12)` | same | Buttons and choices: at rest / hovered / pressed | — |
+| `--shadow-inset` | `inset 0 2px 4px rgb(5 0 36 / 0.06)` | same | Inputs | — |
+| `--blob-tint` | `16%` | `8%` | Strength of the join screen's decoration | — |
+| `--motion-fast` / `--motion-base` / `--motion-slow` | `120ms` / `200ms` / `320ms` | same | Leave, press / enter, FLIP / the "Show all players" panel, card lift | — |
+| `--motion-count` / `--motion-pop` / `--stagger` | `600ms` / `360ms` / `120ms` | same | Count-up / answer pop and podium rise / delay between podium steps | — |
+| `--ease-standard` / `--ease-spring` | `cubic-bezier(0.2, 0, 0, 1)` / `cubic-bezier(0.34, 1.56, 0.64, 1)` | same | Every transition / touch feedback and one-shot entrances only (§5.5) | — |
 
 ### 7.3 Where the tokens live
 
-- One file, `web/src/styles/tokens.css`, defines the tokens as CSS custom properties on `:root`, with the full set of names that shadcn-vue components read (`--background`, `--foreground`, `--card`, `--card-foreground`, `--popover`, `--popover-foreground`, `--primary`, `--primary-foreground`, `--secondary`, `--secondary-foreground`, `--muted`, `--muted-foreground`, `--accent`, `--accent-foreground`, `--destructive`, `--border`, `--input`, `--ring`, `--radius`; the chart and sidebar tokens are unused) plus `--highlight`, `--success`, `--warning`, the soft fills, the shadow and the motion tokens. `--accent` keeps shadcn-vue's meaning (the hover background), so my row has its own `--highlight` and buttons never hover in the my-row tint.
-- Tailwind maps its theme colors, radius and durations to these properties, so components use classes such as `bg-card`, `text-success` and `duration-slow`, never a raw hex value or millisecond count.
+- One file, `web/src/styles/tokens.css`, defines the tokens as CSS custom properties on `:root`, with the full set of names that shadcn-vue components read (`--background`, `--foreground`, `--card`, `--card-foreground`, `--popover`, `--popover-foreground`, `--primary`, `--primary-foreground`, `--secondary`, `--secondary-foreground`, `--muted`, `--muted-foreground`, `--accent`, `--accent-foreground`, `--destructive`, `--border`, `--input`, `--ring`, `--radius`; the chart and sidebar tokens are unused) plus the brand, role, state, gradient, type, shape, shadow and motion tokens of §7.2. `--accent` keeps shadcn-vue's meaning (the hover background), so my row has its own `--highlight` and buttons never hover in the my-row tint.
+- The dark theme is one `@media (prefers-color-scheme: dark)` block in the same file that redefines the color tokens, `--gradient-text`, `--clay-tint` and `--blob-tint` on `:root`, and switches `color-scheme` from `light` to `dark` so scrollbars and native form controls follow. There is no toggle. Tailwind's `dark:` variant stays bound to a `.dark` ancestor, so the shadcn-vue `dark:` classes never apply; components carry none. `web/index.html` sets the browser's `theme-color` for each scheme.
+- Tailwind maps its theme colors, the title and display sizes, the radius and the default transition to these properties in `web/src/styles/main.css`; the tokens that Tailwind has no theme namespace for (the card radius, the clay border, the shadows, the primary gradient, the durations and easings) are `@utility` classes that read them. The shadow utilities fill Tailwind's shadow slot next to its ring slots, so a focus ring still draws on a hovered or pressed control. Components use classes such as `bg-card`, `text-success`, `rounded-card`, `shadow-press` and `duration-slow`, never a raw hex value, pixel size or millisecond count.
 - The same file holds the one `@media (prefers-reduced-motion: reduce)` block that sets every motion token to `0ms` (§5.4).
+- The font is self-hosted: `main.css` declares the latin and latin-ext faces of Nunito Variable from the `@fontsource-variable/nunito` package, with `font-display: swap`, so the browser fetches it from the app's own origin.
+
+### 7.4 Components
+
+The shadcn-vue primitives in `web/src/components/ui/` carry the clay look, so screens choose a variant instead of overriding classes:
+
+- **Button:** 16 px corners, the 3 px clay outline, weight 700, 16 px text; sizes `default` 44 px, `sm` 44 px with 14 px text, `lg` 56 px. Variants: `default` (primary gradient, primary-foreground text), `secondary`, `outline` (card fill, input outline, primary text; fills with `--primary-hover` on hover), `ghost`, `destructive`, `mint` (celebratory calls to action) and `link`. Press and lift sit behind `motion-safe:`.
+- **Card:** `rounded-card`, the clay outline in `--border`, `shadow-clay`, 24 px padding (32 px from 640 px). The `interactive` prop adds the 4 px lift on hover.
+- **Badge:** a pill with a 2 px outline, 14 px text at weight 600 and an optional leading icon. Variants: `default` (secondary tokens), `mint`, `cyan` and `sun` (role fill, `--night` text), `success`, `destructive` and `warning` (soft fill, state text), `outline`.
+- **Input:** 48 px tall, 16 px text at every width, the clay outline in `--input`, an inset shadow; focus turns the outline `--primary` and keeps the 2 px focus ring; an invalid field has a `--destructive` outline.
+- **Progress:** a 12 px `--muted` track with a 2 px outline and a primary-gradient fill with round ends.
+- **Toasts:** clay corners, outline and shadow, in the app font; success, error and warning toasts use the soft state fills.

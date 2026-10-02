@@ -177,11 +177,12 @@ async def test_ready_and_tickets_on_redis(redis_url: str, now: list[int]) -> Non
 
 async def test_log_lines_are_json_with_quiz_and_request_ids(http: httpx.AsyncClient) -> None:
     out = io.StringIO()
-    logs.configure_logging(out)
+    listener = logs.configure_logging(out)
     await create(http)
     resp = await http.get("/quizzes/VOCAB-42", headers={"X-Request-ID": "req-1"})
     await http.get("/healthz")
     assert resp.headers["X-Request-ID"] == "req-1"
+    listener.stop()  # writes the queued lines
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     assert all({"quiz_id", "request_id", "event", "level"} <= line.keys() for line in lines)
     get = [line for line in lines if line.get("path") == "/quizzes/VOCAB-42"]

@@ -1,4 +1,5 @@
-# AI-ASSISTED: the HTTP edge: an end that was not announced, an unhandled error, the identity limit.
+# AI-ASSISTED: the HTTP edge: an end that was not announced, an unhandled error, the identity limit,
+# public quiz info without a ranking.
 import io
 import json
 from collections.abc import AsyncIterator
@@ -8,6 +9,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
+from quiz.adapters.memory import store as memory_store
 from quiz.config import Settings
 from quiz.main import create_app, services_of
 from quiz.obs import logs
@@ -54,10 +56,11 @@ async def test_an_unhandled_error_answers_500_with_the_request_id(
         raise RuntimeError(msg)
 
     out = io.StringIO()
-    logs.configure_logging(out)
+    listener = logs.configure_logging(out)
     resp = await http.get("/boom", headers={"X-Request-ID": "req-9"})
     assert (resp.status_code, resp.headers["X-Request-ID"]) == (500, "req-9")
     assert resp.json() == {"error": "INTERNAL", "message": "internal error"}
+    listener.stop()  # writes the queued lines
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     [error] = [line for line in lines if "exception" in line]
     assert error["request_id"] == "req-9"
@@ -79,3 +82,23 @@ async def test_sessions_and_tickets_share_one_limit_per_client_address() -> None
         other = {"X-Forwarded-For": "203.0.113.7"}  # another client behind that proxy
         resp = await http.post("/sessions", json={"displayName": "Bo"}, headers=other)
         assert resp.status_code == 201
+
+
+async def test_quiz_info_counts_players_without_ranking_them(
+    app: FastAPI, http: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = {"quizId": "VOCAB-42", "timeLimitMs": 20_000, "windowMs": 600_000}
+    assert (await http.post("/admin/quizzes", json=body, headers=TOKEN)).status_code == 201
+    store = services_of(app).store
+    for user in "abc":
+        await store.join("VOCAB-42", user, user.upper(), f"c-{user}")
+
+    def refuse(_: object) -> list[object]:
+        pytest.fail("ranked every player")
+
+    monkeypatch.setattr(memory_store, "standings", refuse)
+    info = (await http.get("/quizzes/VOCAB-42")).json()
+    assert (info["status"], info["players"]) == ("open", 3)
+    monkeypatch.undo()  # quiz_ended carries the ranked top entries
+    await store.end_by_host("VOCAB-42")
+    assert (await http.get("/quizzes/VOCAB-42")).json()["status"] == "ended"

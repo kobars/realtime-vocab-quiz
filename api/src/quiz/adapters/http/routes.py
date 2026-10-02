@@ -64,13 +64,13 @@ async def _info(deps: HttpDeps, quiz_id: str) -> h.QuizInfo:
     questions = await deps.bank.questions(quiz_id) if QUIZ_ID.fullmatch(quiz_id) else None
     if questions is None:
         raise DomainError(ErrorCode.QUIZ_NOT_FOUND, NOT_FOUND)
-    page = await deps.store.standings_page(quiz_id, 0, 1)  # status from the clock alone
+    ranks = await deps.store.ranks_of(quiz_id, ())  # the count and status alone: no ranking
     return h.QuizInfo(
         quizId=quiz_id,
         title=await deps.bank.title(quiz_id) or quiz_id,
         questionCount=len(questions),
-        status="ended" if page.final else "open",
-        players=page.player_count,
+        status=ranks.status,
+        players=ranks.player_count,
     )
 
 
@@ -128,7 +128,7 @@ def _public(deps: HttpDeps) -> APIRouter:
 
     @api.get("/readyz", tags=["operations"], responses={503: {"model": h.Status}})
     async def readyz(response: Response) -> h.Status:
-        """Readiness: the store answers; 503 when Redis is unreachable."""
+        """Readiness: the store takes writes; 503 when Redis is unreachable or refuses writes."""
         if await deps.ready():
             return h.Status(status="ready")
         response.status_code = 503

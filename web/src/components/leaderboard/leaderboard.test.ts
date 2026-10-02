@@ -249,12 +249,28 @@ it('a snapshot or a rebase frame swaps the rows in one step; an ordinary frame m
 it('my row gets a 1 s tint when it moves up, and none when it moves down', async () => {
   const w = track(mount(LeaderboardRows, { ...options, props: { entries: [row(1, 140), me(2, 0)], myUserId: 'u1' } }))
   const mine = () => w.find('[aria-current="true"]').classes()
+  // The tint is my row's only fill, so it never depends on the CSS order of two fills.
+  expect(mine()).toContain('bg-highlight')
+  expect(mine()).not.toContain('bg-card')
+  expect(w.find('li:not([aria-current])').classes()).toContain('bg-card')
   await w.setProps({ entries: [me(1, 150), row(2, 140)] })
   expect(mine()).toContain('lb-rise')
   await vi.advanceTimersByTimeAsync(1_000)
   expect(mine()).not.toContain('lb-rise')
   await w.setProps({ entries: [row(1, 160), me(2, 150)] })
   expect(mine()).not.toContain('lb-rise')
+})
+
+it('the top 3 rank chips sit on the place fills under dark text; the rest are muted', () => {
+  const chips = rows(top(4)).findAll('li').map((li) => li.get('span').classes())
+  expect(chips.map((c) => c.find((name) => name.startsWith('bg-')))).toEqual(['bg-sun', 'bg-muted', 'bg-warning-soft', 'bg-muted'])
+  expect(chips.map((c) => c.find((name) => name.startsWith('text-') && !name.startsWith('text-sm')))).toEqual(['text-night', 'text-foreground', 'text-foreground', 'text-muted-foreground'])
+})
+
+it('a long name truncates and keeps the full name in its title', () => {
+  const name = 'A very long display name that does not fit'
+  const span = rows([{ rank: 1, userId: 'p1', displayName: name, score: 10 }]).get('li').findAll('span')[1]
+  expect([span?.classes(), span?.attributes('title')]).toEqual([expect.arrayContaining(['truncate', 'min-w-0']), name])
 })
 
 it('a leaving row fades where it was, not at the top of the list', async () => {
