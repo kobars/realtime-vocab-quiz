@@ -13,5 +13,8 @@ COPY api/pyproject.toml api/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --only-group load --no-install-project
 COPY load/bots.py load/latency.py load/player.py ./
-# Runs as root so it can write result files into the bind-mounted load/results on any host.
+# make load runs it as the host user, so its result files in the bind-mounted load/results are
+# the user's; a run is a batch job with no service to probe.
+USER 10001:10001
+HEALTHCHECK NONE
 ENTRYPOINT ["python", "bots.py"]

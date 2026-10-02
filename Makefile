@@ -99,7 +99,7 @@ review-budget: ## Count the branch's review input in tokens, against BASE_SHA or
 acceptance: ## Run the acceptance tests alone (ACCEPTANCE_STORE=redis: on Redis)
 	$(acceptance_steps)
 load: ## Run the bot swarm against the running full stack; options in LOAD_ARGS (load/README.md)
-	docker compose --profile load run --rm --build load $(LOAD_ARGS)
+	docker compose --profile load run --rm --build --user "$$(id -u):$$(id -g)" load $(LOAD_ARGS)
 contracts: ## Regenerate the JSON Schema and TypeScript types
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,contracts,uv run --project api --locked python scripts/gen_contracts.py)
