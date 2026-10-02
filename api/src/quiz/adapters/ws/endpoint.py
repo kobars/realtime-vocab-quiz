@@ -5,13 +5,15 @@ Before accept, in order: the Origin (403), the subprotocol (400), the ticket (40
 caps (503 per process, 429 per client address). A refusal is a plain HTTP response.
 
 A socket whose close the sender gave up (the peer reads nothing, so not even the close frame
-goes out) leaves the registry at once but keeps its cap slots until uvicorn reports the
-disconnect. ASGI has no abort and uvicorn's close waits for the buffer to flush, so that
-transport lasts until the peer reads or goes (the kernel ends a vanished peer's connection),
-and the caps keep bounding open transports. The cost is one idle handler per such socket; no
-timer frees the slot sooner, since a peer that never reads could then open sockets without
-limit."""
+goes out) leaves the registry at once but keeps its cap slots, and its close frame stays
+pending, until that frame goes out or uvicorn reports the disconnect. ASGI has no abort and
+uvicorn's close waits for the buffer to flush, so that transport lasts until the peer reads
+again (the frame goes out and uvicorn's close timeout ends the transport) or goes (the kernel
+ends a vanished peer's connection), and the caps keep bounding open transports. The cost is
+one idle handler per such socket; no timer frees the slot sooner, since a peer that never
+reads could then open sockets without limit."""
 
+import asyncio
 import logging
 import time
 import uuid
@@ -105,9 +107,18 @@ class Gateway:
                 self.registry.drop(conn)
                 structlog.contextvars.bind_contextvars(quiz_id=conn.quiz_id)
                 log.info("ws %s closed %d", path, code)
-        if sender is not None and sender.given_up:
-            while ws.client_state is not WebSocketState.DISCONNECTED:
-                await ws.receive()  # until uvicorn's disconnect: the transport is gone
+        if sender is not None and sender.closing is not None:
+            peer_gone = asyncio.create_task(_until_disconnect(ws))
+            try:
+                await asyncio.wait({sender.closing, peer_gone}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                sender.closing.cancel()
+                peer_gone.cancel()
+
+
+async def _until_disconnect(ws: WebSocket) -> None:
+    while ws.client_state is not WebSocketState.DISCONNECTED:
+        await ws.receive()  # until uvicorn's disconnect: the transport is gone
 
 
 async def _refuse(ws: WebSocket, status: int, reason: str) -> None:

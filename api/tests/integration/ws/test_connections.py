@@ -552,9 +552,10 @@ async def test_a_present_socket_that_joins_again_after_the_end_still_leaves() ->
     assert await online(store) == 0
 
 
-async def test_a_given_up_close_keeps_the_cap_slot_until_the_transport_is_gone(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def given_up_close(
+    monkeypatch: pytest.MonkeyPatch, writable: asyncio.Event
+) -> tuple[Any, asyncio.Queue[dict[str, Any]], asyncio.Task[None], list[int]]:
+    """A gateway socket closed with 1009 whose close frame waits for ``writable``, given up."""
     monkeypatch.setattr(endpoint, "Sender", partial(Sender, flush_s=0.05))
     app = create_app(Settings())
     services, gateway = services_of(app), app.state.gateway
@@ -566,10 +567,19 @@ async def test_a_given_up_close_keeps_the_cap_slot_until_the_transport_is_gone(
     inbound.put_nowait({"type": "websocket.connect"})
     for text in (json.dumps(JOIN), "x" * (16 * KIB + 1)):  # the second frame closes it with 1009
         inbound.put_nowait({"type": "websocket.receive", "text": text})
+    closed: list[int] = []
+    dropped, drop = asyncio.Event(), gateway.registry.drop
+
+    def drop_and_note(conn: Connection) -> None:
+        drop(conn)
+        dropped.set()
+
+    monkeypatch.setattr(gateway.registry, "drop", drop_and_note)
 
     async def send(message: dict[str, Any]) -> None:
-        if message["type"] == "websocket.close":  # the peer reads nothing: it never goes out
-            await asyncio.Event().wait()
+        if message["type"] == "websocket.close":  # the peer reads nothing until writable is set
+            await writable.wait()
+            closed.append(message["code"])
 
     scope = {
         "type": "websocket",
@@ -581,9 +591,26 @@ async def test_a_given_up_close_keeps_the_cap_slot_until_the_transport_is_gone(
     }
     ws = WebSocket(scope, inbound.get, send)  # type: ignore[arg-type]
     handler = asyncio.create_task(gateway.endpoint(ws))
-    await asyncio.sleep(1.3)  # past flush_s and the close frame's own second: given up
-    assert gateway.registry.senders("VOCAB-42") == []  # the registry lets go at the deadline
-    assert (handler.done(), gateway.caps.total) == (False, 1)
+    await asyncio.wait_for(dropped.wait(), 5)  # past flush_s and the close's own second: given up
+    assert gateway.registry.senders("VOCAB-42") == []
+    assert (handler.done(), gateway.caps.total) == (False, 1)  # the registry let go, the cap not
+    return gateway, inbound, handler, closed
+
+
+async def test_a_given_up_close_keeps_the_cap_slot_until_the_transport_is_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway, inbound, handler, closed = await given_up_close(monkeypatch, asyncio.Event())
     inbound.put_nowait({"type": "websocket.disconnect", "code": 1006})
     await asyncio.wait_for(handler, 1)
-    assert gateway.caps.total == 0
+    assert (gateway.caps.total, closed) == (0, [])
+
+
+async def test_a_given_up_close_still_goes_out_once_the_peer_reads_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writable = asyncio.Event()
+    gateway, _, handler, closed = await given_up_close(monkeypatch, writable)
+    writable.set()  # the peer reads again; uvicorn's close timeout then ends the transport
+    await asyncio.wait_for(handler, 1)
+    assert (gateway.caps.total, closed) == (0, [1009])
