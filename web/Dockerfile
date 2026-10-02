@@ -7,8 +7,9 @@ ENV PNPM_HOME=/pnpm \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /web
-# Dependencies first, so a source change reuses this layer.
+# Dependencies first, so a source change reuses this layer: the workspace's manifests, the design-system package's too.
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
+COPY web/packages/clay/package.json ./packages/clay/
 RUN --mount=type=cache,target=/pnpm/store \
     pnpm config set store-dir /pnpm/store \
     && pnpm install --frozen-lockfile

@@ -8,7 +8,7 @@ import type { ClientEvent } from '@/protocol/client'
 import { createAppRouter } from '@/router'
 import { configureQuizStore, type QuizClientPort } from '@/stores/quiz'
 import { strings } from '@/strings'
-import { stackedFocusClasses } from '@/components/ui/focus.testing'
+import { stackedFocusClasses } from '@quiz/clay/testing'
 
 let emit: (event: ClientEvent) => void
 let start: ReturnType<typeof vi.fn>

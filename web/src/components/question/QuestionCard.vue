@@ -3,7 +3,7 @@
 import { LoaderCircle } from '@lucide/vue'
 import { useEventListener } from '@vueuse/core'
 import { computed, nextTick, useTemplateRef, watch } from 'vue'
-import { Button } from '@/components/ui/button'
+import { Button } from '@quiz/clay'
 import type { CurrentQuestion } from '@/stores/quiz'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'

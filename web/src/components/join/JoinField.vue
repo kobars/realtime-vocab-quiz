@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { CircleAlert } from '@lucide/vue'
 import { computed, useTemplateRef, watch } from 'vue'
-import { Input } from '@/components/ui/input'
+import { Input } from '@quiz/clay'
 
 defineOptions({ inheritAttrs: false })
 const props = defineProps<{ id: string; label: string; hint?: string; error: string | null }>()

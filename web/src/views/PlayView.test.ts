@@ -9,7 +9,7 @@ import type { AnswerResult, Joined, Question, ServerMessage, Snapshot } from '@/
 import { createAppRouter } from '@/router'
 import { configureQuizStore, type QuizClientPort, useQuizStore } from '@/stores/quiz'
 import PlayView from './PlayView.vue'
-import { stackedFocusClasses } from '@/components/ui/focus.testing'
+import { stackedFocusClasses } from '@quiz/clay/testing'
 
 let emit: (event: ClientEvent) => void
 let clock = 0

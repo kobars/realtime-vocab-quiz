@@ -1,8 +1,7 @@
 <!-- AI-ASSISTED: the calm connection pill: connecting, reconnecting or updating (quiet pill), server busy (warning pill), or closed (destructive pill), wrapping on a narrow screen; nothing while live or blocked (UI spec §3.7, §6.3). -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { badgeVariants } from '@/components/ui/badge'
-import { cn } from '@/lib/utils'
+import { badgeVariants, cn } from '@quiz/clay'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 

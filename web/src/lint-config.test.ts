@@ -1,5 +1,5 @@
 // @vitest-environment node
-// AI-ASSISTED: checks that the ESLint config accepts browser globals in Vue single-file components and runs the type-aware rules.
+// AI-ASSISTED: checks that the ESLint config accepts browser globals in Vue single-file components, runs the type-aware rules and keeps the app on the design system's public entry points.
 import { ESLint } from 'eslint'
 import { describe, expect, it } from 'vitest'
 
@@ -50,5 +50,23 @@ describe('eslint config', { timeout: 30_000 }, () => {
       '@typescript-eslint/no-misused-promises',
       '@typescript-eslint/await-thenable',
     ])
+  })
+
+  it.each([
+    "import { Button } from '@quiz/clay/src/components/button'",
+    "import { cn } from '../packages/clay/src/utils'",
+    "import { cva } from 'class-variance-authority'",
+    "import { toast } from 'vue-sonner'",
+  ])('rejects %s in app code', async (line) => {
+    const rules = (await lint(`${line}\nexport const used = [${line.match(/\{ (\w+) \}/)?.[1]}]\n`, 'src/main.ts')).map((message) => message.ruleId)
+    expect(rules).toEqual(['no-restricted-imports'])
+  })
+
+  it.each([
+    "import { Button, cn } from '@quiz/clay'",
+    "import { themes } from '@quiz/clay/tokens'",
+    "import { stackedFocusClasses } from '@quiz/clay/testing'",
+  ])('accepts %s in app code', async (line) => {
+    expect(await lint(`${line}\nexport const used = [${line.match(/\{ ([\w, ]+) \}/)?.[1]}]\n`, 'src/main.ts')).toEqual([])
   })
 })

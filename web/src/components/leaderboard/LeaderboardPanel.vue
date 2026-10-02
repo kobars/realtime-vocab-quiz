@@ -1,8 +1,7 @@
 <!-- AI-ASSISTED: the live leaderboard panel: player counts, the top 50, my row pinned below it when I am further down (on an opaque dock that sticks to the bottom of the window while the list scrolls), and the full list, in a clay card (UI spec §3.5). -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Badge } from '@/components/ui/badge'
-import { Card } from '@/components/ui/card'
+import { Badge, Card } from '@quiz/clay'
 import { useQuizStore } from '@/stores/quiz'
 import { strings } from '@/strings'
 import AllPlayers from './AllPlayers.vue'

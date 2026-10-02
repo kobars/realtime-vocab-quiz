@@ -88,7 +88,12 @@ def test_size_limit_counts_changed_lines_without_generated_files(
     lines = check_pr.MAX_CHANGED_LINES - 1  # the AI-LOG entry adds the last line
     big = "x\n" * 1000
     pr_repo.commit(
-        {"app.py": "x\n" * lines, "api/uv.lock": big, "web/src/components/ui/a.vue": big, **ENTRY}
+        {
+            "app.py": "x\n" * lines,
+            "api/uv.lock": big,
+            "web/packages/clay/src/components/a.vue": big,
+            **ENTRY,
+        }
     )
     assert _check(base, capsys)[0] == 0
 

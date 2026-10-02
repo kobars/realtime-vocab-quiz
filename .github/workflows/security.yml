@@ -66,7 +66,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           FILES_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files
-          PATHS: '^(api/uv\.lock|api/pyproject\.toml|web/pnpm-lock\.yaml|web/package\.json|\.nvmrc|Makefile|\.github/workflows/security\.yml)$'
+          PATHS: '^(api/uv\.lock|api/pyproject\.toml|web/pnpm-lock\.yaml|web/(packages/[^/]+/)?package\.json|\.nvmrc|Makefile|\.github/workflows/security\.yml)$'
         run: |
           files=$(gh api --paginate "$FILES_URL" --jq '.[].filename')
           if grep -qE "$PATHS" <<<"$files"; then changed=true; else changed=false; fi

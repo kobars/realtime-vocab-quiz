@@ -1,7 +1,7 @@
 <!-- AI-ASSISTED: the quiz preview card on the join screen: an icon tile, the title, whether the quiz has ended, and the question and player counts as pills; it sits inside the join card, so it has an outline but no shadow of its own. -->
 <script setup lang="ts">
 import { BookOpenText } from '@lucide/vue'
-import { Badge } from '@/components/ui/badge'
+import { Badge } from '@quiz/clay'
 import type { QuizPreview } from '@/components/join/preview'
 import { strings } from '@/strings'
 

@@ -49,14 +49,16 @@ COMPOSE_NO_SECRETS = ADMIN_TOKEN="$${ADMIN_TOKEN:-unused}" REDIS_PASSWORD="$${RE
 # The visual and accessibility specs run in the pinned Playwright image (its version matches @playwright/test in
 # web/pnpm-lock.yaml), always as linux/amd64 like CI, so the baselines and every check render alike. The Linux
 # node_modules live in a volume, which leaves the host's web/node_modules alone. The container runs as root, so on exit
-# it hands the build, the reports and the baselines back to the host user. UI_ARGS adds Playwright arguments, quotes
-# included, for example UI_ARGS="--project=320-light -g 'join-error'".
+# it hands the build, the reports and the baselines back to the host user; the design-system package's node_modules get
+# a volume of their own too. UI_ARGS adds Playwright arguments, quotes included, for example
+# UI_ARGS="--project=320-light -g 'join-error'".
 PLAYWRIGHT_IMAGE = mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
 export UI_ARGS
-ui_run = mkdir -p web/node_modules && docker run --rm --platform linux/amd64 --ipc=host \
+ui_run = mkdir -p web/node_modules web/packages/clay/node_modules && docker run --rm --platform linux/amd64 --ipc=host \
 	-e CI -e E2E_SUITE=ui -e UI_ARGS -e HOST_IDS="$$(id -u):$$(id -g)" -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
-	-v "$(CURDIR)":/repo -v elsaquiz-ui-node-modules:/repo/web/node_modules -w /repo/web $(PLAYWRIGHT_IMAGE) \
-	sh -c 'trap "chown -R $$HOST_IDS dist test-results playwright-report e2e/__screenshots__ 2>/dev/null || true" EXIT; \
+	-v "$(CURDIR)":/repo -v elsaquiz-ui-node-modules:/repo/web/node_modules \
+	-v elsaquiz-ui-clay-node-modules:/repo/web/packages/clay/node_modules -w /repo/web $(PLAYWRIGHT_IMAGE) \
+	sh -c 'trap "chown -R $$HOST_IDS dist packages/clay/dist test-results playwright-report e2e/__screenshots__ 2>/dev/null || true" EXIT; \
 	corepack enable && pnpm install --frozen-lockfile --store-dir /tmp/pnpm-store && eval "pnpm exec playwright test $(1) $$UI_ARGS"'
 # The bots that make demo starts.
 BOTS ?= 20
@@ -65,7 +67,7 @@ BOTS ?= 20
 # built here.
 PROD_COMPOSE = scripts/deploy/ops.sh compose
 
-.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines check acceptance load contracts audit audit-python audit-web audit-secrets review-budget prod-up prod-down prod-logs prod-demo prod-update prod-backup prod-restore do-deploy do-destroy
+.PHONY: help build up down demo demo-stop demo-end new-quiz smoke-full dev-api test test-integration test-system test-browser ui-check ui-baselines clay check acceptance load contracts audit audit-python audit-web audit-secrets review-budget prod-up prod-down prod-logs prod-demo prod-update prod-backup prod-restore do-deploy do-destroy
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -125,6 +127,8 @@ ui-check: ## Run the visual and accessibility specs in the pinned Playwright ima
 	$(call step,ui specs,$(call ui_run))
 ui-baselines: ## Regenerate the screenshot baselines that differ or are missing, in the pinned Playwright image
 	$(call step,ui baselines,$(call ui_run,--update-snapshots))
+clay: ## Serve the Clay design system's component gallery on :5180 (web/packages/clay)
+	pnpm -C web --filter @quiz/clay dev
 check: export ACCEPTANCE_STORE = memory
 check: ## Run every check a change must pass
 	$(call step,web install,pnpm -C web install --frozen-lockfile)

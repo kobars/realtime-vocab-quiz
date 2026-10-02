@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { Sparkles } from '@lucide/vue'
 import { useTemplateRef } from 'vue'
-import { Toaster } from '@/components/ui/sonner'
+import { Toaster } from '@quiz/clay'
 import { strings } from '@/strings'
 
 const main = useTemplateRef<HTMLElement>('main')

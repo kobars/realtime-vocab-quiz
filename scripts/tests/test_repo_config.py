@@ -209,8 +209,13 @@ def test_ui_container_hands_its_files_back_and_takes_ui_args_from_the_environmen
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     ui_run = re.search(r"^ui_run = (.*?[^\\])$", makefile, re.MULTILINE | re.DOTALL)
     assert ui_run is not None
-    chown = 'trap "chown -R $$HOST_IDS dist test-results playwright-report e2e/__screenshots__'
+    chown = (
+        'trap "chown -R $$HOST_IDS dist packages/clay/dist test-results playwright-report '
+        "e2e/__screenshots__"
+    )
     assert chown in ui_run[1]
+    # The design-system package's Linux node_modules stay in a volume too, off the host's folder.
+    assert "-v elsaquiz-ui-clay-node-modules:/repo/web/packages/clay/node_modules" in ui_run[1]
     assert '-e HOST_IDS="$$(id -u):$$(id -g)"' in ui_run[1]
     assert "-e UI_ARGS" in ui_run[1]
     assert 'eval "pnpm exec playwright test $(1) $$UI_ARGS"' in ui_run[1]
