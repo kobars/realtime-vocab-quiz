@@ -9,9 +9,11 @@ handler, which ``logging.shutdown`` does at exit, writes the queued lines first,
 ``STOP_WAIT_S``: a stalled reader never holds the exit."""
 
 import logging
+import os
 import queue
 import sys
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from logging.handlers import QueueHandler, QueueListener
 from typing import TextIO, override
@@ -32,10 +34,48 @@ def _ids(_: WrappedLogger, __: str, event: EventDict) -> EventDict:
     return event
 
 
+Write = Callable[[str], None]
+
+
+def _line_writer(stream: TextIO | None) -> Write:
+    """Write to ``stream``, or else straight to stderr's file descriptor. At exit,
+    ``logging.shutdown`` and the interpreter flush ``sys.stderr``; a write blocked on a stalled
+    reader must hold no lock of it, or the exit waits forever."""
+    if stream is None:
+        try:
+            fd = sys.stderr.fileno()
+        except AttributeError, OSError, ValueError:  # a replaced sys.stderr may have no descriptor
+            stream = sys.stderr
+        else:
+
+            def to_fd(line: str) -> None:
+                data = line.encode()
+                while data:
+                    data = data[os.write(fd, data) :]
+
+            return to_fd
+
+    def to_stream(line: str) -> None:
+        stream.write(line)
+        stream.flush()
+
+    return to_stream
+
+
 class _Writer(QueueListener):
-    def __init__(self, lines: queue.Queue[logging.LogRecord | None], out: logging.Handler) -> None:
-        super().__init__(lines, out)
-        self.lines = lines
+    """Writes each queued line itself, with no ``logging.Handler`` in between: ``logging.shutdown``
+    takes every handler's lock at exit, and a handler blocked on a stalled reader holds it."""
+
+    def __init__(self, lines: queue.Queue[logging.LogRecord | None], write: Write) -> None:
+        super().__init__(lines)
+        self.lines, self.write = lines, write
+
+    @override
+    def handle(self, record: logging.LogRecord) -> None:
+        try:
+            self.write(record.getMessage() + "\n")  # the queued message is the JSON line
+        except OSError, ValueError:  # a closed or broken stream: the line is lost, not the writer
+            metrics.LOG_LINES_DROPPED.inc()
 
     @override
     def stop(self) -> None:
@@ -49,9 +89,9 @@ class _Writer(QueueListener):
 
 
 class _DroppingHandler(QueueHandler):
-    def __init__(self, lines: queue.Queue[logging.LogRecord | None], out: logging.Handler) -> None:
+    def __init__(self, lines: queue.Queue[logging.LogRecord | None], write: Write) -> None:
         super().__init__(lines)
-        self.writer = _Writer(lines, out)
+        self.writer = _Writer(lines, write)
 
     @override
     def enqueue(self, record: logging.LogRecord) -> None:
@@ -82,9 +122,7 @@ def configure_logging(stream: TextIO | None = None, level: int = logging.INFO) -
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=False,
     )
-    out = logging.StreamHandler(stream or sys.stderr)
-    out.setFormatter(logging.Formatter("%(message)s"))  # the queued line is already JSON
-    handler = _DroppingHandler(queue.Queue(QUEUE_LINES), out)
+    handler = _DroppingHandler(queue.Queue(QUEUE_LINES), _line_writer(stream))
     handler.name = HANDLER_NAME
     handler.setFormatter(
         structlog.stdlib.ProcessorFormatter(

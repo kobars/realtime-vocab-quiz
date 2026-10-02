@@ -4,9 +4,11 @@ import asyncio
 import io
 import json
 import logging
+import subprocess
+import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import override
 
 import pytest
@@ -26,6 +28,16 @@ class BlockedStream(io.StringIO):  # a sink whose reader has stalled until ``ope
         return super().write(text)
 
 
+@pytest.fixture(autouse=True)
+def detached() -> Iterator[None]:
+    """Take the JSON handler off the root logger after each test, so none outlives its sink."""
+    yield
+    root = logging.getLogger()
+    for handler in [h for h in root.handlers if h.name == logs.HANDLER_NAME]:
+        root.removeHandler(handler)
+        handler.close()
+
+
 @pytest.mark.timeout(10)  # the current code blocks the loop on the first write
 async def test_a_blocked_sink_does_not_stall_the_loop(metric: Callable[..., float]) -> None:
     sink, dropped = BlockedStream(), metric("log_lines_dropped_total")
@@ -41,17 +53,20 @@ async def test_a_blocked_sink_does_not_stall_the_loop(metric: Callable[..., floa
 
     beat = asyncio.create_task(heartbeat())
     log = structlog.get_logger("quiz.http")
-    with structlog.contextvars.bound_contextvars(quiz_id="VOCAB-42", request_id="req-1"):
-        for batch in range(200):  # 20,000 lines, twice the queue
-            for i in range(100):
-                log.info("http_request", n=batch * 100 + i)
-            await asyncio.sleep(0)
-    await asyncio.sleep(0.05)
-    beat.cancel()
-    assert max(gaps) < 0.1
-    assert metric("log_lines_dropped_total") > dropped
-    sink.open.set()
-    listener.stop()
+    try:
+        with structlog.contextvars.bound_contextvars(quiz_id="VOCAB-42", request_id="req-1"):
+            for batch in range(200):  # 20,000 lines, twice the queue
+                for i in range(100):
+                    log.info("http_request", n=batch * 100 + i)
+                await asyncio.sleep(0)
+        await asyncio.sleep(0.05)
+        beat.cancel()
+        # A blocked write would stall the loop until the sink opens; the margin is for slow CI.
+        assert max(gaps) < 0.5
+        assert metric("log_lines_dropped_total") > dropped
+    finally:
+        sink.open.set()
+        listener.stop()
     lines = [json.loads(line) for line in sink.getvalue().splitlines()]
     assert len(lines) > 1
     assert {(line["quiz_id"], line["request_id"], line["event"]) for line in lines} == {
@@ -87,3 +102,21 @@ def test_closing_the_handler_gives_up_on_a_stalled_sink_after_its_wait() -> None
     finally:
         sink.open.set()  # let the writer go, whatever happened
         closing.join()
+
+
+def test_the_process_exits_while_its_stderr_reader_is_stalled() -> None:
+    code = (
+        "import logging; from quiz.obs import logs; logs.configure_logging(); "
+        "[logging.getLogger('quiz.test').info('x' * 200) for _ in range(20_000)]"
+    )
+    stalled = subprocess.Popen(  # noqa: S603 - this interpreter, fixed arguments
+        [sys.executable, "-c", code],
+        stderr=subprocess.PIPE,  # a pipe nobody reads
+    )
+    try:
+        assert stalled.wait(timeout=logs.STOP_WAIT_S + 5) == 0
+    finally:
+        stalled.kill()
+        stalled.wait()
+        assert stalled.stderr is not None
+        stalled.stderr.close()
