@@ -51,7 +51,7 @@ our choice: they make the scale-out claims of §10 real.
 
 | Target | Value | How it is measured |
 |---|---|---|
-| Latency (C5) | p99 below 500 ms from "answer accepted" to "leaderboard delivered"; frames come from a 200 ms coalescing tick, so the tick spends up to 200 ms of it | The bot swarm (`load/bots.py`) times each answer → leaderboard pair on the client side; the runs are in §9 |
+| Latency (C5) | p99 below 500 ms from "answer accepted" to "leaderboard delivered"; frames come from a 200 ms coalescing tick, so the tick spends up to 200 ms of it | The bot swarm (`load/bots.py`) times each answer → leaderboard pair on the client side; the measured runs go in §9 |
 | Throughput | Thousands of concurrent sockets over **two API nodes** behind nginx (a cap of 10,000 per process), and 1,000 answers per second in one quiz of 5,000 players (§9) | Bot swarm runs on one and on two nodes: sockets, messages per second, CPU and memory (§9) |
 | Availability | The service keeps running when one API node stops: its clients reconnect to the other node within the backoff (at most 10 s) and resync. Redis is the single point of failure: while it is down, requests get `UNAVAILABLE` | `/readyz` on each node (503 while Redis is unreachable); the failure table of §11 |
 
@@ -366,7 +366,7 @@ serves a player, so any node can run any write, and the only ordering that matte
 ## 8. Non-functional requirements
 
 The latency, throughput and availability targets, each with how it is measured, are in
-[§2](#2-assumptions-and-non-goals) ("Targets"); §9 holds the measured numbers and §11 the
+[§2](#2-assumptions-and-non-goals) ("Targets"); the measured numbers go in §9, and §11 has the
 failure modes. Durability: Redis AOF `everysec`, so a Redis crash can lose about the last
 second of answers (§11).
 
@@ -579,7 +579,7 @@ Test paths are under `api/tests/` (server) or `web/src/` (client). "Not tested" 
 
 | Failure | Detection | System behavior | User-visible effect | Mitigation | Proving test |
 |---|---|---|---|---|---|
-| API node crash or SIGTERM | The socket closes (1006); nginx's connect to the dead node fails | No graceful drain: the node's sockets drop; nginx sends new connects to the other node; the dead node's grace timers die with it, and another node's presence renew drops its entries 13–16 s later | "Reconnecting", then play resumes on the other node with the same score and cursor | Client backoff (full jitter, at most 10 s), new ticket, `join`, `resync` | `integration/test_two_nodes.py::test_a_player_who_moves_to_the_other_node_within_the_grace_keeps_presence`; `integration/fanout/test_presence.py::test_another_nodes_renew_drops_presence_that_no_live_node_renews`; `web/src/protocol/client.test.ts` (reconnect with backoff). `make smoke-full` (`load/smoke_full.py`) stops the node that holds its socket in the running stack and checks that the player is back through nginx within 10 s with its score; it needs the stack, so it is not part of `make check` |
+| API node crash or SIGTERM | The socket closes: 1006 on a crash, 1012 when uvicorn shuts down on SIGTERM; nginx's connect to the stopped node fails | No graceful drain: the node's sockets drop; nginx sends new connects to the other node; the dead node's grace timers die with it, and another node's presence renew drops its entries 13–16 s later | "Reconnecting", then play resumes on the other node with the same score and cursor | Client backoff (full jitter, at most 10 s), new ticket, `join`, `resync` | `integration/test_two_nodes.py::test_a_player_who_moves_to_the_other_node_within_the_grace_keeps_presence`; `integration/fanout/test_presence.py::test_another_nodes_renew_drops_presence_that_no_live_node_renews`; `web/src/protocol/client.test.ts` (reconnect with backoff). `make smoke-full` (`load/smoke_full.py`) stops the node that holds its socket in the running stack and checks that the player is back through nginx within 10 s with its score; it needs the stack, so it is not part of `make check` |
 | Redis down | A store call raises a connection error; `/readyz` returns 503 | Every request that needs Redis gets `UNAVAILABLE`; ticket redeem fails, so new sockets get HTTP 503; ticks log and retry | Errors and "reconnecting" until Redis is back | The client retries with backoff; restore Redis (a replica with failover is the next step, §10) | `integration/http/test_endpoints.py::test_readyz_and_requests_report_an_unreachable_redis`; `integration/ws/test_gateway.py::test_an_unreachable_ticket_store_answers_503`; `unit/app/test_service.py::test_redis_faults_are_unavailable_and_ping_answers_null` |
 | Redis restart (AOF loss window) | The client sees a lower `seq` on the next frame, or a gap | AOF `everysec`: the last second of writes can be lost, acknowledged answers included; a host end is announced only after its mark is on disk | A score can step back by the answers of that second; standings repair on the resync | `WAITAOF` before the host end; the client resyncs on `seq < lastSeq` | `integration/test_deadline.py::test_host_end_announces_only_after_the_mark_is_fsynced`; `web/src/protocol/seq.test.ts` (a lower `seq` resyncs at once). The loss itself is not tested: it needs a Redis killed between a write and its fsync |
 | Slow consumer | The socket's send buffer passes 64 KiB, then 256 KiB | Above 64 KiB, leaderboards are skipped and the newest one is sent with `rebase: true`; above 256 KiB, `error`, then close 1013 | A slow client sees fewer frames; past the hard limit it reconnects after 5 s plus the backoff | Per-socket buffer limits; one writer per socket | `integration/ws/test_connections.py::test_a_client_that_never_reads_is_conflated_then_closed_with_1013`, `::test_a_conflated_client_gets_rebase_true_and_sends_no_resync` |
@@ -667,15 +667,17 @@ over a quiz; `/readyz` answers 200 while Redis is reachable. The load bots measu
 
 **Alerts a production setup would add.** `/readyz` failing on any node; the answer → leaderboard
 p99 above 500 ms (from client-side timings, which this build does not export); the p99 of
-`tick_duration_seconds` above 50 ms; `rate(leaderboard_frames_total)` at 0 while
-`answers_total` grows; `ws_connections` near the 10,000 cap; any increase of
+`tick_duration_seconds` above 50 ms; `sum(rate(leaderboard_frames_total))` over all nodes at 0
+while `sum(rate(answers_total))` grows (only the node that wins a tick publishes, so one node's
+counter can stay flat on a healthy stack); `ws_connections` near the 10,000 cap; any increase of
 `redis_clock_step_total`; a rise in 1013 and 1008 closes in the logs.
 
 **Diagnosis: "the leaderboard is slow".**
 
 1. Check `/readyz` on both nodes (`docker compose exec api-1 …`, README): a 503 means Redis.
-2. Check that frames are published: `leaderboard_frames_total` must grow while answers arrive.
-   If it does not, look for `tick of quiz … store unreachable` or `fan-out of quiz … failed`
+2. Check that frames are published: the sum of `leaderboard_frames_total` over both nodes must
+   grow while answers arrive (each node counts only the frames it published itself, so read
+   both). If it does not, look for `tick of quiz … store unreachable` or `fan-out of quiz … failed`
    in the logs.
 3. Check the tick time: a high `tick_duration_seconds` points at Redis (`SLOWLOG GET`,
    `INFO commandstats` for the scripts; a quiz above 200 players ranks every scorer in the tick).

@@ -110,10 +110,19 @@ pnpm 11.
   acceptance tests always start their own (Docker).
 - `make acceptance`: the black-box acceptance tests over HTTP and the WebSocket alone;
   `ACCEPTANCE_STORE=redis` runs them on Redis.
-- The tests below need the running Docker stack. The system tests and the browser specs start
-  their own quizzes, so a second run needs fresh stack data
-  (`docker compose --profile full down -v`, then `up` again); run the browser specs before
-  `make smoke-full`, which reuses their quiz.
+- The tests below need the running Docker stack, and they create the seeded quizzes themselves:
+  the system tests `BIZ-20`, the browser specs `VOCAB-42` and `ACAD-10`. A quiz ID can be
+  created only once on the same stack data, so a quiz left by the Docker steps above, the bot
+  swarm or an earlier run makes them fail with HTTP 409. Start from fresh stack data first:
+
+  ```bash
+  docker compose --profile full down -v
+  docker compose --profile full up -d --wait
+  ```
+
+  Then run the system tests, the browser specs and `make smoke-full`, in that order.
+  `make smoke-full` reuses the browser specs' `VOCAB-42` while it is open (10 minutes); after
+  that, start from fresh stack data again.
   - `make test-system`: system tests through nginx (`api/tests/system/`): a score on one node
     reaches a socket on the other, the origin check, the connection cap, the security headers.
   - `make test-browser`: browser specs in Chromium with an accessibility scan (`web/e2e/`,
@@ -211,14 +220,17 @@ make down
 ## Troubleshooting
 
 - **Port already in use** (`bind: address already in use`): another program holds 8080, 8001,
-  5173 or 6381. Stop it, or set `QUIZ_PORT` in `.env` (the stack) or `DEV_API_PORT` (the
-  development API).
+  5173 or 6381. Stop it, or set `QUIZ_PORT` in `.env` (the stack). To move the development
+  API, start it with `DEV_API_PORT` and point the client dev server at it, for example
+  `DEV_API_PORT=8002 ADMIN_MOCK=1 ADMIN_TOKEN=dev-token make dev-api` and
+  `QUIZ_API_URL=http://127.0.0.1:8002 pnpm -C web dev`.
 - **Docker is not running** (`Cannot connect to the Docker daemon`): start Docker Desktop or
   the Docker service; `make build`, the stack, `make test-integration` and `make check` need it.
 - **`set ADMIN_TOKEN in .env`**: Compose refuses to start the stack until `.env` holds both
   secrets (step 1 of the Docker path).
 - **The quiz has ended**: a quiz closes when its window ends, and its ID stays taken (HTTP 409)
-  while its data lives (24 hours). Create another seeded quiz (`BIZ-20` or `ACAD-10`), pass a
+  while its data lives (24 hours). Create another seeded quiz (`BIZ-20` or `ACAD-10`; the test suites
+  then need fresh stack data, see **Run the tests**), pass a
   longer window (`"windowMs": 3600000`, the 60-minute maximum), or start with empty data:
   restart `make dev-api` (memory store), or run `docker compose --profile full down -v` (stack).
 
