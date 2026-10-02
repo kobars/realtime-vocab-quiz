@@ -1,8 +1,9 @@
 # AI-ASSISTED: writes the question bank of many quizzes that the many-quizzes load run plays.
 """Write ``--quizzes`` quiz files, ``LOAD-001`` and on, each with the questions of ``VOCAB-42``
-under its own question IDs, into ``--out`` (default ``load/bank``) in place of the quiz files
-there, and print the quiz IDs comma-separated for the swarm's ``--quiz-ids``. The API nodes read
-the folder when ``load/compose.bank.yaml`` mounts it over their bank."""
+under its own question IDs, into ``--out`` (default ``load/bank``) in place of the ``load-*.json``
+files there (other files stay), and print the quiz IDs comma-separated for the swarm's
+``--quiz-ids``. The API nodes read the folder when ``load/compose.bank.yaml`` mounts it over
+their bank."""
 
 import argparse
 import json
@@ -36,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
         cli.error(f"--quizzes must be 1..{MAX_QUIZZES}")
     source = json.loads(SOURCE.read_text(encoding="utf-8"))
     a.out.mkdir(parents=True, exist_ok=True)
-    for old in a.out.glob("*.json"):  # a smaller bank must not keep an earlier run's quizzes
+    for old in a.out.glob("load-*.json"):  # a smaller bank must not keep an earlier run's quizzes
         old.unlink()
     quizzes = [quiz(n, source) for n in range(1, a.quizzes + 1)]
     for q in quizzes:

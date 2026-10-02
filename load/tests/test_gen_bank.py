@@ -34,6 +34,13 @@ def test_a_smaller_bank_replaces_a_larger_one(tmp_path: Path) -> None:
     assert MockQuestionBank.load(tmp_path).quiz_ids == ("LOAD-001", "LOAD-002")
 
 
+def test_only_generated_quiz_files_are_replaced(tmp_path: Path) -> None:
+    seeded = tmp_path / "vocab-42.json"
+    seeded.write_text("{}", encoding="utf-8")
+    main(["--quizzes", "1", "--out", str(tmp_path)])
+    assert seeded.read_text(encoding="utf-8") == "{}"
+
+
 @pytest.mark.parametrize("count", ["0", "1000"])
 def test_a_count_outside_the_id_range_is_refused(tmp_path: Path, count: str) -> None:
     with pytest.raises(SystemExit):
