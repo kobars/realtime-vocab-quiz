@@ -530,7 +530,7 @@ def test_an_update_of_a_stopped_stack_starts_it_but_cannot_roll_back(tmp_path: P
     code, log, out, _ = _ops(retry, "update", dot_env=PULL_ENV, STOPPED="1", BAD_READY="new")
     assert code == 1
     assert "there are no images to go back to" in out
-    assert BACK == [c for c in log if c.startswith(("git checkout", "git reset"))][-2:]
+    assert [c for c in log if c.startswith(("git checkout", "git reset"))][-2:] == BACK
 
 
 def test_a_short_sha_tag_follows_the_checkout_and_a_short_sha_ref_is_published(
@@ -634,7 +634,7 @@ def test_a_restore_of_a_backup_without_an_image_tag_keeps_the_hosts_own(tmp_path
     code, log, out, _ = _ops(tmp_path, "restore", str(backup))
     assert code == 0, out
     assert "Keeping IMAGE_TAG=main" in out
-    assert _env(repo / ".env")["ADMIN_TOKEN"] == "old"
+    assert "\nADMIN_TOKEN=old\n" in (repo / ".env").read_text(encoding="utf-8")  # the backup's
     assert _env(repo / ".env")["IMAGE_TAG"] == "main"
     assert _env(repo / ".env")["COMPOSE_FILE"].endswith(":compose.images.yaml")
     assert not any(c.startswith("make") for c in log)
