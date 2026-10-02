@@ -22,8 +22,8 @@ are mocks behind ports, and quiz admin is a mock host action (§14).
 
 | Measure | Target (ours) | Measured |
 |---|---|---|
-| Concurrent sockets, two API nodes | thousands | TODO: from the load runs (§9) |
-| Answer accepted → leaderboard delivered, p99 (C5) | below 500 ms | TODO: from the load runs (§9) |
+| Concurrent sockets, two API nodes | thousands | 5,000 in one quiz (about 2,500 per node) and 5,000 over 500 quizzes, all within C5 (§9) |
+| Answer accepted → leaderboard delivered, p99 (C5) | below 500 ms | 202 to 419 ms in four runs; worst 419 ms, one quiz of 5,000 players on two nodes (§9) |
 | Leaderboard frames per quiz | at most 5 per second | by design: one per 200 ms tick, only after a change |
 | Scoring rule | wrong or late 0; correct `100 + (50 * (T - e)) // T` | exact integers; one formula in Lua and Python |
 
@@ -374,7 +374,7 @@ second of answers (§11).
 
 ## 9. Capacity estimate
 
-<!-- AI-ASSISTED-BEGIN: sections 9 and 10 drafted with Claude Code from api/src/quiz/config.py, the contracts, docs/spec/ and docs/DECISIONS.md; the frame sizes were computed by encoding sample frames in compact JSON. -->
+<!-- AI-ASSISTED-BEGIN: sections 9 and 10 drafted with Claude Code from api/src/quiz/config.py, the contracts, docs/spec/ and docs/DECISIONS.md; the frame sizes were computed by encoding sample frames in compact JSON; the measured numbers are copied from the load runs in load/results/. -->
 
 Every number below is either an input with its source, a value computed from those inputs (the
 formula is given), or a measurement from a load-run file. The measured table is the last part.
@@ -436,7 +436,11 @@ hold 20,000. In one hot quiz above 200 players, each socket gets at most 5 frame
 `50,000 × 4,296 B` ≈ 215 MB/s of egress per node, plus at most one `rank_update` per socket
 per tick (A7). All of it runs on one core (A12), so CPU or the network is likely to set the
 practical number below the cap: 215 MB/s is about 1.7 Gbit/s before framing, above a 1 Gbit/s
-link. The measured runs give the number and the memory per socket.
+link. Measured (the table below): one node held 2,500 sockets of one hot quiz within C5 (p99
+385 ms) at 64 % of its core on average, peaking at a full core, and each node of the two-node run
+held about 2,500 at 64 % (p99 419 ms). So the practical number per node in one hot quiz is 2,500
+measured, and by extrapolating the CPU about 3,500 at most (an estimate, not measured), against
+the computed cap of 10,000: CPU, not memory, sets it.
 
 **Messages per question** (computed). For a quiz of `N` players, per player and question:
 
@@ -478,9 +482,38 @@ clients that send faster than A11 (up to 20 messages per second per socket, A6).
 
 **Measured numbers.**
 
-TODO: the measured runs from `load/README.md` and `load/results/` (scenario, connections,
-msg/s, p50, p95 and p99 in ms, CPU %, RSS in MB, the machine used) and whether C5 (p99 below
-500 ms) was met.
+Copied from [load/README.md](load/README.md), which says how to repeat each run. Machine: an
+Apple M4 Pro laptop (12 cores, 24 GB) running Docker Desktop with a Linux VM of 12 CPUs and
+7.7 GiB, shared by nginx, the API nodes (built from commit `f33b6b5`), Redis and the bot swarm
+(`make load`). Every run: a 30 s
+ramp, then 180 s of answering, one answer per player about every 5 s (A11), 70 % correct.
+Latencies are the bots' "answer accepted → leaderboard delivered" samples (C5); the answer
+latency is the client-observed round trip from `answer` to `answer_result`. Msg/s counts the
+frames the bots received; CPU % is the mean over the answering window, in percent of one core
+(two values: one per node); RSS is the node's peak memory in MiB as `docker stats` reports it.
+No run had a missing, timed-out or reconnecting sample; the many-quizzes run counted 4 `seq`
+gaps, each closed by a resync.
+
+| Scenario | Connections | Msg/s | p50 ms | p95 ms | p99 ms | CPU % | RSS MB | Answer p99 ms | Missing samples | Bots' CPU % (procs) | Result files in `load/results/` |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| One hot quiz, 1 node | 1,000 | 5,991 | 111.7 | 195.2 | 202.1 | 26.2 | 123 | 30.6 | 0 | 9.8 (4) | `20261002T015133874705Z-hot-1node-1000.json`, `20261002T015125572903Z-hot-1node-1000-nodes.json` |
+| One hot quiz, 1 node | 2,500 | 14,025 | 126.2 | 218.5 | 385.4 | 63.8 | 197 | 254.6 | 0 | 17.2 (6) | `20261002T015548565474Z-hot-1node-2500.json`, `20261002T015539887204Z-hot-1node-2500-nodes.json` |
+| One hot quiz, 2 nodes | 5,000 | 29,327 | 121.7 | 200.8 | 418.6 | 63.8, 63.7 | 194, 205 | 320.9 | 0 | 23.4 (10) | `20261002T015941299620Z-hot-2node-5000.json`, `20261002T015933705982Z-hot-2node-5000-nodes.json` |
+| 500 quizzes × 10 players, 2 nodes | 5,000 | 8,925 | 91.7 | 191.3 | 237.5 | 74.4, 73.5 | 244, 242 | 394.6 | 0 | 10.0 (10) | `20261002T020339231432Z-many-2node-500x10.json`, `20261002T020329823078Z-many-2node-500x10-nodes.json` |
+
+**C5 is met**: the p99 stays below 500 ms in every run, 419 ms in the worst. The p50 of about
+120 ms in one hot quiz is the tick: a new total waits on average half of the 200 ms tick. The
+tail grows with the node's CPU, so the margin at 2,500 sockets per node in one hot quiz is small.
+
+**Steady-state memory per socket** = `(peak RSS − idle RSS) / sockets on the node`, with the
+idle RSS taken before the run (in the `-nodes.json` files): 1,000 sockets
+`(123.0 − 57.0) MiB / 1,000` = 68 KiB; 2,500 sockets `(197.0 − 58.6) MiB / 2,500` = 57 KiB; the
+two-node hot quiz 55 and 59 KiB; 500 quizzes 75 KiB on each node (each served quiz adds its own
+state and a Redis subscription). The two-node figures assume an even split of 2,500 sockets per
+node: nginx balances requests round-robin and no result file counts sockets per node, but the
+nodes' near-equal CPU and memory growth agree with it. That is about a tenth of the 634 KiB per socket that the buffer bounds
+above allow a slow, flooding client, so 10,000 healthy sockets need about 0.5 to 0.8 GiB per
+node.
 
 ## 10. Scalability and trade-offs
 

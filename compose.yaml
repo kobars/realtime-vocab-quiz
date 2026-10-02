@@ -99,6 +99,18 @@ services:
       web:
         condition: service_healthy
 
+  # The bot swarm (make load); it reaches the full stack through nginx on the stack network.
+  load:
+    <<: *hardened # its nofile limit gives one descriptor per bot socket
+    profiles: [load]
+    build:
+      context: .
+      dockerfile: load/Dockerfile
+    environment:
+      LOAD_URL: ${LOAD_URL:-http://nginx:8080/api}
+    volumes:
+      - ./load/results:/app/results
+
 networks:
   stack:
     ipam:

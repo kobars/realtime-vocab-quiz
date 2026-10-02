@@ -44,7 +44,7 @@ DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
 # even to start the development Redis or to stop anything. Placeholders: never start the stack with it.
 COMPOSE_NO_SECRETS = ADMIN_TOKEN="$${ADMIN_TOKEN:-unused}" REDIS_PASSWORD="$${REDIS_PASSWORD:-unused}" docker compose
 
-.PHONY: help build up down smoke-full dev-api test test-integration test-system test-browser check acceptance contracts audit audit-python audit-web audit-secrets review-budget
+.PHONY: help build up down smoke-full dev-api test test-integration test-system test-browser check acceptance load contracts audit audit-python audit-web audit-secrets review-budget
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -98,6 +98,8 @@ review-budget: ## Count the branch's review input in tokens, against BASE_SHA or
 	uv run --project api --locked python scripts/review_budget.py
 acceptance: ## Run the acceptance tests alone (ACCEPTANCE_STORE=redis: on Redis)
 	$(acceptance_steps)
+load: ## Run the bot swarm against the running full stack; options in LOAD_ARGS (load/README.md)
+	docker compose --profile load run --rm --build --user "$$(id -u):$$(id -g)" load $(LOAD_ARGS)
 contracts: ## Regenerate the JSON Schema and TypeScript types
 	$(call step,web install,pnpm -C web install --frozen-lockfile)
 	$(call step,contracts,uv run --project api --locked python scripts/gen_contracts.py)

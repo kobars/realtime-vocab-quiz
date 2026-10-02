@@ -1,0 +1,12 @@
+# AI-ASSISTED: the many-quizzes load run: both API nodes read load/bank (load/gen_bank.py) as their
+# question bank. Each quiz a node serves holds one connection of the subscription pool, whose size
+# is REDIS_MAX_CONNECTIONS, so it must exceed the run's quizzes.
+x-bank: &bank
+  volumes:
+    - ./load/bank:/app/src/quiz/adapters/mock_questions/data:ro
+  environment:
+    REDIS_MAX_CONNECTIONS: ${REDIS_MAX_CONNECTIONS:-1000}
+
+services:
+  api-1: *bank
+  api-2: *bank

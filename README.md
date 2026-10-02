@@ -133,7 +133,9 @@ pnpm 11.
   - The bot swarm (`load/bots.py`) plays quizzes and reports the answer → leaderboard latency,
     for example 10 bots for 30 seconds:
     `uv run --project api python load/bots.py --admin-token "$ADMIN_TOKEN" --bots 10 --duration 30`.
-    Without `--admin-token` it plays quizzes that already exist.
+    Without `--admin-token` it plays quizzes that already exist. `make load` runs it as a
+    container on the stack network, with its options in `LOAD_ARGS`;
+    [load/README.md](load/README.md) explains them and holds the measured load runs.
 - `make check`: every check a change must pass (lint, types, unit and acceptance tests with
   coverage, the client build, the link check). Run it before you open a pull request; it needs
   Docker.
