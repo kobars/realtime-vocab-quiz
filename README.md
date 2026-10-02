@@ -20,8 +20,22 @@ which test now checks the fix and which review ran.
 
 ## Try it with Docker
 
-This runs the full stack: two API nodes on one Redis behind nginx. You need Docker with
-Compose v2, `make`, `curl` and `openssl`.
+**One command.** With Docker (Compose v2) and `make`:
+
+```bash
+git clone https://github.com/kobars/realtime-vocab-quiz.git
+cd realtime-vocab-quiz
+make demo
+```
+
+`make demo` writes `.env` with new secrets if there is none, builds the images, starts the full
+stack, starts a fresh 60-minute quiz with 20 bots playing it, and prints the quiz ID and the
+player URL. Open that URL in two browser windows and join to play next to the bots.
+`make demo BOTS=200` starts more bots, `make demo-stop` removes them, `make new-quiz` starts
+another quiz on the running stack, and `make down` stops everything.
+
+**Step by step.** This runs the same full stack: two API nodes on one Redis behind nginx. You
+need Docker with Compose v2, `make`, `curl` and `openssl`.
 
 1. Clone the repository and write the two secrets the stack needs into `.env` (the mock
    admin token and the stack Redis password; [`.env.example`](.env.example) lists the other
@@ -151,6 +165,9 @@ pnpm 11.
     Without `--admin-token` it plays quizzes that already exist. `make load` runs it as a
     container on the stack network, with its options in `LOAD_ARGS`;
     [load/README.md](load/README.md) explains them and holds the measured load runs.
+- `docker compose --profile test run --rm test`: `make test` and the acceptance tests on the
+  memory store in a container, with no uv or pnpm on the host. It needs `.env` (step 1 above,
+  or `make demo` writes it), as every Compose command does.
 - `make check`: every check a change must pass (lint, types, unit and acceptance tests with
   coverage, the client build, the link check). Run it before you open a pull request; it needs
   Docker.
@@ -215,7 +232,7 @@ its default, and [`.env.example`](.env.example) shows the common ones.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `STORE` | `memory` | `memory` for one process, `redis` for several nodes |
+| `STORE` | `memory`; `redis` in the API image | `memory` for one process, `redis` for several nodes |
 | `REDIS_URL` | `redis://127.0.0.1:6381/0` | The Redis that `make up` starts (`make down` stops it) |
 | `ALLOWED_ORIGINS` | `http://localhost:8080`, `http://127.0.0.1:8080` | Comma-separated origins allowed to open the WebSocket; others get HTTP 403. `make dev-api` sets the client dev server's origins |
 | `QUIZ_PORT` | `8080` | The public port; the default allowed origins use it |
@@ -246,7 +263,8 @@ make down
 - **`set ADMIN_TOKEN in .env`**: Compose refuses to start the stack until `.env` holds both
   secrets (step 1 of the Docker path).
 - **The quiz has ended**: a quiz closes when its window ends, and its ID stays taken (HTTP 409)
-  while its data lives (24 hours). Create another seeded quiz (`BIZ-20` or `ACAD-10`; the test suites
+  while its data lives (24 hours). On the stack, `make new-quiz` starts a fresh 60-minute run
+  of `VOCAB-42` under a new ID. Or create another seeded quiz (`BIZ-20` or `ACAD-10`; the test suites
   then need fresh stack data, see **Run the tests**), pass a
   longer window (`"windowMs": 3600000`, the 60-minute maximum), or start with empty data:
   restart `make dev-api` (memory store), or run `docker compose --profile full down -v` (stack).

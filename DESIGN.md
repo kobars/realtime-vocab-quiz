@@ -81,7 +81,7 @@ core; the quiz host uses a token-gated mock admin API. All three are dashed.
 ```mermaid
 flowchart LR
     player(["Player<br/>(browser)"])
-    host(["Quiz host<br/>(admin API, end now)"])
+    host(["Quiz host<br/>(make new-quiz, end now)"])
     subgraph built["Built for real"]
         quiz["Real-time quiz service<br/>Vue client + API nodes + Redis"]
     end
@@ -781,8 +781,8 @@ it.
 | Mock | What this build does | What production would use instead |
 |---|---|---|
 | Identity and tickets (`quiz/adapters/mock_auth/`) | `POST /sessions` makes an anonymous user ID and a session token; `POST /tickets` makes a single-use 30 s ticket; both kept in Redis | The company's identity provider (OIDC) for users and sessions; the single-use ticket mechanism stays as built |
-| Question bank (`quiz/adapters/mock_questions/`) | Seed quizzes read from JSON files at start-up | A content service or database, edited in an authoring tool |
-| Quiz admin (`quiz/adapters/http/`, `ADMIN_MOCK`) | `POST /admin/quizzes {quizId, timeLimitMs, windowMs}` starts a quiz from the bank, only with `ADMIN_MOCK=1` and a matching `X-Admin-Token` header (else 404); a mock host action "end now" ends a quiz early | The admin API behind the identity provider, with per-user roles in place of one shared token, plus an admin UI for scheduling and quiz settings |
+| Question bank (`quiz/adapters/mock_questions/`) | Seed quizzes read from JSON files at start-up; a run ID, a seed quiz ID and a run code (`VOCAB-42-7K3Q`), plays that seed quiz under its own ID | A content service or database, edited in an authoring tool |
+| Quiz admin (`quiz/adapters/http/`, `ADMIN_MOCK`) | `POST /admin/quizzes {quizId, timeLimitMs, windowMs}` starts a quiz from the bank, only with `ADMIN_MOCK=1` and a matching `X-Admin-Token` header (else 404); the make targets `make new-quiz` and `make demo` create a quiz; a mock host action "end now" ends a quiz early | The admin API behind the identity provider, with per-user roles in place of one shared token, plus an admin UI for scheduling and quiz settings |
 
 <!-- AI-ASSISTED-END -->
 
