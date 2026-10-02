@@ -1,0 +1,40 @@
+{
+  "about": "Display name cases that the server (api/src/quiz/domain/names.py) and the join form (web/src/components/join/validation.ts) decide the same way; the rule is in the field types table of docs/spec/protocol.md.",
+  "refused": [
+    {"name": "", "case": "empty"},
+    {"name": "   ", "case": "only spaces"},
+    {"name": "\u200b", "case": "a zero-width space"},
+    {"name": "\u200b\u200b\u200b\u200b\u200b", "case": "zero-width spaces"},
+    {"name": "\u200e\u200f", "case": "direction marks"},
+    {"name": " \u200b\u200e ", "case": "invisible characters between spaces"},
+    {"name": "\u2060\ufeff\u00ad", "case": "format characters: word joiner, BOM, soft hyphen"},
+    {"name": "\u0000\u0007\u001b", "case": "control characters"},
+    {"name": "A\u0007na", "case": "a control character inside visible text"},
+    {"name": "A\u001b[31mna", "case": "a terminal escape sequence inside visible text"},
+    {"name": "Ana\nBo", "case": "a line break inside visible text"},
+    {"name": "Ana\tBo", "case": "a tab inside visible text"},
+    {"name": "\u001fAna", "case": "a leading control character that Python's str.strip() would remove"},
+    {"name": "Ana\u0085", "case": "a trailing NEL that Python's str.strip() would remove"},
+    {"name": "\u0301\u0301", "case": "combining marks with nothing to sit on"},
+    {"name": "\u3164\u115f", "case": "Hangul fillers"},
+    {"name": "\u1160\uffa0", "case": "more Hangul fillers"},
+    {"name": "\u2800", "case": "the blank Braille pattern"},
+    {"name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "case": "33 characters"},
+    {"name": "   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "case": "33 characters after the trim"}
+  ],
+  "accepted": [
+    {"name": "  Ana ", "stored": "Ana", "case": "spaces trimmed"},
+    {"name": "\ufeffAna\u3000", "stored": "Ana", "case": "a BOM and an ideographic space trimmed, as String.prototype.trim does"},
+    {"name": "Cafe\u0301", "stored": "Caf\u00e9", "case": "NFC"},
+    {"name": "A\u200bna", "stored": "A\u200bna", "case": "visible text keeps its zero-width space"},
+    {"name": "\u200fAna", "stored": "\u200fAna", "case": "a direction mark before the text"},
+    {"name": "\ud83e\udd8a", "stored": "\ud83e\udd8a", "case": "an emoji"},
+    {"name": "\ud83d\udc69\u200d\ud83d\udcbb", "stored": "\ud83d\udc69\u200d\ud83d\udcbb", "case": "an emoji sequence held by a zero-width joiner"},
+    {"name": "\u0645\u0631\u064a\u0645", "stored": "\u0645\u0631\u064a\u0645", "case": "right-to-left script"},
+    {"name": "\uf8ff", "stored": "\uf8ff", "case": "a private-use character (the Apple logo on Apple systems)"},
+    {"name": "\ud83e\udeea", "stored": "\ud83e\udeea", "case": "a character newer than one side's Unicode tables counts as visible"},
+    {"name": "Ana Bo", "stored": "Ana Bo", "case": "a space inside the name"},
+    {"name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "stored": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "case": "32 characters"},
+    {"name": "e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301", "stored": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9", "case": "40 code points that NFC makes 20"}
+  ]
+}

@@ -18,7 +18,7 @@ This document is the wire contract between the server, the Vue client, the load 
 | `userId` | string, `^[A-Za-z0-9_-]{1,64}$`; set by the server from the ticket, never sent by the client |
 | `questionId` | string, `^[A-Za-z0-9_-]{1,64}$` |
 | `submissionId` | string, a UUID (RFC 9562, lowercase hex with hyphens) that the client makes per answer |
-| `displayName` | string, at most 128 characters on input; 1–32 after trim and Unicode NFC normalization, at least one of them visible (not only control, format or other invisible characters such as U+200B; these are kept inside a visible name) |
+| `displayName` | string, at most 128 characters on input; 1–32 after trim (the white space and line terminators that JavaScript's `String.prototype.trim` removes) and Unicode NFC normalization, at least one of them visible (not only format, separator, combining or blank characters such as U+200B; these are kept inside a visible name) and no control character (Unicode Cc, such as a tab, a line break or ESC). Shared cases: `docs/spec/display-names.json` |
 | `questionIndex` | integer, `0 … N−1` (`next` also accepts `N`) |
 | `choiceIndex` | integer, `0 … 3` |
 | `seq`, `atSeq`, `lastSeq` | integer ≥ 0 (see §3) |

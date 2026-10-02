@@ -15,6 +15,7 @@ export const strings = {
     nameRequired: 'Enter your name',
     nameTooLong: 'Use at most 32 characters',
     nameInvisible: 'Use at least one visible character',
+    nameControl: 'Remove tabs, line breaks and other control characters',
     notFound: 'No quiz with this ID',
     failed: 'Could not join, try again',
     resume: (quizId: string) => `Resume quiz ${quizId}`,
