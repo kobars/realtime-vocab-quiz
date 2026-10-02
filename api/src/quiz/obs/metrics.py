@@ -1,8 +1,8 @@
 # AI-ASSISTED: the Prometheus metrics of one node, on a registry of their own.
 """Every metric the service exports. ``/metrics`` serves ``REGISTRY``. Each metric is registered
 here up front, and a labelled counter starts with each label value at 0 (``ws_errors_total``: its
-``UNAVAILABLE`` series; ``ws_closes_total``: its slow-client series, which the sender adds with its
-close code), so a scrape shows those series before their first event. The scoring
+``UNAVAILABLE`` series; ``ws_closes_total``: each known close code and ``other``), so a scrape shows
+those series before their first event. The scoring
 service counts answers, error replies, resyncs and clock steps; the gateway its sockets, pending
 closes and closes by code; each socket's sender its send delays and the leaderboard frames
 conflation dropped; the fan-out tick its frames, durations and publish lags; the log pipeline the
@@ -35,6 +35,11 @@ WS_CLOSES = Counter(
     ["code"],
     registry=REGISTRY,
 )
+# The codes this service closes with, and those a browser, a proxy or a server restart give. A peer
+# may close with any of about 2,000 more; those count as "other", so a client adds no series.
+WS_CLOSE_CODES = frozenset({1000, 1001, 1005, 1006, 1008, 1009, 1011, 1012, 1013, 4001})
+for _code in (*map(str, sorted(WS_CLOSE_CODES)), "other"):
+    WS_CLOSES.labels(_code)
 WS_SEND_DELAY = Histogram(
     "ws_send_delay_seconds",
     "Time from queueing a frame in a socket's send queue to the end of its write",
@@ -94,3 +99,8 @@ LOG_LINES_DROPPED = Counter(
 def exposition() -> tuple[bytes, str]:
     """The registry in the Prometheus text format, and its content type."""
     return generate_latest(REGISTRY), CONTENT_TYPE_LATEST
+
+
+def count_close(code: int) -> None:
+    """Count one WebSocket close under its code, or under ``other`` outside ``WS_CLOSE_CODES``."""
+    WS_CLOSES.labels(str(code) if code in WS_CLOSE_CODES else "other").inc()

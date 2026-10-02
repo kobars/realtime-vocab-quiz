@@ -124,6 +124,18 @@ def test_ws_closes_total_counts_each_close_by_its_code(metric: Callable[..., flo
     assert after == {code: count + 1 for code, count in before.items()}
 
 
+def test_a_close_code_the_peer_picks_outside_the_known_set_counts_as_other(
+    metric: Callable[..., float],
+) -> None:
+    before = metric("ws_closes_total", code="other")
+    with client_of() as client:
+        for code in (3000, 3999, 4999):  # the WebSocket layer accepts every code from 3000 to 4999
+            with connect(client, ticket(client)) as ws:
+                ws.close(code)
+    assert metric("ws_closes_total", code="other") == before + 3
+    assert metric("ws_closes_total", code="3999") == 0  # no series of its own
+
+
 def test_x_forwarded_for_counts_real_clients_only_behind_the_trusted_proxy() -> None:
     def via(ip: str) -> dict[str, str]:
         return {**ORIGIN, "x-forwarded-for": f"6.6.6.6, {ip}"}  # nginx appends its peer

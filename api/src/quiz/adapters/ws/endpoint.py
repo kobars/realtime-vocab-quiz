@@ -133,7 +133,7 @@ class Gateway:
                 self.registry.drop(conn)
                 structlog.contextvars.bind_contextvars(quiz_id=conn.quiz_id)
                 log.info("ws %s closed %d", path, code)
-                metrics.WS_CLOSES.labels(str(code)).inc()
+                metrics.count_close(code)
         if sender is not None and sender.closing is not None:
             peer_gone = asyncio.create_task(_until_disconnect(ws))
             try:

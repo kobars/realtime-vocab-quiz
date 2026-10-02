@@ -731,10 +731,12 @@ total, with missing and timed-out samples counted as misses.
 - `/metrics` (Prometheus text format, `obs/metrics.py`): `ws_connections` (sockets holding a
   connection cap slot, from the cap check until the slot is freed), `ws_pending_close` (those of
   them whose close frame the sender gave up on, waiting for the peer to read or go),
-  `ws_closes_total{code}` (closes by close code: 1013 for a slow client, 1008 for abuse),
-  `ws_send_delay_seconds` (histogram, observed by each socket's sender on each frame it writes:
-  the time from queueing the frame to the end of its write), `event_loop_lag_seconds` (how late
-  the node's event loop ran its latest 100 ms timer), `answers_total{result}` (correct, wrong, late), `leaderboard_frames_total` (frames this node
+  `ws_closes_total{code}` (closes by close code: 1013 for a slow client, 1008 for abuse; a code
+  a peer picks outside the ones the service and browsers use counts as `other`, so a client
+  cannot add series), `ws_send_delay_seconds` (histogram, observed by each socket's sender on
+  each frame it writes: the time from queueing the frame to the end of its write),
+  `event_loop_lag_seconds` (how late the node's event loop ran its latest 100 ms timer),
+  `answers_total{result}` (correct, wrong, late), `leaderboard_frames_total` (frames this node
   published), `leaderboard_publish_lag_seconds` (histogram, observed by the tick on each frame
   it publishes: the time from the first change the frame carries, an answer that scored, a join
   or a leave, to its publication, on the Redis clock), `leaderboard_frames_conflated_total`

@@ -26,7 +26,6 @@ from quiz.contracts.codec import encode
 from quiz.obs import metrics
 
 CLOSE_OVERLOAD = 1013
-metrics.WS_CLOSES.labels(str(CLOSE_OVERLOAD))  # the slow-client closes: scraped at 0 before one
 FLUSH_S = 5.0
 CLOSE_S = 1.0
 # Our encoder writes compact JSON, and a quote inside a string value is escaped: this key with
