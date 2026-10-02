@@ -615,18 +615,9 @@ every quiz runs there.
 **Redis as one process: failure.** Today a Redis outage stops the service: scripts fail with
 `UNAVAILABLE` and `/readyz` returns 503 (§11). The next step is a replica with Sentinel, or a
 managed Redis with automatic failover. Replication is asynchronous, so a failover can lose the
-last acknowledged writes like an AOF crash does, and `seq` can go back. A client already
-resyncs on `seq < lastSeq`, but if the counter goes back and then climbs past `lastSeq` before
-the client sees a frame, the numbers alone do not show the reset. So frames would carry a
-`seq` epoch next to `seq`: a random value stored with the counter, together with the
-replication ID it was made under. A node that sees a new replication ID (`master_replid` in
-`INFO replication`) passes the ID it knew and the new one to one script, which renews the
-epoch only when the stored ID is still the one the node knew (compare and set), so one
-failover renews it once however many nodes see it, and a late observer changes nothing. A client that sees a new
-epoch resyncs, whatever the number. The host end would wait for the replica too
-(`WAITAOF 1 1 <timeout>`, with `appendonly yes` on the replica), so an announced end survives
-a failover when the promoted replica is the one that confirmed it; with one replica that always
-holds, and Redis gives no stronger guarantee.
+last acknowledged writes like an AOF crash does, and `seq` can go back without the numbers alone
+showing it. Frames would then carry a `seq` epoch, renewed once per failover, and a client that
+sees a new epoch resyncs.
 
 **Redis as one process: growth.** Past one Redis, a Redis Cluster spreads quizzes over shards.
 The hash tag in every key (`quiz:{<quizId>}:*`) keeps one quiz in one slot, so each script
