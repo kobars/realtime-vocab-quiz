@@ -120,8 +120,8 @@ Later commits on `main` postdate these runs but leave the answer → leaderboard
 `145284ba` no commit has changed the serve, score, tick, join or read scripts, the fan-out
 (`api/src/quiz/fanout/`), the WebSocket adapter (`api/src/quiz/adapters/ws/`), the nginx config
 or the swarm. The changes beside that path are the display-name rule on `join`, a split of the
-parser's protocol-version check (a valid message passes the same checks) and the self-service
-hosting routes and scripts. `git log 145284ba..main -- <path>` lists them.
+parser's protocol-version check (a valid message passes the same checks), strict JSON types in
+the HTTP request bodies and the self-service hosting routes and scripts. `git log 145284ba..main -- <path>` lists them.
 
 | Run | Quizzes | Connections | Msg/s to / from bots (ramp included) | Leaderboard p50 / p95 / p99 ms | Answer p50 / p95 / p99 ms | Missing samples | Leaderboard completion | Below 500 ms (`slo_met`) | API node CPU % mean (peak) | Swarm CPU % per process (procs) | API node RSS MB idle → peak | Swarm RSS MB per process |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
