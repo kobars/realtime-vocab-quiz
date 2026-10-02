@@ -62,6 +62,7 @@ class _Quiz:
         return self.ranked
 
     def row(self, user_id: str | None) -> Row | None:
+        """The user's row in the current state's standings, or None."""
         self.rows()
         return None if user_id is None else self.index.get(user_id)
 
@@ -188,9 +189,8 @@ class MemoryStore:
             match step.reply:
                 case ev.QuestionServed(question_index=i, question_id=qid, remaining_ms=left):
                     return Served(seq, i, qid, left)
-                case ev.PlayerFinished(total=total):
-                    quiz.rows()
-                    return Finished(seq, total, quiz.index[user_id].rank, len(quiz.index))
+                case ev.PlayerFinished(total=total) if (row := quiz.row(user_id)) is not None:
+                    return Finished(seq, total, row.rank, len(quiz.state.players))
                 case reply:
                     raise TypeError(reply)
 
