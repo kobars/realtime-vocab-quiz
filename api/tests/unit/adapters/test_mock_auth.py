@@ -190,15 +190,28 @@ class DownRedis:
     set = get = getdel = _fail
 
 
+REFUSALS = [  # Redis refusing writes: a read-only replica, maxmemory, a failed AOF write
+    redis_errors.ReadOnlyError("You can't write against a read only replica."),
+    redis_errors.OutOfMemoryError("command not allowed when used memory > 'maxmemory'."),
+    redis_errors.ResponseError("MISCONF Errors writing to the AOF file: No space left on device"),
+]
+
+
 @pytest.mark.parametrize(
     ("raised", "seen"),
     [
         (redis_errors.ConnectionError("down"), ConnectionError),
         (redis_errors.TimeoutError("slow"), TimeoutError),
+        *((refusal, ConnectionError) for refusal in REFUSALS),
+        (
+            redis_errors.ResponseError("WRONGTYPE Operation against a key"),
+            redis_errors.ResponseError,
+        ),
     ],
+    ids=["unreachable", "slow", "READONLY", "OOM", "MISCONF", "another reply error"],
 )
-async def test_redis_variant_raises_the_builtin_errors_when_redis_is_unreachable(
-    raised: redis_errors.RedisError, seen: type[OSError]
+async def test_redis_variant_raises_the_builtin_errors_when_redis_is_unreachable_or_refuses(
+    raised: redis_errors.RedisError, seen: type[Exception]
 ) -> None:
     store = RedisTicketStore(DownRedis(raised))
     for call in (store.create_session("Ada"), store.issue_ticket("t"), store.redeem("t")):

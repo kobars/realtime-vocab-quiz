@@ -304,6 +304,49 @@ async def test_redis_faults_are_unavailable_and_ping_answers_null() -> None:
     assert await send(service, conn, m.Ping()) == [m.Pong(seq=None)]
 
 
+class RefusingRedis(DownRedis):  # loads scripts, then every script call gets ``error``
+    def __init__(self, error: redis_errors.ResponseError) -> None:
+        self.error = error
+
+    @override
+    async def evalsha(self, *_: object) -> None:
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    ("error", "refusal"),
+    [
+        (
+            redis_errors.ReadOnlyError("You can't write against a read only replica."),
+            (E.UNAVAILABLE, None),
+        ),
+        (
+            redis_errors.OutOfMemoryError("command not allowed when used memory > 'maxmemory'."),
+            (E.UNAVAILABLE, None),
+        ),
+        (
+            redis_errors.ResponseError("MISCONF Errors writing to the AOF file"),
+            (E.UNAVAILABLE, None),
+        ),
+        (
+            redis_errors.ResponseError("ERR user_script:1: attempt to call a nil value"),
+            (E.INTERNAL, 1011),
+        ),
+    ],
+    ids=["READONLY", "OOM", "MISCONF", "script error"],
+)
+async def test_redis_write_refusals_are_unavailable_and_other_errors_internal(
+    error: redis_errors.ResponseError, refusal: Refusal
+) -> None:
+    store = RedisStore(RefusingRedis(error))  # type: ignore[arg-type]
+    await store.start()
+    service = QuizService(store, Bank(), lambda: 0)
+    assert (
+        await refused(service, Connection("c-a", "a"), m.Join(quizId=QUIZ, displayName="A"))
+        == refusal
+    )
+
+
 async def test_ping_reads_only_the_counter(service: QuizService, store: SpyStore) -> None:
     conn = await joined(service)
     assert await send(service, conn, m.Ping()) == [m.Pong(seq=0)]

@@ -2,16 +2,15 @@
 """MOCK: sessions and tickets in Redis. A real system would use its identity provider's sessions;
 the ticket mechanism (SET EX 30, then GETDEL) is what a real build would keep.
 
-A redis-py connection or timeout error leaves as the built-in ``ConnectionError`` or
-``TimeoutError``, so the gateway answers an unreachable store with 503."""
+An unreachable Redis, or one that refuses writes, leaves as the built-in ``ConnectionError`` or
+``TimeoutError`` (``quiz.adapters.redis_outage``), so the gateway answers it with 503."""
 
 import json
 from collections.abc import Awaitable
 from typing import Protocol
 
-from redis import exceptions as redis_errors
-
 from quiz.adapters.mock_auth import tokens
+from quiz.adapters.redis_outage import reachable
 from quiz.ports.tickets import Identity
 
 SESSION_KEY, TICKET_KEY = "auth:session:", "auth:ticket:"
@@ -40,7 +39,8 @@ class RedisTicketStore:
         return identity, token
 
     async def issue_ticket(self, session_token: str) -> str | None:
-        raw = await _reachable(self._redis.get(SESSION_KEY + tokens.digest(session_token)))
+        with reachable():
+            raw = await self._redis.get(SESSION_KEY + tokens.digest(session_token))
         identity = _identity(raw, session_token)
         if identity is None:
             return None
@@ -49,23 +49,15 @@ class RedisTicketStore:
         return ticket
 
     async def redeem(self, ticket: str) -> Identity | None:
-        raw = await _reachable(self._redis.getdel(TICKET_KEY + tokens.digest(ticket)))
+        with reachable():
+            raw = await self._redis.getdel(TICKET_KEY + tokens.digest(ticket))
         return _identity(raw, ticket)
 
     async def _put(self, prefix: str, token: str, identity: Identity, ttl_s: int) -> None:
         key = tokens.digest(token)
         value = json.dumps({"digest": key, "uid": identity.user_id, "name": identity.display_name})
-        await _reachable(self._redis.set(prefix + key, value, ex=ttl_s))
-
-
-async def _reachable[T](command: Awaitable[T]) -> T:
-    """Await one command; re-raise redis-py's connection and timeout errors as the built-ins."""
-    try:
-        return await command
-    except redis_errors.TimeoutError as error:
-        raise TimeoutError(str(error)) from error
-    except redis_errors.ConnectionError as error:
-        raise ConnectionError(str(error)) from error
+        with reachable():
+            await self._redis.set(prefix + key, value, ex=ttl_s)
 
 
 def _identity(raw: bytes | str | None, token: str) -> Identity | None:
