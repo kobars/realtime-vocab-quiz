@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: project overview: what it does, how to try it, run the tests, how it works and where the documents are. -->
+<!-- AI-ASSISTED: project overview: the live demo and video, what it does, how it works, run the tests, where the documents are and how to try it locally. -->
 # Real-time vocabulary quiz
 
 Players join a vocabulary quiz by its ID, answer timed questions, and watch one shared
@@ -7,44 +7,14 @@ leaderboard move live as anyone scores, across two server nodes.
 [![ci](https://github.com/kobars/realtime-vocab-quiz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kobars/realtime-vocab-quiz/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/kobars/realtime-vocab-quiz/badge)](https://scorecard.dev/viewer/?uri=github.com/kobars/realtime-vocab-quiz)
 
-**Live demo:** <https://kobar-vocab-quiz-web.fly.dev>, deployed on Fly.io
-([Deploy to Fly.io](docs/operations.md#deploy-to-flyio)). Start a quiz on its host page,
-[/host](https://kobar-vocab-quiz-web.fly.dev/host), and open the player link it shares in two
-browser windows.
+**Live demo:** <https://kobar-vocab-quiz-web.fly.dev>, on Fly.io. Start a quiz on its host page,
+[/host](https://kobar-vocab-quiz-web.fly.dev/host), open the player link it shares in two browser
+windows and join with a different name in each. The demo is shared: it holds at most 50 open
+self-hosted quizzes, and one address can start only a few in a short time.
 
 **Video walkthrough:** <https://www.youtube.com/watch?v=7gOKTPEs5Ak>
 
 ![Two players in one quiz: each window shows its question and the same live leaderboard](docs/images/demo.png)
-
-## Quick start
-
-You need Docker (Compose v2) and `make`.
-
-```bash
-git clone https://github.com/kobars/realtime-vocab-quiz.git
-cd realtime-vocab-quiz
-make demo
-```
-
-`make demo` writes `.env` with new secrets on the first run, builds the images, starts the stack,
-starts a fresh 60-minute quiz with 20 bots playing it, and prints its ID, its player URL and the
-command that ends it:
-
-```text
-Quiz ID:    VOCAB-42-7K3Q (open for 60 min)
-Player URL: http://localhost:8080/q/VOCAB-42-7K3Q
-End it:     make demo-end ID=VOCAB-42-7K3Q
-```
-
-Open the player URL in two browser windows, join with a different name in each, choose
-**Start** and answer: both leaderboards update within a fraction of a second. Run the printed
-end command and both windows show the final podium. `make new-quiz` starts another quiz on the
-running stack, and `make down` stops everything.
-
-To serve it over HTTPS from a fresh Ubuntu VM, one command installs it on the images that CI
-publishes, and `make do-deploy` creates that VM on DigitalOcean from a laptop: see
-[Deploy to a VM](docs/operations.md#deploy-to-a-vm). `make fly-launch` and `make fly-deploy` run it
-on Fly.io instead: see [Deploy to Fly.io](docs/operations.md#deploy-to-flyio).
 
 ## What it does
 
@@ -103,6 +73,27 @@ tool, the task, the interaction, how it was verified and the mistakes caught in 
 Claude Code `/code-review` and Codex. [DESIGN.md §15](DESIGN.md#15-ai-collaboration-in-design)
 tells how the design was made.
 
+### Harness and CI
+
+The checks below are the harness that keeps AI-written changes honest: a change merges only when
+they pass, whoever wrote it.
+
+- **`make check`, on the laptop and in CI:** ruff, ESLint, shellcheck, typos and an offline link
+  check; mypy; import-linter, which keeps the API's layers apart; deptry; actionlint and zizmor
+  on the workflows; the unit, property and acceptance tests; a drift check of the generated
+  contracts; vue-tsc, Vitest and the client build.
+- **Pull-request guards** (`scripts/check_pr.py`): the frozen acceptance tests change only with
+  a label, a PR stays under 400 changed lines unless labelled, every commit carries the
+  `AI-Assisted:` trailer, and the PR's AI-LOG entry exists. `make review-budget` flags a PR too
+  big to review well.
+- **CI on every push** ([.github/workflows/](.github/workflows/)): `ci` adds the integration tests
+  on Redis, the visual and accessibility specs, and coverage floors of 95% combined and 90% on
+  the changed lines; `stack` runs the system and browser tests on the full stack; `containers`
+  builds the images and publishes them on `main`; `security` runs the secret scan, the dependency
+  review and audits; CodeQL and OpenSSF Scorecard run as well.
+- **Scheduled runs:** the stack nightly and the rest weekly, with an online link check; a
+  scheduled failure opens an issue.
+
 ## Documentation
 
 - [DESIGN.md](DESIGN.md): the system design, from the architecture to the failure modes
@@ -111,3 +102,33 @@ tells how the design was made.
 - [CONTRIBUTING.md](CONTRIBUTING.md): running the stack, development, the make targets, troubleshooting
 - [docs/operations.md](docs/operations.md): ports, endpoints, configuration, metrics and deploying to a VM or to Fly.io
 - [SECURITY.md](SECURITY.md): how to report a vulnerability
+
+## Quick start
+
+You need Docker (Compose v2) and `make`.
+
+```bash
+git clone https://github.com/kobars/realtime-vocab-quiz.git
+cd realtime-vocab-quiz
+make demo
+```
+
+`make demo` writes `.env` with new secrets on the first run, builds the images, starts the stack,
+starts a fresh 60-minute quiz with 20 bots playing it, and prints its ID, its player URL and the
+command that ends it:
+
+```text
+Quiz ID:    VOCAB-42-7K3Q (open for 60 min)
+Player URL: http://localhost:8080/q/VOCAB-42-7K3Q
+End it:     make demo-end ID=VOCAB-42-7K3Q
+```
+
+Open the player URL in two browser windows, join with a different name in each, choose
+**Start** and answer: both leaderboards update within a fraction of a second. Run the printed
+end command and both windows show the final podium. `make new-quiz` starts another quiz on the
+running stack, and `make down` stops everything.
+
+To serve it over HTTPS from a fresh Ubuntu VM, one command installs it on the images that CI
+publishes, and `make do-deploy` creates that VM on DigitalOcean from a laptop: see
+[Deploy to a VM](docs/operations.md#deploy-to-a-vm). `make fly-launch` and `make fly-deploy` run it
+on Fly.io instead: see [Deploy to Fly.io](docs/operations.md#deploy-to-flyio).
