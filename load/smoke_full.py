@@ -3,8 +3,8 @@
 
 It reads ``/healthz`` and ``/readyz`` inside each API node, plays one question through nginx,
 then stops the node that holds the socket: within 10 s the player must be back through nginx,
-resynced, with its score. The node then starts again. It takes the bots' options; without
-``--admin-token`` it reads the token from api-1's environment.
+resynced, with its score. The node then starts again. It takes the bots' options, aimed at
+nginx's published port; without ``--admin-token`` it reads the token from api-1's environment.
 """
 
 import asyncio
@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from typing import Any
 
@@ -28,11 +29,11 @@ from quiz.adapters.mock_questions import MockQuestionBank
 from quiz.domain.session import MAX_WINDOW_MS
 
 NODES = ("api-1", "api-2")
-REPLY_S, RECOVER_S, RETRY_S = 5.0, 10.0, 0.25
+REPLY_S, RECOVER_S, RETRY_S, COMPOSE_S = 5.0, 10.0, 0.25, 120.0
 # Run in a node's container: print the body of a local request; fail on an error status.
 GET = (
     "import sys, urllib.request as u;"
-    "print(u.urlopen('http://127.0.0.1:8000' + sys.argv[1]).read().decode())"
+    f"print(u.urlopen('http://127.0.0.1:8000' + sys.argv[1], timeout={REPLY_S}).read().decode())"
 )
 Reply = dict[str, Any]
 
@@ -43,11 +44,23 @@ class SmokeError(Exception):
 
 def compose(*args: str) -> str:
     command = ["docker", "compose", *args]
-    done = subprocess.run(command, capture_output=True, text=True, check=False)  # noqa: S603
+    try:
+        done = subprocess.run(  # noqa: S603
+            command, capture_output=True, text=True, check=False, timeout=COMPOSE_S
+        )
+    except subprocess.TimeoutExpired:
+        msg = f"docker compose {args[0]}: no exit within {COMPOSE_S:.0f} s"
+        raise SmokeError(msg) from None
     if done.returncode:
         msg = f"docker compose {args[0]}: {done.stderr.strip()}"
         raise SmokeError(msg)
     return done.stdout.strip()
+
+
+def stack_entry() -> list[str]:
+    """``--url`` and ``--origin`` of the port nginx publishes; options given after them win."""
+    base = f"http://{compose('port', 'nginx', '8080')}"
+    return ["--url", f"{base}/api", "--origin", base]
 
 
 def node_get(node: str, path: str) -> str:
@@ -79,13 +92,14 @@ def sockets_by_node() -> dict[str, int]:
 async def request(ws: ClientConnection, kind: str, want: str, **body: Any) -> Reply:  # noqa: ANN401
     """Send one message; return the first reply of type ``want``, skipping broadcasts."""
     await ws.send(json.dumps({"v": 1, "type": kind, **body}))
-    while True:
-        reply: Reply = json.loads(await asyncio.wait_for(ws.recv(), REPLY_S))
-        if reply["type"] == "error":
-            msg = f"{kind}: {reply['code']} {reply['message']}"
-            raise SmokeError(msg)
-        if reply["type"] == want:
-            return reply
+    async with asyncio.timeout(REPLY_S):
+        while True:
+            reply: Reply = json.loads(await ws.recv())
+            if reply["type"] == "error":
+                msg = f"{kind}: {reply['code']} {reply['message']}"
+                raise SmokeError(msg)
+            if reply["type"] == want:
+                return reply
 
 
 async def sign_in(http: httpx.AsyncClient) -> None:
@@ -98,7 +112,19 @@ async def join(http: httpx.AsyncClient, opts: Options) -> tuple[ClientConnection
     ticket = (await http.post("/tickets")).raise_for_status().json()["ticket"]
     url, origin = f"{opts.ws_url}?ticket={ticket}", Origin(opts.origin)
     ws = await connect(url, origin=origin, subprotocols=[SUBPROTOCOL], open_timeout=OPEN_TIMEOUT_S)
-    return ws, await request(ws, "join", "joined", quizId=opts.quiz_ids[0], displayName="smoke")
+    try:
+        return ws, await request(ws, "join", "joined", quizId=opts.quiz_ids[0], displayName="smoke")
+    except BaseException:
+        await ws.close()
+        raise
+
+
+def scored(result: Reply) -> int:
+    """The total after an answer that earned points: a kept 0 would prove nothing."""
+    if not result["correct"] or result["late"] or not result["pointsAwarded"]:
+        msg = f"the answer earned no points: {result}"
+        raise SmokeError(msg)
+    return int(result["score"])
 
 
 async def play_one(http: httpx.AsyncClient, opts: Options) -> tuple[ClientConnection, int, int]:
@@ -110,9 +136,9 @@ async def play_one(http: httpx.AsyncClient, opts: Options) -> tuple[ClientConnec
     question = await request(ws, "next", "question", questionIndex=i)
     answer = {"questionIndex": i, "choiceIndex": key[question["questionId"]]}
     result = await request(ws, "answer", "answer_result", **answer, submissionId=str(uuid.uuid4()))
-    seq = (await request(ws, "resync", "snapshot", lastSeq=0))["atSeq"]
-    print(f"joined {opts.quiz_ids[0]}: question {i} answered, total {result['score']}")
-    return ws, seq, result["score"]
+    score = scored(result)
+    print(f"joined {opts.quiz_ids[0]}: question {i} answered, total {score}")
+    return ws, result["atSeq"], score
 
 
 async def recover(
@@ -130,6 +156,29 @@ async def recover(
             continue
         async with ws:
             return joined, await request(ws, "resync", "snapshot", lastSeq=seq)
+
+
+@contextlib.asynccontextmanager
+async def stopped(node: str) -> AsyncIterator[None]:
+    """Stop ``node`` during the block, then start it again; a failed stop explains the block's."""
+    stop = await asyncio.create_subprocess_exec(
+        "docker", "compose", "stop", node, stderr=asyncio.subprocess.PIPE
+    )
+    problems: list[str] = []
+    try:
+        yield
+    except Exception as error:  # noqa: BLE001  # reported below with the stop and start
+        problems.append(str(error) or type(error).__name__)
+    finally:
+        _, stderr = await stop.communicate()
+        if stop.returncode:
+            problems.insert(0, f"docker compose stop: {stderr.decode().strip()}")
+        try:
+            compose("up", "--detach", "--wait", node)
+        except SmokeError as error:
+            problems.append(str(error))
+    if problems:
+        raise SmokeError("; ".join(problems))
 
 
 def check_kept(score: int, joined: Reply, snapshot: Reply) -> None:
@@ -150,25 +199,24 @@ async def smoke(opts: Options) -> None:
         await sign_in(http)
         before = sockets_by_node()
         ws, seq, score = await play_one(http, opts)
-        node = holder(before, sockets_by_node())
-        stopped = time.monotonic()
-        stop = await asyncio.create_subprocess_exec("docker", "compose", "stop", node)
-        try:
-            async with asyncio.timeout(RECOVER_S):
-                joined, snapshot = await recover(ws, http, opts, seq)
-            print(f"{node} stopped: back in {time.monotonic() - stopped:.1f} s, {snapshot['you']}")
-        except TimeoutError:
-            msg = f"no resynced reconnect within {RECOVER_S:.0f} s"
-            raise SmokeError(msg) from None
-        finally:
-            await stop.wait()
-            compose("up", "--detach", "--wait", node)
+        async with ws:  # closes it too when the stop leaves it open
+            node = holder(before, sockets_by_node())
+            began = time.monotonic()
+            async with stopped(node):
+                try:
+                    async with asyncio.timeout(RECOVER_S):
+                        joined, snapshot = await recover(ws, http, opts, seq)
+                except TimeoutError:
+                    msg = f"no resynced reconnect within {RECOVER_S:.0f} s"
+                    raise SmokeError(msg) from None
+                back = time.monotonic() - began
+                print(f"{node} stopped: back in {back:.1f} s, {snapshot['you']}")
         check_kept(score, joined, snapshot)
 
 
 def main(argv: list[str] | None = None) -> int:
     try:
-        asyncio.run(smoke(parse(argv)))
+        asyncio.run(smoke(parse([*stack_entry(), *(sys.argv[1:] if argv is None else argv)])))
     except (SmokeError, RuntimeError, OSError, WebSocketException, httpx.HTTPError) as error:
         print(f"smoke failed: {error}", file=sys.stderr)
         return 1
