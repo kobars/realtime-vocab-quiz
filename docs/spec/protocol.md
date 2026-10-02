@@ -169,12 +169,16 @@ A browser cannot read the HTTP status of a refused upgrade (401, 403, 429 or 503
 
 Backoff is full jitter: `floor(random() × min(10,000, 250 × 2^attempt))` ms, reset after 10 s joined, with a 5 s open timeout. A session or ticket request (§8) that gets no reply within 5 s fails and counts as a failed open. After 10 connects in a row without a `joined` the client stops and shows "Still can't connect" (UI §3.7). There is no graceful drain: when a node stops, its sockets drop and each client reconnects through nginx (to the other node) and resyncs.
 
-## 8. Authentication
+## 8. Authentication and HTTP endpoints
+
+### 8.1 Tickets
 
 1. `POST /sessions` (once per tab) returns a mock `userId` and a session token, kept in the tab. The session lasts 2 h, twice the longest quiz window, counted from its last ticket: each `POST /tickets` renews it, so a tab that keeps reconnecting keeps its `userId`. A session with no ticket for 2 h is gone: `POST /tickets` answers 401 and the client creates a new session.
 2. Before every connect, `POST /tickets` with the session token returns a ticket: 32 random bytes in base64url, single use, valid 30 s.
 3. `GET /ws?ticket=…` with the subprotocol `quiz.v1`. Before the upgrade the server checks, in order, the `Origin` (403), that the client offers `quiz.v1` (400), the IP's upgrade attempts (429 above a burst of 2 × `PER_IP_CONN_CAP`, refilled over 60 s, so a flood of made-up tickets never reaches the ticket store), the ticket (401) and the connection caps (503 at 10,000 per process, 429 at 50 per IP). The IP is the peer's, or the client's from `X-Forwarded-For` when the peer is a trusted proxy (`TRUSTED_PROXIES`: by default the local host only; behind nginx elsewhere, set it to nginx's address or its network's subnet). Each refusal is a plain HTTP response with no `error` frame, which the browser sees as close 1006 (§7). An accepted upgrade carries the header `X-Node-Id` with the serving node's `NODE_ID`, so a test through nginx knows which node holds each socket. The identity comes from the ticket only.
 4. The API's logs and nginx's access log record the path only, never the query string. nginx's error log can quote the request line, ticket included, when an upgrade fails at a node (DESIGN §12).
+
+### 8.2 HTTP endpoints
 
 The HTTP endpoints (`/docs` serves the OpenAPI page, without the admin routes). Every error body is `{error, message}`: request validation answers 422 `INVALID_MESSAGE`, a store outage 503 `UNAVAILABLE`, and a path that does not exist 404 `NOT_FOUND`.
 
@@ -193,7 +197,11 @@ The HTTP endpoints (`/docs` serves the OpenAPI page, without the admin routes). 
 | `GET /healthz`; `GET /readyz` | Liveness; readiness: 503 when Redis is unreachable or refusing writes |
 | `GET /metrics` | The Prometheus text format: `ws_connections`, `ws_pending_close`, `ws_closes_total{code}`, `ws_send_delay_seconds`, `event_loop_lag_seconds`, `answers_total{result}`, `ws_errors_total{request,code}`, `leaderboard_frames_total`, `leaderboard_frames_conflated_total`, `leaderboard_publish_lag_seconds`, `resyncs_total`, `tick_duration_seconds`, `feed_subscribe_failures_total{reason}`, `redis_clock_step_total`, `log_lines_dropped_total` |
 
+### 8.3 Self-service hosting
+
 **Self-service hosting.** The three hosting routes exist only with `PUBLIC_HOSTING` on (the default); off, each answers the 404 `NOT_FOUND` of a path that does not exist. The host token is 32 random bytes in base64url, returned once; the store keeps only its SHA-256 with the quiz (`hostHash` in redis.md §2), the node compares hashes in constant time, and no log line carries the token (the logs record the path only). The client keeps it in the host's tab (`sessionStorage`). Limits, all settings (docs/operations.md): `POST /quizzes` takes `HOSTING_PER_IP` creations (5) per client address (found as above) in each `HOSTING_PER_IP_WINDOW_S` (600 s), a token bucket on each node (it counts every attempt, refused ones too) whose `Retry-After` is the time one creation takes to refill (120 s); every node together holds at most `HOSTING_MAX_OPEN` (50) open self-hosted quizzes, counted in Redis until each one's window ends or a host end (its host's or the admin's) ends it. A request whose `Origin` header names an origin outside `ALLOWED_ORIGINS` gets 403 `FORBIDDEN` on all three routes. A browser sends `Origin` with every `POST`, so a `POST` without it comes from no browser and no other site can make a visitor send it; a `GET /banks` without it (a navigation, say) only reads the list. The bodies are strict like every other: an unknown field is 422.
+
+### 8.4 Logs
 
 Logs are JSON lines on stderr, one per event; each line carries `quiz_id` and `request_id` (`null` when unknown). The request id is the client's `X-Request-ID` when it is safe (1–64 of `A-Za-z0-9_.-`), else a fresh one, and the response echoes it, also on a 500. On the WebSocket path, `request_id` is the connection's id (one per socket) and `quiz_id` is set once the socket joins.
 

@@ -717,7 +717,7 @@ refills them over `HOSTING_PER_IP_WINDOW_S` (600 s), one every 120 s: a burst of
 refill (429 with `Retry-After`), and nginx's two nodes each keep their own bucket. Across every
 node, at most `HOSTING_MAX_OPEN` (50) self-hosted quizzes are open, counted in Redis by
 `hold_hosted.lua` (503 `HOSTING_FULL`). Each self-hosted quiz is open for `HOSTING_WINDOW_MS` (30 min). The routes and
-their errors are in [protocol §8](docs/spec/protocol.md#8-authentication).
+their errors are in [protocol §8](docs/spec/protocol.md#83-self-service-hosting).
 
 **The reveal abuse.** `answer_result` reveals the correct choice at once, and a mock identity
 is free: one person with a second tab (a second identity) can answer each question there
