@@ -28,7 +28,7 @@ const styled: [string, string][] = [
   ['input', inputClass()],
 ]
 
-// The page's :focus-visible outline is the one indicator (main.test.ts checks it); a second one stacks a ring on it.
+// The page's :focus-visible outline is the one indicator (theme.test.ts checks it); a second one stacks a ring on it.
 describe('focus indicator', () => {
   it.each(styled)('%s adds no ring and does not hide the outline', (_, value) => {
     expect(stackedFocusClasses(classes(value))).toEqual([])

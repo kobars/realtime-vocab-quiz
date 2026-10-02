@@ -1,4 +1,4 @@
-// AI-ASSISTED: class-name helper that the shadcn-vue components import, taught the token utilities of main.css.
+// AI-ASSISTED: class-name helper that the shadcn-vue components import, taught the clay utilities of theme.css.
 import { clsx, type ClassValue } from 'clsx'
 import { extendTailwindMerge } from 'tailwind-merge'
 
