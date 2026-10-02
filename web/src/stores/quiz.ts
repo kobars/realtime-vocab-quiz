@@ -47,7 +47,11 @@ const BLOCKED_BY_CLOSE: Partial<Record<number, Blocked>> = { 4001: 'replaced', 1
 
 /** The `joined` reply; `cursor` and `cursorOpen` follow later questions and results, `endsAt` is on the `now` clock. */
 export type QuizInfo = Joined & { endsAt: number }
-/** `deadlineAt` = arrival on the `now` clock + `remainingMs` (the server's serve time + `timeLimitMs`). */
+/**
+ * `deadlineAt` = the time the client last sent the `next` for this question on the `now` clock (its arrival, if it sent
+ * none) + `remainingMs`, so a slow reply shortens the countdown by the round trip instead of showing time the server will
+ * not honour, and a resend after a dropped `next` restarts that offset (protocol §6).
+ */
 export type CurrentQuestion = Question & { deadlineAt: number }
 /** A `leaderboard_page`: `rows` from rank `offset + 1`, read from the standings at `atSeq`; `final` once they are the final standings. */
 export interface StandingsPage { offset: number; atSeq: number; final: boolean; rows: Entry[] }
@@ -70,6 +74,8 @@ const initial = () => ({
   onlineCount: 0,
   myRank: null as number | null,
   myScore: 0,
+  /** The `atSeq` of the last `answer_result`: standings at or before it were built before that answer was scored. */
+  answeredAtSeq: -1,
   /** Counts the standings applied as a full replacement (`snapshot`, `rebase: true`), which swap in one step (UI spec §5.1). */
   replacements: 0,
   /** The last page of "Show all players". */
@@ -144,19 +150,21 @@ export const useQuizStore = defineStore('quiz', () => {
     switch (message.type) {
       case 'joined':
         return onJoined(message)
-      case 'question':
+      case 'question': {
         // A reply built before the end that arrives after quiz_ended never undoes it (protocol §3).
         if (s.ended) return
-        s.question = { ...message, deadlineAt: deps.now() + message.remainingMs }
+        const { askedMsAgo = 0, ...question } = message
+        s.question = { ...question, deadlineAt: deps.now() - askedMsAgo + message.remainingMs }
         if (s.pending?.questionIndex !== message.questionIndex) s.pending = null
         setCursor(message.questionIndex, true)
         s.phase = 'question'
         return
+      }
       case 'answer_result':
         if (s.pending?.submissionId === message.submissionId) s.pending = null
         // A reply read before the end never changes the final standings either (protocol §3).
         if (s.ended) return
-        Object.assign(s, { lastResult: message, myScore: message.score, phase: 'feedback' })
+        Object.assign(s, { lastResult: message, myScore: message.score, answeredAtSeq: message.atSeq, phase: 'feedback' })
         setCursor(message.questionIndex, false)
         return
       case 'finished':
@@ -167,7 +175,7 @@ export const useQuizStore = defineStore('quiz', () => {
         standings(message.seq, message.entries, message.playerCount, message.onlineCount, undefined, message.rebase)
         return
       case 'rank_update':
-        if (!s.ended) Object.assign(s, { myRank: message.rank, myScore: message.score, playerCount: message.playerCount })
+        if (!s.ended) Object.assign(s, { myRank: message.rank, myScore: ownScore(message.atSeq, message.score), playerCount: message.playerCount })
         return
       case 'snapshot':
         // A snapshot read before the end never undoes it (protocol §3).
@@ -187,12 +195,16 @@ export const useQuizStore = defineStore('quiz', () => {
         if (!known && s.quiz !== null) client.value?.refresh()
         return
       }
-      case 'leaderboard_page':
+      case 'leaderboard_page': {
         // A page read before the end never shows after it: only the final standings do.
         if (s.ended && !message.final) return
-        s.page = { offset: message.offset, atSeq: message.atSeq, final: message.final, rows: message.entries }
+        // A live page read before my last answer was scored never shows my row below the header's score (protocol §3).
+        const rows = message.final ? message.entries : message.entries.map((entry) =>
+          (entry.userId === s.quiz?.userId ? { ...entry, score: ownScore(message.atSeq, entry.score) } : entry))
+        s.page = { offset: message.offset, atSeq: message.atSeq, final: message.final, rows }
         s.playerCount = message.playerCount
         return
+      }
       case 'error':
         return onError(message)
     }
@@ -239,14 +251,41 @@ export const useQuizStore = defineStore('quiz', () => {
     s.connection = 'idle'
   }
 
-  /** Applies the standings; returns whether they gave my rank and score, from `you` or my row in `rows`. */
+  /**
+   * Applies the standings; returns whether they gave my rank and score, from `you` or my row in `rows`. `you` is read
+   * when the message is built, so it can be newer than the rows; my row then shows its rank and score, like the header.
+   */
   function standings(seq: number, rows: Entry[], players: number, online: number, you?: You | null, replace = false): boolean {
-    Object.assign(s, { seq, entries: rows, playerCount: players, onlineCount: online })
+    const row = rows.find((entry) => entry.userId === s.quiz?.userId)
+    const mine = you ?? row
+    // Only live `leaderboard` rows (no `you` field) can predate my last answer; a snapshot or the final standings set it.
+    if (mine) Object.assign(s, { myRank: mine.rank, myScore: you === undefined ? ownScore(seq, mine.score) : mine.score })
+    Object.assign(s, { seq, entries: row ? placeMe(rows, row) : rows, playerCount: players, onlineCount: online })
     if (replace) s.replacements += 1
-    const mine = you ?? rows.find((row) => row.userId === s.quiz?.userId)
-    if (mine) Object.assign(s, { myRank: mine.rank, myScore: mine.score })
     return mine !== undefined
   }
+
+  /**
+   * `rows` with my row at my current rank and score. When `you` holds a rank other than my row's, my row moves there and
+   * the rows between shift by one, so the ranks stay unique; a rank past the last row leaves my row to the pinned row.
+   */
+  function placeMe(rows: Entry[], row: Entry): Entry[] {
+    const rank = s.myRank ?? row.rank
+    if (rank === row.rank) return row.score === s.myScore ? rows : rows.map((entry) => (entry === row ? { ...row, score: s.myScore } : entry))
+    const [low, high, shift] = rank < row.rank ? [rank, row.rank, 1] : [row.rank, rank, -1]
+    const others = rows.filter((entry) => entry !== row)
+      .map((entry) => (entry.rank >= low && entry.rank <= high ? { ...entry, rank: entry.rank + shift } : entry))
+    if (!rows.some((entry) => entry.rank >= rank)) return others
+    const at = others.findIndex((entry) => entry.rank > rank)
+    others.splice(at === -1 ? others.length : at, 0, { ...row, rank, score: s.myScore })
+    return others
+  }
+
+  /**
+   * My score from standings at `seq`: those at or before my last answer's `atSeq` were built before it was scored, so
+   * they never lower the score it gave (protocol §3). `you` and `joined` are read fresh and set it directly.
+   */
+  const ownScore = (seq: number, score: number): number => (seq <= s.answeredAtSeq ? Math.max(score, s.myScore) : score)
 
   const setCursor = (cursor: number, open: boolean): void => void (s.quiz && Object.assign(s.quiz, { cursor, cursorOpen: open }))
   /**

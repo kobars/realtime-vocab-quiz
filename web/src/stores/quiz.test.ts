@@ -1,7 +1,7 @@
 // AI-ASSISTED: tests for the quiz store: recorded server frames go through a real QuizClient on a fake socket, and the state is checked after each one.
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { QuizClient, type QuizSocket } from '@/protocol/client'
+import { QuizClient, type QuizSocket, REPLY_TIMEOUT_MS } from '@/protocol/client'
 import type { AnswerResult, ErrorCode, Joined, Leaderboard, ProtocolError, Question, ServerMessage, Snapshot } from '@/protocol/types.generated'
 import { configureQuizStore, useQuizStore } from './quiz'
 
@@ -402,4 +402,111 @@ it('quiz_ended with you: null sends no resync before a joined', async () => {
   socket.receive({ type: 'quiz_ended', seq: 4, playerCount: 2, entries: [rival], you: null })
   await wait(10_000)
   expect([store.phase, store.myRank, resyncs(socket)]).toEqual(['results', null, []])
+})
+
+/** Plays question 0 and gets `answer_result` with a total of 150 at `atSeq` 4. */
+async function answered() {
+  const { store, socket } = await playing()
+  socket.receive(question(0))
+  store.answer(1)
+  socket.receive(result(0, 's-1', 150))
+  return { store, socket }
+}
+const myRow = (store: ReturnType<typeof useQuizStore>) => store.entries.find((row) => row.userId === me.userId)
+
+it('a leaderboard frame at or before my last answer never lowers my score, in the header or my row', async () => {
+  const { store, socket } = await answered()
+  socket.receive(board(4, 50))
+  expect([store.seq, store.myRank, store.myScore, myRow(store)?.score]).toEqual([4, 1, 150, 150])
+  socket.receive(board(5, 150))
+  expect([store.seq, store.myScore, myRow(store)?.score]).toEqual([5, 150, 150])
+})
+
+it('a rank_update at or before my last answer never lowers my score; a later one sets it', async () => {
+  const { store, socket } = await answered()
+  socket.receive({ type: 'rank_update', atSeq: 4, rank: 220, score: 50, playerCount: 300 })
+  expect([store.myRank, store.myScore]).toEqual([220, 150])
+  socket.receive({ type: 'rank_update', atSeq: 3, rank: 230, score: 0, playerCount: 300 })
+  expect([store.myRank, store.myScore]).toEqual([230, 150])
+  socket.receive({ type: 'rank_update', atSeq: 5, rank: 90, score: 150, playerCount: 300 })
+  expect([store.myRank, store.myScore]).toEqual([90, 150])
+})
+
+it('a snapshot with a lower score still lowers my score, so the standings recover after a store restart', async () => {
+  const { store, socket } = await answered()
+  socket.receive({ ...snapshot(2), entries: [rival, me], you: { rank: 2, score: 0 } })
+  expect([store.seq, store.myScore, myRow(store)?.score]).toEqual([2, 0, 0])
+  socket.receive({ ...board(3, 40), entries: [rival, { ...me, score: 40 }] })
+  expect([store.seq, store.myScore, myRow(store)?.score]).toEqual([3, 40, 40])
+})
+
+it('a snapshot whose rows are older than its you shows the score of you in the header and in my row', async () => {
+  const { store, socket } = await joinQuiz()
+  socket.receive(joined())
+  socket.receive({ ...snapshot(3), entries: [rival, { ...me, score: 50 }], you: { rank: 2, score: 150 } })
+  expect([store.myScore, myRow(store)?.score, store.entries[0]]).toEqual([150, 150, rival])
+})
+
+it('the countdown starts when next was sent, so a slow question reply shortens it by the round trip', async () => {
+  const { store, socket } = await playing()
+  store.next()
+  clock = 1_400
+  socket.receive(question(0, 20_000))
+  expect([store.question?.deadlineAt, store.msLeft()]).toEqual([21_000, 19_600])
+})
+
+it('a next sent again after a silent drop restarts the countdown offset, so the question keeps its full time', async () => {
+  const { store, socket } = await playing()
+  store.next()
+  clock = 6_000
+  await wait(REPLY_TIMEOUT_MS)
+  expect(socket.sent.filter((m) => m.type === 'next')).toHaveLength(2)
+  clock = 6_200
+  socket.receive(question(0, 20_000))
+  expect([store.question?.deadlineAt, store.msLeft()]).toEqual([26_000, 19_800])
+})
+
+it('a second reply to a resent next is timed from the resend, not from the first send', async () => {
+  const { store, socket } = await playing()
+  store.next()
+  clock = 6_000
+  await wait(REPLY_TIMEOUT_MS)
+  clock = 6_300
+  socket.receive(question(0, 19_500))
+  clock = 6_400
+  socket.receive(question(0, 19_000))
+  expect(store.question?.deadlineAt).toBe(25_000)
+})
+
+it('final standings with you: null set my score from my row, even when their seq is below my last answer', async () => {
+  const { store, socket } = await answered()
+  socket.receive({ type: 'quiz_ended', seq: 2, playerCount: 2, entries: [rival, { ...me, score: 60 }], you: null })
+  expect([store.phase, store.myScore, myRow(store)?.score]).toEqual(['results', 60, 60])
+})
+
+it('a snapshot whose you holds a better rank than my row moves my row there, so the header and my row agree', async () => {
+  const { store, socket } = await joinQuiz()
+  socket.receive(joined())
+  socket.receive({ ...snapshot(3), entries: [rival, { ...me, score: 50 }], you: { rank: 1, score: 150 } })
+  expect([store.myRank, store.myScore, store.entries]).toEqual([1, 150, [{ ...me, rank: 1, score: 150 }, { ...rival, rank: 2 }]])
+})
+
+it('a snapshot whose you holds a worse rank moves my row down, or off the list when it is past the last row', async () => {
+  const third = { rank: 3, userId: 'u3', displayName: 'Cy', score: 100 }
+  const { store, socket } = await joinQuiz()
+  socket.receive(joined())
+  socket.receive({ ...snapshot(3), entries: [{ ...me, rank: 1 }, { ...rival, rank: 2 }, third], you: { rank: 3, score: 0 } })
+  expect(store.entries).toEqual([{ ...rival, rank: 1 }, { ...third, rank: 2 }, { ...me, rank: 3 }])
+  socket.receive({ ...snapshot(4), entries: [{ ...me, rank: 1 }, { ...rival, rank: 2 }, third], you: { rank: 60, score: 0 } })
+  expect([store.myRank, store.entries]).toEqual([60, [{ ...rival, rank: 1 }, { ...third, rank: 2 }]])
+})
+
+it('a live Show all players page read at or before my last answer never shows my row below my score', async () => {
+  const { store, socket } = await answered()
+  const page = (atSeq: number, score: number): ServerMessage =>
+    ({ v: 1, type: 'leaderboard_page', atSeq, offset: 0, playerCount: 2, final: false, entries: [rival, { ...me, score }] })
+  socket.receive(page(4, 50))
+  expect(store.page?.rows).toEqual([rival, { ...me, score: 150 }])
+  socket.receive(page(5, 160))
+  expect([store.myScore, store.page?.rows[1]?.score]).toEqual([150, 160])
 })

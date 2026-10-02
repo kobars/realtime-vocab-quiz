@@ -108,6 +108,8 @@ What the client does with an incoming `seq` (`L` = its `lastSeq`):
 | `snapshot` after `quiz_ended` was applied | `status: open`: ignore it, and keep the final standings and `L`. It was read before the end and only reached the socket after the `quiz_ended` (one writer orders frames by enqueue time, not by Redis read time); an announced end is never undone, even by a store restart (`docs/spec/redis.md` §3.1). `status: ended`: apply it as above |
 | `quiz_ended` with `you: null` and no row of the joined player in `entries` | The node could not read that player's rank, so it may be stale. Wait 0–250 ms (random), then `resync {lastSeq: L}`; the `snapshot` (`status: ended`, with `you`) sets it |
 
+The player's own score is the one place where a unicast `atSeq` is compared, and never with `L`: the `atSeq` of the player's last `answer_result` is compared with the `seq` of a `leaderboard` and with the `atSeq` of a `rank_update` (both are values of the same counter). A `leaderboard` or `rank_update` at or below it was built before that answer was scored, so the client never lowers the answer's score from it (a `snapshot` or `quiz_ended` always sets the score: from `you`, read fresh, or else from the player's row).
+
 Between sending `resync` and receiving `snapshot`, the client buffers broadcasts instead of applying them, at most the newest 64 (the snapshot drops older ones; a gap left after it starts another resync). The client sends the same `resync` again 1 s after a `RATE_LIMITED` that names no request (the token bucket may have dropped it), and whenever no `snapshot` arrives within 5 s of sending it (a silent drop). `quiz_ended` is always applied, whatever its `seq`, and sets `L`; from then on the standings are final, and only a `snapshot` with `status: ended` or a second `quiz_ended` (after a store restart) replaces them.
 
 ## 4. Standings policy
@@ -127,7 +129,7 @@ Between sending `resync` and receiving `snapshot`, the client buffers broadcasts
 
 ## 6. Countdown
 
-`question` carries `remainingMs = max(0, min(serveMs + T, deadlineMs) − now)` on the server clock (domain §2), on the first serve and on every re-serve (a repeat of `next {i}` or a reconnect). The client starts its countdown from the moment it receives the message, using a monotonic clock (`performance.now()`), and never reads its wall clock. The countdown is display only: the server decides lateness when the answer arrives.
+`question` carries `remainingMs = max(0, min(serveMs + T, deadlineMs) − now)` on the server clock (domain §2), on the first serve and on every re-serve (a repeat of `next {i}` or a reconnect). The client starts its countdown from the moment it last sent the `next` for that question on the current socket, using a monotonic clock (`performance.now()`), and never reads its wall clock. The server computed `remainingMs` after that send, so the countdown is offset by the `next`-to-`question` round trip and does not show time the server will not honour; a slow reply shortens it instead of lengthening it. A resend (after `RATE_LIMITED`, `UNAVAILABLE`, `NOT_JOINED` or a silent drop) restarts the offset, so a dropped `next` costs the countdown no time, and a second reply to a resend is timed from that resend. The one overstatement left is a first reply slower than the 5 s reply deadline that arrives after its resend; the reply to the resend, when it comes, corrects it. The countdown is display only: the server decides lateness when the answer arrives.
 
 ## 7. Errors and close codes
 
