@@ -12,7 +12,7 @@ from quiz.adapters.redis.keys import NO_QUIZ_TTL, QuizKeys, quiz_keys
 from quiz.adapters.redis.scripts import Scripts, compose, source
 from quiz.ports.store import QUIZ_TTL_MS
 
-ARGS = ('["q0"]', "[0]", 20_000, 60_000)
+ARGS = ('["q0"]', "[0]", 20_000, 60_000, "VOCAB-42")
 
 
 def test_every_key_shares_the_quiz_hash_tag() -> None:

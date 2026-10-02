@@ -44,3 +44,4 @@ echo
 echo "$seeded"
 echo "Bots:       $bots playing $quiz_id until its window ends (make demo-stop stops them)."
 echo "Open the player URL in two browser windows, join, and watch the leaderboard move."
+echo "End it with the command above: both windows then show the final podium."

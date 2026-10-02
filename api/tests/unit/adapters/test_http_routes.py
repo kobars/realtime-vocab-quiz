@@ -104,10 +104,32 @@ async def test_quiz_info_counts_players_without_ranking_them(
     assert (await http.get("/quizzes/VOCAB-42")).json()["status"] == "ended"
 
 
-async def test_a_run_of_a_bank_quiz_starts_beside_the_bank_quiz(http: httpx.AsyncClient) -> None:
+async def test_a_new_quiz_id_can_play_a_bank_quiz(http: httpx.AsyncClient) -> None:
     """``make demo`` starts a fresh run on every call, though the bank quiz itself has started."""
-    for quiz_id in ("VOCAB-42", "VOCAB-42-7K3Q"):
-        body = {"quizId": quiz_id, "windowMs": 3_600_000}
+    for body in ({"quizId": "VOCAB-42"}, {"quizId": "DEMO-7K3Q", "bankQuizId": "VOCAB-42"}):
         assert (await http.post("/admin/quizzes", json=body, headers=TOKEN)).status_code == 201
-    bank, run = [(await http.get(f"/quizzes/{q}")).json() for q in ("VOCAB-42", "VOCAB-42-7K3Q")]
-    assert run == bank | {"quizId": "VOCAB-42-7K3Q"}
+    bank, run = [(await http.get(f"/quizzes/{q}")).json() for q in ("VOCAB-42", "DEMO-7K3Q")]
+    assert run == bank | {"quizId": "DEMO-7K3Q"}
+
+
+async def test_a_run_created_again_without_its_bank_quiz_is_a_conflict(
+    http: httpx.AsyncClient,
+) -> None:
+    """A load run that re-posts an existing run ID learns that it exists, not that it is unknown."""
+    run = {"quizId": "DEMO-7K3Q", "bankQuizId": "VOCAB-42"}
+    assert (await http.post("/admin/quizzes", json=run, headers=TOKEN)).status_code == 201
+    again = await http.post("/admin/quizzes", json={"quizId": "DEMO-7K3Q"}, headers=TOKEN)
+    assert again.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"quizId": "VOCAB-42-7K3Q"}, {"quizId": "DEMO-7K3Q", "bankQuizId": "NOPE-1"}],
+    ids=["no-bank-quiz-of-that-id", "unknown-bank-quiz"],
+)
+async def test_a_quiz_without_a_bank_quiz_is_not_found(
+    http: httpx.AsyncClient, body: dict[str, str]
+) -> None:
+    resp = await http.post("/admin/quizzes", json=body, headers=TOKEN)
+    assert (resp.status_code, resp.json()["error"]) == (404, "QUIZ_NOT_FOUND")
+    assert (await http.get(f"/quizzes/{body['quizId']}")).status_code == 404

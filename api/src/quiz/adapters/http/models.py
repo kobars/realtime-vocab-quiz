@@ -5,6 +5,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
+from quiz.contracts.messages import QuizId
+
 LIMIT_MS = 3_600_000  # one hour: the longest question time and quiz window
 
 
@@ -41,8 +43,11 @@ class QuizInfo(BaseModel):
 
 
 class CreateQuiz(BaseModel):
-    model_config = _example(quizId="VOCAB-42", timeLimitMs=20_000, windowMs=600_000)
-    quizId: Annotated[str, Field(pattern=r"^[A-Z0-9-]{3,16}$")]
+    model_config = _example(
+        quizId="VOCAB-42-7K3Q", bankQuizId="VOCAB-42", timeLimitMs=20_000, windowMs=600_000
+    )
+    quizId: QuizId
+    bankQuizId: QuizId | None = None  # the bank quiz it plays; by default quizId
     timeLimitMs: Annotated[int, Field(ge=1, le=LIMIT_MS)] = 20_000
     windowMs: Annotated[int, Field(ge=1, le=LIMIT_MS)] = 600_000
 

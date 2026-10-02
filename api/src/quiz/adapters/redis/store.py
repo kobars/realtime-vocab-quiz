@@ -90,11 +90,18 @@ class RedisStore:
         return _ok(name, reply)
 
     async def create_quiz(
-        self, quiz_id: str, questions: tuple[Question, ...], *, window_ms: int, time_limit_ms: int
+        self,
+        quiz_id: str,
+        questions: tuple[Question, ...],
+        *,
+        window_ms: int,
+        time_limit_ms: int,
+        bank_quiz_id: str | None = None,
     ) -> Created:
         ids = json.dumps([q.question_id for q in questions])
         answers = json.dumps([q.correct_choice for q in questions])
-        reply = await self._run("create_quiz", quiz_id, ids, answers, time_limit_ms, window_ms)
+        args = (ids, answers, time_limit_ms, window_ms, bank_quiz_id or quiz_id)
+        reply = await self._run("create_quiz", quiz_id, *args)
         start_ms, deadline_ms = (int(v or 0) for v in reply[1:3])
         return Created(start_ms, deadline_ms)
 
@@ -173,6 +180,11 @@ class RedisStore:
             raise DomainError(ErrorCode.INVALID_MESSAGE, msg)
         snap, _ = await self._read(quiz_id, offset, limit)
         return port.Page(snap.at_seq, snap.player_count, snap.status == "ended", snap.rows)
+
+    async def bank_quiz_id(self, quiz_id: str) -> str:
+        with _reachable():
+            bank = await self._client.hget(quiz_keys(quiz_id, self._prefix).meta, "bankQuizId")
+        return quiz_id if bank is None else str(bank)
 
     async def read_seq(self, quiz_id: str) -> int | None:
         with _reachable():

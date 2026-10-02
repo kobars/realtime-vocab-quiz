@@ -149,8 +149,20 @@ def announced(end: End) -> int:
 
 class Store(Protocol):
     async def create_quiz(
-        self, quiz_id: str, questions: tuple[Question, ...], *, window_ms: int, time_limit_ms: int
-    ) -> Created: ...
+        self,
+        quiz_id: str,
+        questions: tuple[Question, ...],
+        *,
+        window_ms: int,
+        time_limit_ms: int,
+        bank_quiz_id: str | None = None,
+    ) -> Created:
+        """``bank_quiz_id``: the question bank's quiz that it plays; by default ``quiz_id``."""
+        ...
+
+    async def bank_quiz_id(self, quiz_id: str) -> str:
+        """The bank quiz that ``quiz_id`` plays; an unknown quiz plays the one of its own ID."""
+        ...
 
     async def join(self, quiz_id: str, user_id: str, display_name: str, conn_id: str) -> Joined: ...
 

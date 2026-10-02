@@ -29,6 +29,14 @@ Most entries also give the date, the phase (design, implementation or testing) a
 Every commit carries the trailer `AI-Assisted: Claude Code (<model>)`, and every source file
 the AI wrote or changed carries an `AI-ASSISTED:` marker.
 
+**Where to start**, one or two entries per area:
+
+- Scoring and the Redis store: [PR-10](PR-10.md) (the scoring rule), [PR-61](PR-61.md) (the serve and score scripts).
+- Fan-out across nodes: [PR-105](PR-105.md) (the coalescing tick), [PR-145](PR-145.md) (two nodes, resubscribe and repair).
+- WebSocket gateway: [PR-68](PR-68.md) (upgrade checks and limits), [PR-89](PR-89.md) (send buffers and conflation).
+- Web client: [PR-37](PR-37.md) (the protocol client), [PR-165](PR-165.md) (the design system).
+- Tests and CI: [PR-31](PR-31.md) (the acceptance suite), [PR-161](PR-161.md) (system tests and browser specs).
+
 **Two examples where a review caught an AI mistake.**
 
 - [PR-17](PR-17.md) ([#17](https://github.com/kobars/realtime-vocab-quiz/pull/17)), the

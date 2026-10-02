@@ -61,13 +61,15 @@ def _quiz(request: Request, quiz_id: str) -> None:
 
 
 async def _info(deps: HttpDeps, quiz_id: str) -> h.QuizInfo:
-    questions = await deps.bank.questions(quiz_id) if QUIZ_ID.fullmatch(quiz_id) else None
-    if questions is None:
+    if not QUIZ_ID.fullmatch(quiz_id):
+        raise DomainError(ErrorCode.QUIZ_NOT_FOUND, NOT_FOUND)
+    bank_quiz_id = await deps.store.bank_quiz_id(quiz_id)
+    if (questions := await deps.bank.questions(bank_quiz_id)) is None:
         raise DomainError(ErrorCode.QUIZ_NOT_FOUND, NOT_FOUND)
     ranks = await deps.store.ranks_of(quiz_id, ())  # the count and status alone: no ranking
     return h.QuizInfo(
         quizId=quiz_id,
-        title=await deps.bank.title(quiz_id) or quiz_id,
+        title=await deps.bank.title(bank_quiz_id) or quiz_id,
         questionCount=len(questions),
         status=ranks.status,
         players=ranks.player_count,
@@ -173,13 +175,21 @@ def _admin(deps: HttpDeps) -> APIRouter:
 
     @api.post("/quizzes", status_code=201, responses={409: {"model": h.Problem}})
     async def create_quiz(request: Request, body: h.CreateQuiz) -> h.QuizInfo:
-        """MOCK: start the bank's quiz of this ID; 409 when it exists."""
+        """MOCK: start the bank quiz ``bankQuizId`` (by default ``quizId``) under ``quizId``; 409
+        when ``quizId`` exists."""
         _quiz(request, body.quizId)
-        if (bank := await deps.bank.questions(body.quizId)) is None:
+        # An existing quiz keeps its bank quiz, so a repeat without bankQuizId still gets the 409.
+        bank_quiz_id = body.bankQuizId or await deps.store.bank_quiz_id(body.quizId)
+        if (bank := await deps.bank.questions(bank_quiz_id)) is None:
             raise DomainError(ErrorCode.QUIZ_NOT_FOUND, NOT_FOUND)
         questions = tuple(Question(q.question_id, q.correct_choice) for q in bank)
-        window, limit = body.windowMs, body.timeLimitMs
-        await deps.store.create_quiz(body.quizId, questions, window_ms=window, time_limit_ms=limit)
+        await deps.store.create_quiz(
+            body.quizId,
+            questions,
+            window_ms=body.windowMs,
+            time_limit_ms=body.timeLimitMs,
+            bank_quiz_id=bank_quiz_id,
+        )
         return await _info(deps, body.quizId)
 
     @api.post(
