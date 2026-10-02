@@ -210,6 +210,16 @@ def test_api_image_pings_every_heartbeat_and_drops_a_socket_without_a_pong_by_th
     assert config.ws_ping_interval == config.ws_ping_timeout == heartbeat_s == 25
 
 
+def test_api_image_bounds_its_shutdown_and_names_its_protocol_classes() -> None:
+    """A protocol given by name ("auto") may pick a class without the head and fragment limits."""
+    config = _server_config()
+    grace = config.timeout_graceful_shutdown
+    assert grace is not None
+    assert grace < 10  # the container engine's default stop grace period
+    assert not isinstance(config.http, str)
+    assert not isinstance(config.ws, str)
+
+
 @pytest.mark.parametrize(
     ("argv", "address"),
     [

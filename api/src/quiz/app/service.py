@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 RESYNC_INTERVAL_MS, NAME_MAX = 1_000, 32
 STANDINGS_TRIES = 3  # a tick or a join between the two reads of ``standings`` makes them differ
 type Standing = tuple[m.Snapshot] | tuple[m.Snapshot, m.RankUpdate]
+OUTAGE_LOG_INTERVAL_MS = 1_000  # at most one store outage line per interval; the counter has all
 CLOSE_INTERNAL, CLOSE_REPLACED = 1011, 4001
 
 
@@ -116,6 +117,7 @@ class QuizService:
         self._store, self._bank, self._clock, self._tick_ms = store, bank, clock, tick_ms
         self._shared: dict[str, Shared] = {}  # per quiz: the standings at its latest seq
         self._refills: dict[str, asyncio.Task[Shared]] = {}  # per quiz: the read in flight
+        self._outage_logged_ms: int | None = None
         self._pages: dict[PageKey, tuple[int, m.LeaderboardPage]] = {}  # (expires at ms, page)
         self._page_reads: dict[PageKey, asyncio.Task[m.LeaderboardPage]] = {}
 
@@ -157,6 +159,13 @@ class QuizService:
             raise
 
     async def handle(self, conn: Connection, msg: m.ClientMessage) -> Outcome:
+        outcome = await self._handle(conn, msg)
+        for reply in outcome.replies:
+            if isinstance(reply, m.ProtocolError):
+                metrics.WS_ERRORS.labels(msg.type, reply.code.value).inc()
+        return outcome
+
+    async def _handle(self, conn: Connection, msg: m.ClientMessage) -> Outcome:
         kind = msg.type
         try:
             out = await getattr(self, f"_on_{kind}")(conn, msg)
@@ -167,6 +176,11 @@ class QuizService:
         except Refused as error:
             return Outcome((_error(error.code, str(error), kind),))
         except ConnectionError, TimeoutError:
+            now = self._clock()
+            last = self._outage_logged_ms
+            if last is None or now - last >= OUTAGE_LOG_INTERVAL_MS:
+                self._outage_logged_ms = now
+                log.warning("store unreachable on %s", kind, exc_info=True)
             return Outcome((_error(m.ErrorCode.UNAVAILABLE, "the store is unreachable", kind),))
         except Exception:
             ref = uuid.uuid4().hex[:12]

@@ -6,13 +6,14 @@ from typing import Literal
 import httpx
 import pytest
 from fastapi import FastAPI
+from redis import exceptions as redis_errors
 
 import quiz.main
 from quiz.adapters.memory import MemoryStore
 from quiz.adapters.mock_auth import MemoryTicketStore, RedisTicketStore
 from quiz.adapters.redis import RedisStore
 from quiz.config import Settings
-from quiz.main import Hook, create_app, module_app, services_of
+from quiz.main import Hook, create_app, module_app, redis_probe, services_of
 from quiz.ports.store import Limits
 
 
@@ -130,3 +131,15 @@ def test_the_resync_limit_runs_on_a_monotonic_clock(
     monkeypatch.setattr(time, "time_ns", no_wall_clock)  # a wall-clock step cannot reach it
     first = service._clock()  # noqa: SLF001
     assert service._clock() >= first  # noqa: SLF001
+
+
+class ReadOnlyRedis:  # a replica: it answers PING but refuses every write
+    async def ping(self) -> bool:
+        return True
+
+    async def set(self, *_: object, **__: object) -> bool:
+        raise redis_errors.ReadOnlyError
+
+
+async def test_readiness_fails_while_redis_answers_ping_but_refuses_writes() -> None:
+    assert await redis_probe(ReadOnlyRedis())() is False  # type: ignore[arg-type]

@@ -22,7 +22,7 @@ from quiz.adapters.mock_auth.tokens import TICKET_TTL_S
 from quiz.adapters.mock_questions import MockQuestionBank
 from quiz.adapters.redis import RedisStore
 from quiz.adapters.ws.endpoint import Gateway
-from quiz.adapters.ws.limits import AddressRateLimiter
+from quiz.adapters.ws.limits import address_limiter
 from quiz.app.service import QuizService
 from quiz.config import Settings
 from quiz.fanout.presence import PresenceRenewer
@@ -36,7 +36,7 @@ from quiz.ports.tickets import TicketStore
 Hook = Callable[[], Awaitable[None]]
 Probe = Callable[[], Awaitable[bool]]
 READY_TIMEOUT_S = 1.0
-IDENTITY_REFILL_S = 60  # the per-address bucket of POST /sessions and POST /tickets refills in it
+READY_PROBE_KEY, READY_PROBE_TTL_MS = "quiz:ready:probe", 5_000
 # The errors that mean the store is unreachable: HTTP 503.
 OUTAGES = (ConnectionError, TimeoutError, redis_errors.ConnectionError, redis_errors.TimeoutError)
 
@@ -55,13 +55,17 @@ async def always_ready() -> bool:
 
 
 def redis_probe(client: Redis) -> Probe:
-    async def ping() -> bool:
+    """Ready when Redis accepts a write: it answers PING also while it refuses writes (a
+    read-only replica, a failed AOF write, maxmemory with noeviction)."""
+
+    async def write() -> bool:
+        probe = client.set(READY_PROBE_KEY, "1", px=READY_PROBE_TTL_MS)
         try:
-            return bool(await asyncio.wait_for(client.ping(), READY_TIMEOUT_S))
+            return bool(await asyncio.wait_for(probe, READY_TIMEOUT_S))
         except redis_errors.RedisError, OSError, TimeoutError:
             return False
 
-    return ping
+    return write
 
 
 @dataclass(slots=True)
@@ -162,8 +166,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
     services.shutdown.append(renewer.stop)
     s, ttl_ms = services.settings, TICKET_TTL_S * 1000
     token = s.admin_token.get_secret_value() if s.admin_mock and s.admin_token else None
-    burst = 2 * s.per_ip_conn_cap  # a session and a ticket for each socket one address may hold
-    limit = AddressRateLimiter(burst / IDENTITY_REFILL_S, burst, monotonic_ms)
+    limit = address_limiter(s.per_ip_conn_cap, monotonic_ms)
     deps = HttpDeps(services.store, services.tickets, services.bank, services.ready, ttl_ms, limit)
     proxies = s.trusted_proxies
     install(app, replace(deps, trusted_proxies=proxies, admin_token=token, outages=OUTAGES))

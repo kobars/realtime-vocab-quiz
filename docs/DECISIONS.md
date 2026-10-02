@@ -63,6 +63,8 @@ The product needs one real-time quiz service built for real; identity, questions
 
 ## ADR-002 — Self-paced quiz model and the integer scoring rule
 
+<!-- AI-ASSISTED-BEGIN: ADR-002 to ADR-008 drafted with Claude Code from the reviewed design drafts, checked by hand against docs/spec/. -->
+
 - **Status:** accepted
 - **Date:** 2026-10-01
 
@@ -248,6 +250,8 @@ One schema in one Redis: every key of a quiz is `quiz:{<quizId>}:<name>`, with t
 
 - Scaling out means a Redis Cluster that spreads quizzes over shards; one quiz never spans shards, so the largest quiz is bounded by one shard. On a Cluster, sharded pub/sub (`SPUBLISH`) keeps the channel on the quiz's shard.
 - A quiz expires as a whole 24 h after its last write.
+
+<!-- AI-ASSISTED-END -->
 
 ## ADR-009 — Repository layout and the Vue client: `api/`, `web/`, generated `contracts/`
 

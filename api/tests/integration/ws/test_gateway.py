@@ -206,11 +206,33 @@ def test_the_close_line_carries_the_quiz_id_and_the_connection_id() -> None:
         create = partial(store.create_quiz, window_ms=60_000, time_limit_ms=20_000)
         client.portal.call(create, "VOCAB-42", (Question("q0", 1),))  # type: ignore[union-attr]
         out = io.StringIO()
-        logs.configure_logging(out)
+        listener = logs.configure_logging(out)
         with connect(client, ticket(client)) as ws:
             ws.send_json({"v": 1, "type": "join", "quizId": "VOCAB-42", "displayName": "Ann"})
             assert ws.receive_json()["type"] == "joined"
+    listener.stop()  # writes the queued lines
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     [closed] = [line for line in lines if line["event"].startswith("ws /ws closed")]
     assert closed["quiz_id"] == "VOCAB-42"
     assert closed["request_id"]  # the connection's id
+
+
+def test_upgrade_attempts_above_the_address_burst_get_429_without_a_ticket_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with client_of(per_ip_conn_cap=1) as one:  # a burst of 2 attempts per address
+        now, redeemed = [0], []
+        one.app.state.gateway.clock = lambda: now[0]  # type: ignore[attr-defined]
+        store = services_of(one.app).tickets  # type: ignore[arg-type]
+
+        async def redeem(ticket_: str) -> None:
+            redeemed.append(ticket_)
+
+        monkeypatch.setattr(store, "redeem", redeem)
+        assert [refused(one, f"made-up-{i}") for i in range(3)] == [401, 401, 429]
+        assert redeemed == ["made-up-0", "made-up-1"]
+        other = TestClient(one.app, client=("10.0.0.9", 1))
+        assert refused(other, "made-up-3") == 401  # the limit is per address
+        now[0] = 60_000  # a full refill
+        assert refused(one, "made-up-4") == 401
+        assert redeemed[-1] == "made-up-4"
