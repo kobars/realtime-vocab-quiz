@@ -1,4 +1,4 @@
-<!-- AI-ASSISTED: shadcn-vue toaster in the clay look: card radius, 3 px outline, hard shadow, the app font and soft state fills. -->
+<!-- AI-ASSISTED: shadcn-vue toaster in the clay look: card radius, 3 px outline, hard shadow, the app font and soft state fills; it brings vue-sonner's stylesheet, so a consumer imports nothing else. -->
 <script lang="ts" setup>
 import type { ToasterProps } from "vue-sonner"
 import { CircleCheckIcon, InfoIcon, Loader2Icon, OctagonXIcon, TriangleAlertIcon, XIcon } from "@lucide/vue"

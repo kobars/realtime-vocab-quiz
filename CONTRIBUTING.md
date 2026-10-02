@@ -90,6 +90,16 @@ in its memory store are lost with it.
 To run the development API on Redis instead: `make up`, then
 `STORE=redis ADMIN_MOCK=1 ADMIN_TOKEN=dev-token make dev-api`, and `make down` afterwards.
 
+### Work on the design system
+
+The client's look lives in the Clay design system, the workspace package `web/packages/clay`
+(`@quiz/clay`): its tokens, Tailwind theme, font and components. `make clay` serves its component
+gallery on <http://localhost:5180>, which shows every token and every component variant and state
+in the light and the dark theme side by side, and reloads on every change; it needs no API. App code
+imports the package only from `@quiz/clay` (ESLint enforces it). The package's
+[README](web/packages/clay/README.md) explains how to add a token or a component, and
+`pnpm -C web exec vitest run --project clay` runs its tests alone.
+
 ## Run the tests
 
 The [Make targets](#make-targets) table says what each test target runs. `make test` and
@@ -100,14 +110,16 @@ layers need more:
 - `make test-integration`: the integration tests use `REDIS_URL` when it is set, else a Redis
   container of their own; the acceptance tests on Redis always start their own (Docker).
 - `make ui-check`: the visual and accessibility specs (`web/e2e/visual.spec.ts`,
-  `web/e2e/a11y.spec.ts`) on the production build, with no backend: `web/e2e/fixtures/` mocks the
+  `web/e2e/a11y.spec.ts`, and `web/e2e/gallery.visual.spec.ts` for the design system's gallery) on
+  the production build, with no backend: `web/e2e/fixtures/` mocks the
   HTTP calls and the quiz socket and pauses the page clock. Eleven screens, from the join form to
   the final results, run at 320, 768 and 1280 px wide in light and dark with reduced motion (the
   Leaderboard tab only below 1024 px; wider, the leaderboard sits beside every play screen). Each
   must match its screenshot baseline in `web/e2e/__screenshots__/` (at most 50 pixels differ) and
   pass axe for WCAG 2.2 A and AA, with no sideways scroll (also at 640 px, a 1280 px window at
   200% zoom), controls of at least 44 × 44 px and a visible focus ring at every Tab stop. It runs
-  in the Playwright image pinned in the `Makefile`, always as `linux/amd64`, so every machine
+  The gallery has one baseline per colour scheme at 1280 px, and passes axe with no sideways
+  scroll at every width. It all runs in the Playwright image pinned in the `Makefile`, always as `linux/amd64`, so every machine
   renders like CI; it needs Docker, and `make check` needs no browser. `make ui-baselines`
   regenerates the baselines that changed, in the same image; `UI_ARGS` passes Playwright arguments
   to both, for example `make ui-check UI_ARGS="--project=320-light -g 'join-error'"`. The CI job
@@ -168,6 +180,7 @@ layers need more:
 | `make test-system` | The system tests (`api/tests/system/`) against a running full stack at `STACK_URL` (default `http://localhost:$QUIZ_PORT`), with the `ADMIN_TOKEN` from `.env` |
 | `make test-browser` | The Playwright browser specs (`web/e2e/`, with an axe accessibility scan) in Chromium against the same stack |
 | `make ui-check`, `make ui-baselines` | The visual and accessibility specs in the pinned Playwright image (Docker), and the regeneration of their screenshot baselines ([Run the tests](#run-the-tests)) |
+| `make clay` | Serve the Clay design system's component gallery on :5180 ([Work on the design system](#work-on-the-design-system)) |
 | `make check` | Every check a change must pass; it stops at the first failing step |
 | `make contracts` | Regenerate the JSON Schema and the client's TypeScript types from the server's models |
 | `make build` | Build the images `elsaquiz-api` and `elsaquiz-web` (tag `IMAGE_TAG`, default `dev`) |
@@ -192,7 +205,8 @@ In order, stopping at the first failing step:
    branch-coverage floor (`UNIT_COVERAGE_FLOOR` in the `Makefile`), then the acceptance tests on
    the memory store.
 8. The contract drift check: the generated schema and types match the server's models.
-9. vue-tsc, then Vitest with coverage thresholds (`web/vitest.config.ts`).
+9. vue-tsc over the app and the workspace packages, then Vitest with coverage thresholds: the
+   app's project and each package's own (`web/vitest.config.ts`).
 10. The client build (`pnpm -C web build`).
 
 Each acceptance run writes a JUnit report (into `REPORTS`, else `reports/`), and
@@ -262,7 +276,7 @@ same option then reports the lock as out of date.
 
 ```text
 api/        the server: FastAPI app, Lua scripts, tests (unit, property, contract, integration, acceptance, system)
-web/        the Vue 3 client and its tests
+web/        the Vue 3 client and its tests; web/packages/clay is its design system (@quiz/clay)
 contracts/  the JSON Schema of the wire protocol, generated from the server's models
 infra/      the nginx and Caddy configuration of the full stack
 load/       the bot swarm, the smoke test and the measured load runs
