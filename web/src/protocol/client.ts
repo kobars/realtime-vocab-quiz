@@ -29,8 +29,15 @@ export interface QuizSocket {
  * `closed` follows a final close code or `stop`; `failed` means the client gave up after 10 connects without a `joined`.
  */
 export type ClientEvent =
-  | Exclude<ServerMessage, { type: 'pong' }>
+  | Exclude<ServerMessage, { type: 'pong' | 'question' }>
+  | QuestionEvent
   | { type: 'status'; status: 'connecting' | 'open' | 'resyncing' | 'reconnecting' | 'closed' | 'failed'; code: number | null }
+
+/**
+ * A `question`, plus `askedMsAgo`: how long ago this client last sent the `next` for its index on this socket, when it
+ * did. The server computed `remainingMs` after that send, so the countdown starts that long before the arrival (protocol §6).
+ */
+export type QuestionEvent = Extract<ServerMessage, { type: 'question' }> & { askedMsAgo?: number }
 
 export interface QuizClientOptions {
   api: AuthApi
@@ -75,6 +82,11 @@ export class QuizClient {
    * replies it got (the backoff attempt of its next retry), and whether it got `NOT_JOINED` and waits for `joined`.
    */
   private pendingNext: { questionIndex: number; failures: number; afterJoin: boolean } | null = null
+  /**
+   * The last `next` sent on the current socket, and when. It stays after its `question`, so a second reply (to a resend
+   * after a slow first reply) is also timed from the latest send, never from the first one.
+   */
+  private lastNextSent: { questionIndex: number; at: number } | null = null
   /** The scheduled resend of `pendingNext`: its retry after an error, or else its reply deadline. */
   private nextRetry: Timer | undefined
   /** True once the current socket got `joined`, and false again after `NOT_JOINED`: answers go out only while true. */
@@ -230,6 +242,9 @@ export class QuizClient {
         if (message.type === 'finished' || message.questionIndex === this.pendingNext?.questionIndex) {
           this.cancelNextRetry()
           this.pendingNext = null
+        }
+        if (message.type === 'question' && message.questionIndex === this.lastNextSent?.questionIndex) {
+          return this.emit({ ...message, askedMsAgo: this.o.now() - this.lastNextSent.at })
         }
         break
       case 'answer_result':
@@ -433,6 +448,7 @@ export class QuizClient {
   private sendNext(): void {
     if (this.pendingNext === null) return
     this.send({ v: 1, type: 'next', questionIndex: this.pendingNext.questionIndex })
+    this.lastNextSent = { questionIndex: this.pendingNext.questionIndex, at: this.o.now() }
     this.cancelNextRetry()
     this.nextRetry = this.after(REPLY_TIMEOUT_MS, () => this.sendNext())
   }
@@ -497,6 +513,7 @@ export class QuizClient {
     this.inFlight = []
     this.answerRetries.clear()
     this.pendingNext = null
+    this.lastNextSent = null
     for (const timer of this.timers) clearTimeout(timer)
     this.timers.clear()
     clearInterval(this.ping)
