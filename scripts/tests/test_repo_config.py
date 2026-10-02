@@ -524,9 +524,23 @@ def test_a_failed_scheduled_run_of_each_workflow_is_reported_in_an_issue(workflo
     assert [line for line in job if line.endswith(": write")] == ["issues: write"]
     (needs,) = [line for line in job if line.startswith("needs: [")]
     needed = needs.removeprefix("needs: [").removesuffix("]").split(", ")
-    others = [j for j in _job_ids(path) if j != "scheduled-failure"]
-    assert needed
-    assert set(needed) <= set(others), needed
+    # Every job that runs on the schedule is reported: all but the jobs of another event (pull
+    # request or push) and the merge gates (*-required), which fail only when a job they need has.
+    other_event = re.compile(r"if: github\.event_name == '(?!schedule')")
+
+    def job_if(job_id: str) -> str:
+        section = _section(path, job_id, 2)
+        head = section[: section.index("steps:")] if "steps:" in section else section
+        return next((line for line in head if line.startswith("if: ")), "")
+
+    scheduled = [
+        j
+        for j in _job_ids(path)
+        if j != "scheduled-failure"
+        and not j.endswith("-required")
+        and not other_event.match(job_if(j))
+    ]
+    assert sorted(needed) == sorted(scheduled)
 
 
 def _link_ignores() -> list[re.Pattern[str]]:
