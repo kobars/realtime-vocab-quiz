@@ -99,14 +99,14 @@ def _wire(settings: Settings, clock: Clock | None) -> Services:
     if settings.store == "memory":
         quiz_clock = clock or wall_clock_ms  # quiz time; ticket and session expiry stay real
         memory = MemoryStore(quiz_clock, limits)
-        service = QuizService(memory, bank, clock or monotonic_ms)
+        service = QuizService(memory, bank, clock or monotonic_ms, tick_ms=limits.tick_ms)
         return Services(
             settings, quiz_clock, memory, MemoryTicketStore(wall_clock_ms), bank, service
         )
     # Redis reads its own TIME for quiz time; the monotonic clock only paces the resync limit.
     client = connect_redis(settings)
     redis, tickets = RedisStore(client, limits=limits), RedisTicketStore(client)
-    service = QuizService(redis, bank, monotonic_ms)
+    service = QuizService(redis, bank, monotonic_ms, tick_ms=limits.tick_ms)
     start: list[Hook] = [redis.start]
     stop: list[Hook] = [client.aclose]
     probe = redis_probe(client)
