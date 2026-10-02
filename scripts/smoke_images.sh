@@ -103,9 +103,10 @@ network="smoke-$$"
 redis="smoke-redis-$$"
 trap 'docker rm --force "$redis" >/dev/null 2>&1; docker network rm "$network" >/dev/null 2>&1' EXIT
 docker network create "$network" >/dev/null
-docker run --detach --name "$redis" --network "$network" redis:8-alpine >/dev/null
+# The Redis that compose runs (scripts/tests/test_images.py keeps them the same).
+docker run --detach --name "$redis" --network "$network" redis:8.10-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0 >/dev/null
 for _ in $(seq 15); do
   docker exec "$redis" redis-cli ping >/dev/null 2>&1 && break
   sleep 1
 done
-smoke "elsaquiz-api:$tag" check_ready --network "$network" -e "REDIS_URL=redis://$redis:6379/0"
+smoke "elsaquiz-api:$tag" check_ready --network "$network" -e "REDIS_URL=redis://${redis}:6379/0"

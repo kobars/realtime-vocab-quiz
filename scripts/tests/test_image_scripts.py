@@ -32,6 +32,7 @@ case "$*" in
 esac
 """
 LUA = "api/src/quiz/adapters/redis/lua/"
+COMPOSE_REDIS = re.findall(r"image: (redis:\S+)", (ROOT / "compose.yaml").read_text())[0]
 
 
 def _run(
@@ -188,7 +189,7 @@ def test_smoke_runs_the_api_image_on_a_redis_of_its_own_until_it_is_ready(tmp_pa
     assert code == 0
     (network,) = [c.split()[-1] for c in calls if c.startswith("network create ")]
     redis = network.replace("smoke-", "smoke-redis-")
-    assert f"run --detach --name {redis} --network {network} redis:8-alpine" in calls
+    assert f"run --detach --name {redis} --network {network} {COMPOSE_REDIS}" in calls
     (api,) = [c for c in calls if c.startswith("run --detach") and "elsaquiz-api" in c]
     assert f"--network {network} -e REDIS_URL=redis://{redis}:6379/0" in api
     assert "STORE" not in api  # the image's default
