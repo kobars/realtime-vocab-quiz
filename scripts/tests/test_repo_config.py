@@ -151,7 +151,9 @@ def test_each_acceptance_run_checks_its_report_for_the_skips_of_its_store(
 ) -> None:
     report = ROOT / "reports" / f"acceptance-{store}.xml"
     commands = _make_dry_run(target, *variables)
-    assert f"pytest tests/acceptance --junitxml={report} ||" in commands
+    # The Redis harness flushes its database, so it never gets the Redis that REDIS_URL names.
+    run = f"unset REDIS_URL; cd api && uv run --locked pytest tests/acceptance --junitxml={report}"
+    assert f"{run} ||" in commands
     check = f"scripts/check_junit_skips.py {report} --expect {skips} --reason 'exact-time check'"
     assert check in commands
 

@@ -25,7 +25,7 @@ make help                    # list every make target
 uv run --project api pre-commit install  # run the hooks on staged files at each commit
 make check                   # every check a change must pass; stops at the first failing step
 make test                    # the server and client unit tests
-make test-integration        # the tests that need Redis, then the acceptance tests on Redis (REDIS_URL: see below)
+make test-integration        # the tests that need Redis (set REDIS_URL to use your own), then the acceptance tests on Redis
 make audit                   # the dependency audits and the secret scan (needs the network and gitleaks 8.25+)
 make review-budget           # the branch's review input in tokens (diff plus changed files, against origin/main)
 make acceptance              # the acceptance tests alone; ACCEPTANCE_STORE=redis runs them on Redis
@@ -40,11 +40,11 @@ The API refuses a WebSocket upgrade from an origin it does not allow (HTTP 403).
 `make dev-api` sets it to the Vite dev server's origins; `DEV_API_PORT` and
 `DEV_ORIGINS` change the port and the list.
 
-The tests that need Redis use `REDIS_URL` when it is set, else a Redis container of
-their own. The integration tests write only keys under a prefix of their own and delete
-them. The acceptance tests on Redis flush their database before each test, so they use
-database 15 of that Redis, refuse to start unless it is empty, and empty it when they
-finish. Each acceptance run writes a JUnit report (into `REPORTS`, else `reports/`) and
+The integration tests use `REDIS_URL` when it is set, else a Redis container of their
+own; they write only keys under a prefix of their own and delete them. The acceptance
+tests on Redis flush their database before each test, so the make targets unset
+`REDIS_URL` for them and they always start a Redis container of their own (Docker is
+needed). Each acceptance run writes a JUnit report (into `REPORTS`, else `reports/`) and
 `scripts/check_junit_skips.py` fails it when a test skips that should run: none on the
 memory store, only the two exact-time checks on Redis, which need the memory store's
 injected clock.

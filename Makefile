@@ -9,15 +9,17 @@ VITEST = pnpm -C web exec vitest run
 # With REPORTS set to a folder (CI sets it), each test step also writes a JUnit report there.
 pytest_junit = $(if $(REPORTS),--junitxml=$(abspath $(REPORTS))/$(1).xml)
 vitest_junit = $(if $(REPORTS),--reporter=default --reporter=junit --outputFile.junit=$(abspath $(REPORTS))/vitest.xml)
-# The acceptance tests run on the memory store or on Redis. A skipped test passes pytest, so their
-# step always writes a JUnit report (into REPORTS, else reports/) and fails on a skip the store does
-# not expect: on Redis, the two exact-time checks, which need the memory store's injected clock.
+# The acceptance tests run on the memory store or on Redis. Their Redis harness flushes its database
+# before each test, so REDIS_URL is unset and the run starts a Redis container of its own. A skipped
+# test passes pytest, so each run writes a JUnit report (into REPORTS, else reports/) and fails on a
+# skip the store does not expect: on Redis, the two exact-time checks, which need the memory store's
+# injected clock.
 export ACCEPTANCE_STORE ?= memory
 ACCEPTANCE_SKIPS_memory = 0
 ACCEPTANCE_SKIPS_redis = 2
 ACCEPTANCE_REPORT = $(abspath $(or $(REPORTS),reports))/acceptance-$(ACCEPTANCE_STORE).xml
 define acceptance_steps
-$(call step,pytest acceptance,$(PYTEST) tests/acceptance --junitxml=$(ACCEPTANCE_REPORT))
+$(call step,pytest acceptance,unset REDIS_URL; $(PYTEST) tests/acceptance --junitxml=$(ACCEPTANCE_REPORT))
 $(call step,acceptance skips,uv run --project api --locked python scripts/check_junit_skips.py $(ACCEPTANCE_REPORT) --expect $(ACCEPTANCE_SKIPS_$(ACCEPTANCE_STORE)) --reason 'exact-time check')
 endef
 # make check's floor for the unit run alone; CI gates the combined coverage of its test jobs on
