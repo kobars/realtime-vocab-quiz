@@ -2,7 +2,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from typing import Any, cast, override
 from unittest.mock import Mock, call
@@ -252,3 +252,20 @@ async def test_quiz_ended_goes_out_with_you_null_when_the_rank_read_fails(
     assert await Relay("Q", cast("Store", store), sockets, store.limits).relay(ended(SEQ + 1))
     sent = last_sent(sockets)
     assert (sent["type"], sent["seq"], sent["you"]) == ("quiz_ended", SEQ + 1, None)
+
+
+async def test_a_frame_with_no_change_time_is_counted_but_not_timed(
+    metric: Callable[..., float],
+) -> None:
+    store = ScriptedStore(Publish("published", SEQ + 1), Publish("published", SEQ + 2, lag_ms=150))
+    ticker = Ticker(cast("FeedStore", store), Mock(), Mock(spec=QuizService), "n1")
+    frames, lags = (
+        metric("leaderboard_frames_total"),
+        metric("leaderboard_publish_lag_seconds_count"),
+    )
+    lag_s = metric("leaderboard_publish_lag_seconds_sum")
+    for _ in range(2):
+        await ticker._publish("Q")  # noqa: SLF001 - one publish, without the loop
+    assert metric("leaderboard_frames_total") - frames == 2
+    assert metric("leaderboard_publish_lag_seconds_count") - lags == 1
+    assert metric("leaderboard_publish_lag_seconds_sum") - lag_s == pytest.approx(0.15)

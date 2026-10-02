@@ -80,7 +80,7 @@ async def test_script_points_match_python_and_land_in_the_standings(
         total += expected
         assert (r.points, points, r.total, r.correct) == (expected, expected, total, correct)
         assert r.late == (elapsed > LIMIT_MS)
-        assert await redis_client.get(keys.dirty) == ("1" if expected else None)
+        assert bool(await redis_client.exists(keys.dirty)) == (expected > 0)
     assert await redis_client.hget(keys.totals, "a") == str(total)
     assert decode_sort_score(int(await redis_client.zscore(keys.board, "a") or 0))[0] == total
     assert await redis_client.smembers(keys.scored) == {"a"}

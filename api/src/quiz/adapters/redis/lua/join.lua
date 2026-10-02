@@ -28,7 +28,7 @@ if replaced == conn then
   replaced = false
 end
 redis.call('HSET', KEYS[K.present], uid, cjson.encode({conn, now}))
-redis.call('SET', KEYS[K.dirty], 1)
+set_dirty(now)
 if replaced then
   redis.call('SADD', KEYS[K.replaced], replaced)
   redis.call('PUBLISH', KEYS[K.control],

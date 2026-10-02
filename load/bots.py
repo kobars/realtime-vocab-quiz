@@ -28,7 +28,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 from websockets.typing import Origin, Subprotocol
 
-from latency import report, summary
+from latency import SLO_MS, report, summary
 from player import DEAD_LINK, NORMAL, Backoff, BoardWait, Player, Recorder
 
 SUBPROTOCOL = Subprotocol("quiz.v1")
@@ -250,7 +250,7 @@ def parse(argv: list[str] | None = None) -> Options:
     add("--duration", type=float, default=60, help="seconds of answering after the ramp")
     add("--ramp", type=float, default=10, help="seconds over which the bots start")
     add("--procs", type=int, default=1, help="processes to spread the bots over")
-    add("--timeout-ms", type=int, default=5000, help="a sample slower than this times out")
+    add("--timeout-ms", type=int, default=5000, help="a sample slower than this times out (>= 500)")
     add("--admin-token", help="MOCK admin token: create the quizzes first")
     add("--label", default="run", help="name part of the result file")
     a = cli.parse_args(argv)
@@ -260,8 +260,10 @@ def parse(argv: list[str] | None = None) -> Options:
     if a.bots < 1 or not 1 <= a.procs <= a.bots or not 0 <= a.accuracy <= 1:
         cli.error("need --bots >= 1, 1 <= --procs <= --bots and 0 <= --accuracy <= 1")
     finite = math.isfinite(a.ramp + a.duration)  # also an overflowing sum
-    if not finite or a.duration <= 0 or a.ramp < 0 or a.think_ms < 0 or a.timeout_ms <= 0:
-        cli.error("need finite --duration > 0 and --ramp >= 0, --think-ms >= 0, --timeout-ms > 0")
+    if not finite or a.duration <= 0 or a.ramp < 0 or a.think_ms < 0:
+        cli.error("need finite --duration > 0 and --ramp >= 0, and --think-ms >= 0")
+    if a.timeout_ms < SLO_MS:  # a sample timed out below the SLO may still have been on time
+        cli.error(f"--timeout-ms must be at least the {SLO_MS:.0f} ms of the SLO")
     if not re.fullmatch(r"[\w.-]+", a.label, re.ASCII):
         cli.error("--label may hold only letters, digits, '_', '.' and '-'")
     rest = {k: v for k, v in vars(a).items() if k not in {"url", "quiz_ids", "quizzes"}}
@@ -282,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
     result = run(opts)
     print(report(result))  # before the save: a failed write keeps the report
     print(f"written: {save(result, opts.label)}")
-    return 0 if result["valid"] else 1
+    return 0 if result["valid"] and result["slo_met"] else 1
 
 
 if __name__ == "__main__":

@@ -59,7 +59,7 @@ async def test_another_nodes_renew_drops_presence_that_no_live_node_renews(
     await asyncio.sleep(0.4)
     await renewer.stop()
     assert await redis_client.hkeys(keys.present) == ["b"]  # the live connection stays
-    assert await redis_client.get(keys.dirty) == "1"
+    assert await redis_client.exists(keys.dirty)
 
 
 async def test_a_failed_renew_is_logged_and_the_next_one_still_runs(

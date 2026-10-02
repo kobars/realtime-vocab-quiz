@@ -25,6 +25,7 @@ from quiz.fanout.tick import Ticker
 from quiz.ports.store import FeedStore, Limits, Place, Publish, Ranks, Store
 
 QUESTIONS = (Question("q0", 1), Question("q1", 3), Question("q2", 0))
+LAG_SUM = "leaderboard_publish_lag_seconds_sum"
 
 
 class Sink:
@@ -121,14 +122,21 @@ async def test_each_tick_is_timed_and_each_published_frame_counted(
 
     monkeypatch.setattr(store, "publish_if_dirty", counted)
     frames, timed = metric("leaderboard_frames_total"), metric("tick_duration_seconds_count")
+    lags, lag_s = metric("leaderboard_publish_lag_seconds_count"), metric(LAG_SUM)
     (ticker := ticker_of(store, Sink())).open(quiz_id)
     await asyncio.sleep(0.3)
     await score(store, quiz_id, "a", 0)
     await asyncio.sleep(0.3)
     await ticker.stop()
-    assert [r.status for r in results].count("published") == 2  # the join's and the answer's
+    published = [r for r in results if r.status == "published"]
+    assert len(published) == 2  # the join's and the answer's
     assert metric("leaderboard_frames_total") - frames == 2
     assert metric("tick_duration_seconds_count") - timed == ticks[0] >= 3
+    assert metric("leaderboard_publish_lag_seconds_count") - lags == 2
+    lag_ms = [r.lag_ms for r in published]
+    assert metric(LAG_SUM) - lag_s == pytest.approx(sum(ms or 0 for ms in lag_ms) / 1000)
+    assert None not in lag_ms
+    assert (lag_ms[1] or 0) > 0  # the answer waited for the next tick
 
 
 async def test_the_tick_runs_only_while_the_quiz_has_local_sockets(

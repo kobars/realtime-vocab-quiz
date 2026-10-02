@@ -47,7 +47,7 @@ if pts > 0 then
   total = redis.call('HINCRBY', KEYS[K.totals], uid, pts)
   redis.call('ZADD', KEYS[K.board], board_score(total, math.max(0, now - start)), uid)
   redis.call('SADD', KEYS[K.scored], uid)
-  redis.call('SET', KEYS[K.dirty], 1)
+  set_dirty(now)
 end
 if i == n - 1 then
   redis.call('HSET', KEYS[K.serve], uid, cjson.encode({c, serve_ms, 1}))

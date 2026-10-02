@@ -178,9 +178,9 @@ async def test_lost_reply_replays_on_a_connection_opened_after_the_end(
 
 
 async def test_resync_answers_a_snapshot_at_most_once_a_second(
-    service: QuizService, store: SpyStore
+    service: QuizService, store: SpyStore, metric: Callable[..., float]
 ) -> None:
-    conn = await joined(service)
+    conn, before = await joined(service), metric("resyncs_total")
     [snapshot] = await send(service, conn, m.Resync(lastSeq=0))
     entries, you = [m.Entry(rank=1, userId="a", displayName="A", score=0)], m.You(rank=1, score=0)
     assert snapshot == m.Snapshot(
@@ -188,8 +188,10 @@ async def test_resync_answers_a_snapshot_at_most_once_a_second(
     )
     store.now[0] += 999
     assert await refused(service, conn, m.Resync(lastSeq=0)) == (E.RATE_LIMITED, None)
+    assert metric("resyncs_total") == before + 1  # a refused resync is an error reply
     store.now[0] += 1
     assert await send(service, conn, m.Resync(lastSeq=0)) == [snapshot]
+    assert metric("resyncs_total") == before + 2
 
 
 async def test_snapshot_caches_the_shared_part_per_seq(

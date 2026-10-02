@@ -325,6 +325,22 @@ async def test_dirty_gates_publish_and_tick_holds(
     assert (await store.publish_if_dirty(quiz_id, "n1")).status == "clean"
 
 
+async def test_publish_lag_runs_from_the_first_change_the_frame_carries(
+    store: Store, advance: Advance, quiz_id: str
+) -> None:
+    await started(store, quiz_id, "a")
+    await store.publish_if_dirty(quiz_id, "n1")
+    await advance(250)  # the tick token lapses
+    assert await answer(store, quiz_id, "a", 0, 0, "s1") > 0  # dirty from here
+    await advance(100)
+    await store.join(quiz_id, "b", "B", "c-b")  # a later change keeps the first one's time
+    await advance(100)
+    published = await store.publish_if_dirty(quiz_id, "n1")
+    assert published.status == "published"
+    assert published.lag_ms is not None
+    assert 200 <= published.lag_ms < 1_000  # a real clock adds the steps' own time
+
+
 async def test_tick_token_holds_at_most_200_ms_after_a_clock_step_back(
     store: Store, advance: Advance, hold_tick: QuizStep, quiz_id: str
 ) -> None:
