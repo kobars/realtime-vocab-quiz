@@ -4,7 +4,7 @@
 
 <!-- AI-ASSISTED-BEGIN: ADR-009 drafted with Claude Code from the repository layout, api/pyproject.toml and web/package.json, checked by hand against the code. -->
 
-- **Status:** accepted
+- **Status:** accepted; files moved to `web/packages/clay/` by [ADR-013](013-clay-workspace-package.md)
 - **Date:** 2026-10-01
 
 ## Context

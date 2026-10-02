@@ -30,6 +30,7 @@ Clay ([ADR-010](010-clay-design-system.md)) lived inside the app: the tokens and
 - The app's screenshot baselines did not change. Its built CSS differs only by utility classes no element used, which Tailwind used to find in tests and docs: the app's entry now scans only `web/src/` without its tests, and the theme adds the package's components.
 - A change to the look is made, tested and shown in one folder; `CHANGELOG.md` records it and the semantic version says whether consumers must change.
 - The package's dependencies (reka-ui, vue-sonner, class-variance-authority, tailwind-merge, clsx, the font) are its own; the app no longer lists them. The web image copies the package manifest before the frozen install.
+- The files that ADR-009 and ADR-010 name moved: `web/src/components/ui/` → `web/packages/clay/src/components/`; `web/src/styles/tokens.css` → `web/packages/clay/src/styles/tokens.css`; `web/src/styles/main.css` → `web/packages/clay/src/styles/theme.css`; `web/src/styles/contrast.test.ts` and `web/src/styles/tokens.test.ts` → `web/packages/clay/src/styles/`; `web/src/styles/main.test.ts` → `web/packages/clay/src/styles/theme.test.ts`; `web/src/components/ui/ui.test.ts` → `web/packages/clay/src/components/components.test.ts`.
 - The gallery adds two full-page baselines to the visual suite; a component change regenerates them with `make ui-baselines`.
 
 <!-- AI-ASSISTED-END -->

@@ -14,8 +14,8 @@ self-hosted quizzes, and one address can start only a few in a short time.
 
 **Video walkthrough:** <https://www.youtube.com/watch?v=7gOKTPEs5Ak>
 
-**Test plan:** <https://claude.ai/artifact/3i4p3bdSeFWfEen9UehCJi>: the manual and automated test
-cases, each mapped to the requirement it proves, with the result of the latest verification run.
+**[Test plan](https://claude.ai/artifact/3i4p3bdSeFWfEen9UehCJi):** the manual and automated test
+cases, each mapped to the requirement it proves, with the latest verification result.
 
 ![Two of 14 players in one quiz. Ana, ranked 4th, sees a correct answer and her row highlighted in the live top 10. Ben, ranked 13th, sees a wrong answer and the same top 10 with his own row pinned under it, above a "Show all players" button](docs/images/demo.png)
 
@@ -30,9 +30,10 @@ cases, each mapped to the requirement it proves, with the result of the latest v
   share its `/q/<quizId>` link and end it early with the host token the tab keeps; a per-address
   limit and a cap on open quizzes keep it bounded.
 
-The real-time server and self-service hosting are built for real, and the Vue client is their
-working demo interface, for players and hosts. Identity, the question bank and the admin API behind the make
-targets are mocks ([DESIGN.md §14](DESIGN.md#14-implemented-and-mocked)).
+Built for real: the real-time quiz service end to end (the Vue client, the WebSocket gateway,
+scoring in Redis and the fan-out across two API nodes) and self-service hosting. Mocked: sign-in,
+the question bank, and the admin API that `make demo`, `make new-quiz` and `make demo-end` call
+([DESIGN.md §14](DESIGN.md#14-implemented-and-mocked)).
 
 ## How it works
 
@@ -47,37 +48,41 @@ flowchart LR
 ```
 
 Each answer runs as one Lua script in Redis, which scores it once and updates the quiz's sorted
-set. A 200 ms tick on one node publishes the standings over Redis pub/sub, and every node relays
-them to its own sockets. [DESIGN.md](DESIGN.md) has the full design.
+set. Every node serving the quiz runs a 200 ms tick; the one that takes the tick token publishes
+the standings over Redis pub/sub, and every node relays them to its own sockets.
+
+Measured on two API nodes: 5,000 players in one quiz, answer to leaderboard p99 409 ms against a
+500 ms target ([DESIGN.md §9](DESIGN.md#9-performance-and-capacity), [load/README.md](load/README.md)).
+
+The [reading map](DESIGN.md#reading-map) in DESIGN.md links each part of the design: architecture,
+components, data flow, technologies, scalability, performance, reliability, maintainability,
+observability and security.
 
 ## AI collaboration
 
-Claude Code wrote the design, the code and the tests; every source file it wrote carries an
-`AI-ASSISTED` marker. Each pull request has an entry in [docs/ai-log/](docs/ai-log/README.md): the
-tool, the task, the interaction, how it was verified and the mistakes caught in review by
-Claude Code `/code-review` and Codex. [DESIGN.md §15](DESIGN.md#15-ai-collaboration-in-design)
-tells how the design was made.
+I set the requirements, the fixed choices and the rules, reviewed every change and decided on
+every review finding; Claude Code drafted the design, the code, the tests and the docs. Every
+source file it wrote or changed carries an `AI-ASSISTED` marker: find them with
+`git grep -n AI-ASSISTED` (the marker forms are in [AGENTS.md](AGENTS.md)). Each merged pull
+request has an entry in [docs/ai-log/](docs/ai-log/README.md): the tool, the task, the
+interaction, how it was verified and the mistakes caught.
+
+How AI-written code was verified ([an example of each step](docs/ai-log/README.md#how-ai-written-code-was-verified)):
+
+- **Tests first:** new behavior gets a test that fails without the change.
+- **One gate, run twice:** `make check` on the laptop before every push, and again in CI.
+- **Two independent reviewers per PR:** Claude Code `/code-review` and Codex; every finding is confirmed or refuted against the code.
+- **End to end and under load:** system tests and browser specs on the full stack, and load runs on two nodes.
+
+[DESIGN.md §15](DESIGN.md#15-ai-collaboration-in-design) tells how the design was made.
 
 ### Harness and CI
 
-The checks below are the harness that keeps AI-written changes honest: a change merges only when
-they pass, whoever wrote it.
+A change merges only when these checks pass, whoever wrote it:
 
-- **`make check`, on the laptop and in CI:** ruff, ESLint, shellcheck, typos and an offline link
-  check; mypy; import-linter, which keeps the API's layers apart; deptry; actionlint and zizmor
-  on the workflows; the unit, property and acceptance tests; a drift check of the generated
-  contracts; vue-tsc, Vitest and the client build.
-- **Pull-request guards** (`scripts/check_pr.py`): the frozen acceptance tests change only with
-  a label, a PR stays under 400 changed lines unless labelled, every commit carries the
-  `AI-Assisted:` trailer, and the PR's AI-LOG entry exists. `make review-budget` flags a PR too
-  big to review well.
-- **CI on every push** ([.github/workflows/](.github/workflows/)): `ci` adds the integration tests
-  on Redis, the visual and accessibility specs, and coverage floors of 95% combined and 90% on
-  the changed lines; `stack` runs the system and browser tests on the full stack; `containers`
-  builds the images and publishes them on `main`; `security` runs the secret scan, the dependency
-  review and audits; CodeQL and OpenSSF Scorecard run as well.
-- **Scheduled runs:** the stack nightly and the rest weekly, with an online link check; a
-  scheduled failure opens an issue.
+- **`make check`, on the laptop and in CI:** lint, types, layer contracts, the tests and the client build ([what it runs](CONTRIBUTING.md#what-make-check-runs)).
+- **Pull-request guards:** frozen acceptance tests, a size limit, the `AI-Assisted:` trailer and the AI-LOG entry.
+- **CI on every push and on a schedule:** `ci` (with the Redis integration tests), `stack` (system and browser tests), `containers`, `security`, CodeQL and Scorecard ([details](CONTRIBUTING.md#continuous-integration)).
 
 ## Documentation
 

@@ -5,8 +5,8 @@
 <!-- AI-ASSISTED-BEGIN: capacity estimate drafted with Claude Code from api/src/quiz/config.py, the contracts, docs/spec/ and the ADRs; the frame sizes were computed by encoding sample frames in compact JSON; the memory per socket is computed from the load runs in load/results/. -->
 
 Every number below is either an input with its source, a value computed from those inputs (the
-formula is given), or a measurement from a load-run file. The measured results are in
-[DESIGN §9](../DESIGN.md#measured-results).
+formula is given), or a measurement from a load-run file. The measured results are summed up in
+[DESIGN §9](../DESIGN.md#measured-results), and given in full in [load/README.md](../load/README.md#measured-runs).
 
 **Assumptions.**
 
@@ -58,7 +58,7 @@ Their sum is about 634 KiB per socket plus one outbound frame, or 10,000 × 634 
 at the 10,000-socket cap if every client is slow and floods at once. Python's object overhead,
 the decoded copies of queued messages and the kernel's socket buffers come on top, so this is
 not an upper bound. The steady-state memory per socket (RSS divided by sockets), at the end of
-this page, comes from the [measured runs](../DESIGN.md#measured-results).
+this page, comes from the [measured runs](../load/README.md#measured-runs).
 
 **Connections per node** (computed). The cap is 10,000 sockets per process (A4); two nodes
 hold 20,000. In one hot quiz above 200 players, each socket gets at most 5 frames per second
@@ -66,7 +66,7 @@ hold 20,000. In one hot quiz above 200 players, each socket gets at most 5 frame
 `50,000 × 4,296 B` ≈ 215 MB/s of egress per node, plus at most one `rank_update` per socket
 per tick (A7). All of it runs on one core (A12), so CPU or the network is likely to set the
 practical number below the cap: 215 MB/s is about 1.7 Gbit/s before framing, above a 1 Gbit/s
-link. Measured ([DESIGN §9](../DESIGN.md#measured-results)): one node held 2,500 sockets of one hot quiz within C5 (p99
+link. Measured ([load/README.md](../load/README.md#measured-runs)): one node held 2,500 sockets of one hot quiz within C5 (p99
 364 ms) at 63 % of its core on average, peaking at 89 %, and each node of the two-node run held
 about 2,500 at 71 to 73 %, peaking just above a full core (p99 409 ms). So the practical number per node in one hot quiz is 2,500
 measured, and by extrapolating the CPU about 3,500 at most (an estimate, not measured), against

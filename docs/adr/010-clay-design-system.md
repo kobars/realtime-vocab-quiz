@@ -4,7 +4,7 @@
 
 <!-- AI-ASSISTED-BEGIN: ADR-010 drafted with Claude Code from web/src/styles/tokens.css and docs/spec/ui.md §1, §5 and §7; the contrast ratios are recomputed by web/src/styles/contrast.test.ts. -->
 
-- **Status:** accepted
+- **Status:** accepted; files moved to `web/packages/clay/` by [ADR-013](013-clay-workspace-package.md)
 - **Date:** 2026-10-02
 
 ## Context

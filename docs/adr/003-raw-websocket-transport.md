@@ -9,7 +9,7 @@
 
 ## Context
 
-Players send requests (`join`, `next`, `answer`) and receive a shared leaderboard that changes several times a second while a quiz runs (AC-3, AC-6). The target is p99 below 500 ms from an accepted answer to the delivered leaderboard, for thousands of connections per node, on two API nodes behind nginx. The server is Python (FastAPI, uvicorn) and the client is a Vue single-page app.
+Players send requests (`join`, `next`, `answer`) and receive a shared leaderboard that changes several times a second while a quiz runs: scores update in real time, and the leaderboard updates promptly. The target is p99 below 500 ms from an accepted answer to the delivered leaderboard, for thousands of connections per node, on two API nodes behind nginx. The server is Python (FastAPI, uvicorn) and the client is a Vue single-page app.
 
 ## Decision
 
