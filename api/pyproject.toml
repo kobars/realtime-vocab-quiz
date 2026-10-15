@@ -5,7 +5,7 @@ version = "0.1.0"
 description = "Real-time vocabulary quiz service: WebSocket gateway, scoring and live leaderboard."
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi>=0.142.2",
+    "fastapi>=0.142.4",
     "prometheus-client>=0.26.0",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
@@ -13,7 +13,7 @@ dependencies = [
     "starlette>=1.7.0",
     "structlog>=26.1.0",
     "uvicorn[standard]>=0.54.0",
-    "websockets>=17.1",
+    "websockets>=17.2",
 ]
 
 [build-system]
@@ -28,23 +28,23 @@ dev = [
     "diff-cover>=10.6.0",
     "httpx>=0.28.1",
     "httpx2>=2.13.1",
-    "hypothesis>=6.168.3",
+    "hypothesis>=6.168.5",
     "import-linter>=2.15",
-    "mypy>=2.3.1",
+    "mypy>=2.4.0",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "pytest-timeout>=2.4.0",
-    "ruff>=0.16.9",
+    "ruff>=0.16.10",
     "shellcheck-py>=0.11.0.1",
     "tiktoken>=0.14.0",
-    "typos>=1.50.3",
+    "typos>=1.51.1",
     "zizmor>=1.30.1",
 ]
 load = [
     "httpx>=0.28.1",
-    "websockets>=17.1",
+    "websockets>=17.2",
 ]
 
 [tool.ruff]
